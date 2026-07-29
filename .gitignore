@@ -1,0 +1,49 @@
+# Out-of-source build trees
+/build/
+/build-*/
+/out/
+/cmake-build-*/
+
+# Generated binaries and libraries
+*.a
+*.so
+*.so.*
+*.o
+*.obj
+*.exe
+*.dll
+
+# Runtime output
+/logs/
+*.log
+*.pid
+/run/
+
+# Test and analysis artifacts
+/Testing/
+/test-results/
+/coverage/
+*.gcda
+*.gcno
+*.profraw
+*.profdata
+core
+core.*
+
+# Editor and operating-system files
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Local configuration overrides and secrets
+/config/*.local.json
+.env
+.env.*
+
+# Read-only reference material is not part of this project
+/TinyWebServer_reference/
+/TinyWebServer/
+
