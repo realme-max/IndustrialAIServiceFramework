@@ -2,7 +2,7 @@
 
 ## 1. 状态与原则
 
-Phase 1 已实现基础单元测试和 CLI smoke，并在 Phase 1B 加强 Error 边界、Result 引用类别、配置数值类型和 UTF-8 字节限制覆盖。Phase 2 Reactor 实现提交为 `f76993e09767a2d6b6e1cbd2bcb22cfa1df6f74f`，warning 修复及最终验证提交为 `4db8708a5121f8477d835addd0b16170a3e2054f`；[GitHub Actions Linux CI run 30516007475](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30516007475) 已完成 Debug、Release、CTest 和 Release smoke 零 warning 验证，当前状态为 `PHASE_2_REACTOR_CORE_COMPLETED`。
+Phase 1 已实现基础单元测试和 CLI smoke，并在 Phase 1B 加强 Error 边界、Result 引用类别、配置数值类型和 UTF-8 字节限制覆盖。Phase 2 Reactor 最终 [GitHub Actions Linux CI run 30516007475](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30516007475) 已完成 Debug、Release、87/87 CTest 和 Release smoke 零 warning 验证。Phase 3 当前源码定义 50 个 TCP 测试，并新增 1 个 Reactor internal-cleanup 测试，但尚未在对应提交上运行真实 Linux CI，当前状态为 `PHASE_3_TCP_TRANSPORT_IMPLEMENTED_LINUX_VALIDATION_BLOCKED`。
 
 测试原则：
 
@@ -10,7 +10,7 @@ Phase 1 已实现基础单元测试和 CLI smoke，并在 Phase 1B 加强 Error 
 - 不依赖 GPU、真实点云、机器人或外部数据库。
 - 单元测试优先使用确定性输入、可注入时钟和本地 socket。
 - 集成测试启动真实服务进程，动态选择空闲端口并可靠回收。
-- 性能数字只在 Phase 8 实际测量后记录。
+- 性能数字只在 Phase 9 实际测量后记录。
 - 测试失败必须保留原始命令和足够诊断，不以重试掩盖竞态。
 
 ## 2. 测试层次
@@ -29,7 +29,7 @@ flowchart TB
     Sanitizer --> Performance
 ```
 
-Phase 1—7 的 CI 门禁以前三层和适用 sanitizer 为主；性能测试不作为不稳定的每次提交单元门禁。
+Phase 1—8 的 CI 门禁以前三层和适用 sanitizer 为主；性能测试不作为不稳定的每次提交单元门禁。
 
 ## 3. 工具与组织
 
@@ -42,7 +42,7 @@ Phase 1—7 的 CI 门禁以前三层和适用 sanitizer 为主；性能测试�
 - UBSan：未定义行为。
 - TSan：可用 Linux/Clang 环境下检查仓储、线程池和 logger；与 ASan 分开运行。
 - Valgrind：可选慢速补充，不替代 sanitizer。
-- wrk 或 ab：Phase 8 HTTP 压测。
+- wrk 或 ab：Phase 9 HTTP 压测。
 
 推荐测试命名：
 
@@ -221,19 +221,88 @@ ctest --test-dir build/linux-release --output-on-failure
 - timerfd 任务超时、signalfd 优雅停止。
 - 异步日志或 AI 插件。
 
-### 5.3 Phase 3 计划测试边界
+### 5.3 Phase 2 封板时的 Phase 3 测试边界
 
-Phase 3 尚未开始。建议自动化覆盖 Buffer、Acceptor/TcpConnection/TcpServer、
-ET accept/read/write 到 `EAGAIN`、`EPOLLOUT` 动态启停、输出缓冲高水位、连接
-建立/半关闭/关闭生命周期，以及原始字节 Echo 集成测试。Phase 3 测试不得提前引入
-HTTP parser、HttpRouter、ThreadPool、TaskRepository、TaskManager、PluginManager、
-timerfd、signalfd、异步日志、AI 推理或 benchmark。
+Phase 2 封板时计划的 Buffer、Acceptor/TcpConnection/TcpServer、ET I/O、
+动态 `EPOLLOUT`、high-water、半关闭和 Echo 覆盖已在 Phase 3 源码中定义；
+实际 Phase 3 矩阵见第 6 节。没有引入 HTTP parser、HttpRouter、ThreadPool、
+TaskRepository、TaskManager、PluginManager、timerfd、signalfd、异步日志、
+AI 推理或 benchmark。
 
 ### 5.4 fd 泄漏
 
-Phase 2 单元测试重复创建和释放受管 fd，并检查所有权转移后只关闭一次。真实服务进程的 `/proc/<pid>/fd` 稳定性检查延后到连接层集成阶段。
+Phase 2 单元测试重复创建和释放受管 fd，并检查所有权转移后只关闭一次。Phase 3
+测试增加监听 Socket/Channel 顺序、连接延迟 remove、连接表清理、重复 close 和
+RAII 客户端 fd 覆盖；`/proc/<pid>/fd` 数量稳定性仍需真实 Linux 运行后记录。
 
-## 6. HTTP Parser 测试
+## 6. Phase 3 TCP Transport 测试
+
+当前 `iaisf_tcp_tests` 源码定义分布：
+
+| 测试文件 | 定义数 | 覆盖 |
+|---|---:|---|
+| `test_buffer.cpp` | 13 | 空/二进制、游标、显式 compact、前部复用、增长/上限、失败不变式、溢出、move/moved-from |
+| `test_ipv4_endpoint.cpp` | 4 | loopback/any、端口 0/65535、非法 numeric IPv4、sockaddr round-trip |
+| `test_acceptor.cpp` | 7 | port 0、NONBLOCK/CLOEXEC、重复 start、幂等/active-callback stop、异常后继续、突发 accept drain、EAGAIN |
+| `test_tcp_connection.cpp` | 6 | 参数/状态、close once、non-owner/state send、all-or-failure、graceful shutdown、确定性 EPOLLOUT/high-water 重武装与异常 |
+| `test_tcp_server.cpp` | 20 | binary/分片/大流 Echo、多连接、容量、半关闭/输入消费、RST、回调异常、满队列清理、延迟移除/最后强引用释放、stop/table/destructor lifecycle |
+
+合计 **50 个源码 `TEST` 定义**。Phase 3B 另在 `test_event_loop.cpp` 增加 1 项内部
+clean-up lane 测试，使当前 Reactor 源码定义为 45。这不是 CTest 的真实 Linux
+发现/通过数；只有新提交
+在 GitHub Actions 的 Debug/Release 日志中实际发现并执行后才能记录总数。若全部被
+GoogleTest discovery 注册，源码算术组合为 Phase 1 的 43 + Reactor 45 + TCP 50 =
+138，
+但不得把该算术值写成 CI 结果。
+
+关键测试策略：
+
+- 只连接 `127.0.0.1`，监听一律使用 port 0，不访问外部网络；
+- ET Acceptor 突发接受到 EAGAIN；accepted fd 检查 `O_NONBLOCK/FD_CLOEXEC`；
+- Buffer 使用 `size_t::max` 验证减法形式的溢出保护；`bad_alloc` 没有稳定故障注入，
+  只验证实现边界转换代码；
+- 二进制 NUL、三次分片、超过 initial capacity 的 128 KiB payload 和 8 客户端；
+- input/output hard maximum 走 fail-closed；output 超限前先做整包容量预检，断言
+  failure 时对端无本次前缀、原有 output 可读字节不变；最大连接数拒绝由 RAII 回收；
+- direct socketpair 把 server send buffer 设为 4096，通过真实 drain 后二次跨越
+  high-water，验证动态 `EPOLLOUT` 与重武装，不使用固定 sleep；
+- peer write-half shutdown 后仍完整 Echo；RST 输出路径使用 `MSG_NOSIGNAL`，随后
+  健康连接继续；message callback 异常也只关闭故障连接；
+- 普通 pending queue 满时连接关闭和 stop 仍通过 intrusive internal cleanup lane
+  完成；覆盖多连接、幂等登记、一次 disconnect、表清空和最后强引用释放；
+- Acceptor callback 抛异常后 accepted Socket 自动关闭并继续 accept；在 read callback
+  内 stop 时 Channel 在 active batch 后移除；
+- peer EOF 最后一段先交付；分别覆盖部分消费和完全不消费，message/close 不重复，
+  output 排空后关闭；
+- connection/message/high-water/new-connection 回调异常路径均不抛出 EventLoop 边界，
+  Logger 失败不参与清理正确性；
+- started server 直接析构由 death test 证明为契约错误；正常 stop 后可安全析构；
+- test-only Acceptor/Connection/Server cleanup guard 保证非致命断言或提前返回仍尝试
+  remove/stop；所有已启动线程在断言前 join，fd 使用 RAII，future/condition variable 有
+  5—10 秒有限等待，
+  每项 CTest timeout 为 20 秒。
+
+本地实际结果：
+
+| 环境 | Configure | Build | CTest | Smoke | 解释 |
+|---|---|---|---|---|---|
+| Windows VS2022 Debug，network OFF | pass | pass | 43/43 | CTest 内 2 项 pass | 只验证 Phase 1 回归 |
+| Windows VS2022 Release，network OFF | pass | pass | 43/43 | version/config exit 0 | 不编译 TCP |
+| 本机 Linux/WSL | unavailable | 未执行 | 未执行 | 未执行 | 不能替代 CI |
+| Phase 3 GitHub Actions | workflow 已更新 | 尚未运行 | 尚未运行 | 尚未运行 | 当前封板阻塞 |
+
+workflow 在 Debug/Release build 后分别显式构建 `iaisf_tcp` 和
+`iaisf_tcp_tests`，再运行完整 CTest；不使用 `continue-on-error`。正式 Linux
+验收必须记录两个 job 的真实 configure/build、CTest 总数、50 项 TCP 和新增 Reactor
+cleanup 测试是否实际
+执行、smoke 和项目源码/测试 warning。
+
+2026-07-30 的本轮 Windows clean build 未出现项目 C++ warning。Visual Studio 本机
+vcpkg applocal 在 executable 后打印缺少 `pwsh.exe` 的非致命辅助诊断；两个 build
+仍 exit 0，Debug/Release CTest 均 43/43，Release 两项 smoke 均 exit 0。该诊断不是
+Linux/TCP 测试结果。
+
+## 7. HTTP Parser 测试
 
 必须覆盖：
 
@@ -256,7 +325,7 @@ Phase 2 单元测试重复创建和释放受管 fd，并检查所有权转移后
 
 解析测试不需要真实 Socket；向 parser 多次 feed 字节片段即可。
 
-## 7. ThreadPool 与队列测试
+## 8. ThreadPool 与队列测试
 
 - 固定 worker 数启动。
 - 多任务恰好执行一次。
@@ -272,9 +341,9 @@ Phase 2 单元测试重复创建和释放受管 fd，并检查所有权转移后
 
 避免依赖固定 sleep 判断并发；使用 latch/barrier 的 C++17 自定义测试辅助和 condition variable。
 
-## 8. Task 测试
+## 9. Task 测试
 
-### 8.1 状态转换
+### 9.1 状态转换
 
 允许：
 
@@ -290,7 +359,7 @@ Phase 2 单元测试重复创建和释放受管 fd，并检查所有权转移后
 - 重复完成（除非明确作为幂等 no-op，首版建议返回 false）
 - Queued → Failed（排队失败不创建任务；执行错误必须先进入 Running）
 
-### 8.2 并发与容量
+### 9.2 并发与容量
 
 - success 与 timeout 同时竞争，只有一个成功转换。
 - cancel 与 worker start 竞争。
@@ -302,7 +371,7 @@ Phase 2 单元测试重复创建和释放受管 fd，并检查所有权转移后
 - 插件晚到结果不覆盖 Timeout。
 - Succeeded、Failed 与 Timeout 同时到达时，第一个被 TaskRepository 接受的终态获胜。
 
-## 9. Plugin 测试
+## 10. Plugin 测试
 
 - 注册 Echo，按名称获取。
 - 空名/非法名拒绝。
@@ -322,7 +391,7 @@ Phase 2 单元测试重复创建和释放受管 fd，并检查所有权转移后
 
 核心测试不链接 PCL、TensorRT、CUDA 或机器人 SDK。
 
-## 10. Timer 测试
+## 11. Timer 测试
 
 TimerQueue 通过可注入单调时钟或纯堆核心测试，避免真实等待：
 
@@ -340,7 +409,7 @@ TimerQueue 通过可注入单调时钟或纯堆核心测试，避免真实等待
 
 真实 timerfd 只做少量 Linux 集成测试，并给出宽松但有限的时间窗口。
 
-## 11. Config 测试
+## 12. Config 测试
 
 - 完整合法配置。
 - 缺失可选字段使用文档默认。
@@ -355,7 +424,7 @@ TimerQueue 通过可注入单调时钟或纯堆核心测试，避免真实等待
 
 测试使用临时目录，不能修改真实 `config/iaisf.example.json`。
 
-## 12. Logger 测试
+## 13. Logger 测试
 
 - 每个级别过滤正确。
 - 时间、线程 ID、level、message 行完整。
@@ -368,7 +437,7 @@ TimerQueue 通过可注入单调时钟或纯堆核心测试，避免真实等待
 - 基础按大小轮转，文件数量/命名稳定。
 - sink 写失败不递归记录或死锁。
 
-## 13. 集成场景
+## 14. 集成场景
 
 必须自动化：
 
@@ -397,10 +466,10 @@ TimerQueue 通过可注入单调时钟或纯堆核心测试，避免真实等待
 - 设置总 timeout。
 - 无论成功失败都终止并 wait 服务进程。
 
-## 14. 安全回归
+## 15. 安全回归
 
 - 超大 Content-Length 不导致预分配。
-- 慢速分段请求受 idle/header deadline 限制（Phase 6 后）。
+- 慢速分段请求受 idle/header deadline 限制（Phase 7 后）。
 - 多个 Content-Length 请求走固定拒绝路径，防请求走私。
 - `../`、绝对路径、反斜杠、百分号编码绕过。
 - 客户端 JSON 中的 `"command"` 只被视为普通/未知字段，绝不执行。
@@ -408,7 +477,7 @@ TimerQueue 通过可注入单调时钟或纯堆核心测试，避免真实等待
 - 错误响应不含本地绝对路径、errno 文本或异常原文。
 - 连接/队列/日志/任务仓储容量均可触发并恢复。
 
-## 15. Sanitizer 与静态检查
+## 16. Sanitizer 与静态检查
 
 计划命令形态：
 
@@ -423,16 +492,16 @@ ctest --test-dir build-asan --output-on-failure
 
 UBSan/TSan 分开 build 目录。每次记录编译器、sanitizer 选项和被排除测试。不能只写“ASan 通过”而没有命令和日期。
 
-## 16. Phase 8 性能与稳定性
+## 17. Phase 9 性能与稳定性
 
-### 16.1 工作负载
+### 17.1 工作负载
 
 - `GET /health`：测网络/HTTP 基线。
 - Echo submit + status/result：测任务框架。
 - MockVision 固定 mock delay：测 worker/队列行为，不代表视觉推理性能。
 - 长 keep-alive、多短连接分别测试。
 
-### 16.2 记录模板
+### 17.2 记录模板
 
 ```text
 Date:
@@ -457,7 +526,7 @@ Raw output path:
 Interpretation and limitations:
 ```
 
-### 16.3 禁止项
+### 17.3 禁止项
 
 - 不沿用 TinyWebServer README 的性能数字。
 - 不用 mock 延迟结果宣称真实模型吞吐。
@@ -465,7 +534,7 @@ Interpretation and limitations:
 - 不在 Debug/ASan 结果上包装生产性能。
 - 不删除失败请求后只展示成功数字。
 
-## 17. Phase 0 历史调查验证
+## 18. Phase 0 历史调查验证
 
 Phase 0 的非运行验证项：
 

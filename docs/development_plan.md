@@ -2,7 +2,8 @@
 
 ## 1. 执行原则
 
-项目严格按 Phase 0—9 推进。每个阶段只在其验收门槛通过后进入下一阶段，并同步更新：
+项目当前按 Phase 0—10 推进。Phase 2 后将 Reactor Core 与 TCP Transport 分开验收，
+因此后续原计划顺延一阶段。每个阶段只在其验收门槛通过后进入下一阶段，并同步更新：
 
 - `README.md`
 - `docs/stage_status.md`
@@ -126,7 +127,7 @@ Reactor 实现提交为 `f76993e09767a2d6b6e1cbd2bcb22cfa1df6f74f`，warning 修
 
 - `UniqueFd` 独占 fd、禁止复制、允许移动；析构时只尝试一次 `close`，不对 `EINTR` 重试。
 - `Socket` 创建 nonblocking、close-on-exec 的 IPv4 TCP fd；本阶段不提供 bind/listen/accept/connect。
-- `Channel` 不拥有 fd；稳定地址和 fd 的生命周期必须长于注册期，析构前必须移除。active 批次内禁止直接 remove/destroy，必须通过 `queue_in_loop` 延迟。
+- `Channel` 不拥有 fd；稳定地址和 fd 的生命周期必须长于注册期，析构前必须移除。active 批次内禁止直接 remove/destroy；应用回调通过 `queue_in_loop` 延迟，Phase 3 内部生命周期清理使用独立 intrusive lane。
 - `EPOLLRDHUP` 是 read-side 通知；`HUP|IN` 仍执行 read，只有没有 read-side 事件的 HUP 才直接 close。Channel 不负责 ET drain。
 - `EventLoop` 构造线程是 owner；`run/update_channel/remove_channel` 仅 owner 可调用，`queue_in_loop/stop` 可跨线程调用。
 - epoll 使用 ET，不启用 ONESHOT；`eventfd` 只承担唤醒并读取到 `EAGAIN`。
@@ -155,30 +156,44 @@ docs: complete phase 2 validation record
 
 ## 6. Phase 3：TCP 连接层
 
-状态：**planned，未开始**。Phase 2 已完成 Linux CI 验收；仍需用户明确要求后才能开始本阶段。
+状态：**implemented，Linux validation blocked（2026-07-30）**。
 
 目标：在现有单 Reactor Core 上建立完整、可测试的 TCP 连接生命周期，不引入 HTTP 或业务执行。
 
-交付：
+已实现：
 
-- `Buffer`
-- `Acceptor`
-- `TcpConnection`
-- `TcpServer`
-- 输入缓冲区和输出缓冲区
-- ET accept/read/write 循环到 `EAGAIN`
-- 输出缓冲非空时启用、写空后停用 `EPOLLOUT`
-- 输出缓冲高水位和慢客户端边界
-- 连接建立、读半关闭、写半关闭和最终关闭生命周期
-- 基础回显或原始字节集成测试
+- Linux-only `iaisf_tcp` / `iaisf::tcp`，PUBLIC 依赖 `iaisf::net`；
+- numeric IPv4 `Ipv4Endpoint`；
+- initial/maximum 分离、溢出安全、前部复用的 bounded `Buffer`；
+- Socket bind/listen/local endpoint/accept4、accepted fd nonblocking + CLOEXEC；
+- owner-thread-only `Acceptor`，ET accept 到 `EAGAIN`；
+- shared-owned `TcpConnection`、weak Channel callback、四态生命周期；
+- recv/send 到 `EAGAIN`、`MSG_NOSIGNAL`、部分写缓存和动态 `EPOLLOUT`；
+- input/output hard maximum 与可重武装的 output high-water 通知；
+- `TcpServerOptions` 严格有符号输入、跨字段和硬上限校验；
+- `TcpServer` 有界连接表、单调 ID、过载 RAII 拒绝和延迟 remove；
+- 普通有界 pending queue 与不分配的 intrusive internal cleanup lane 分离；
+- `send()` 整包预留后的 all-accepted-or-failure 接受语义；
+- owner-thread-only、幂等、禁止 restart 且具有可观察完成屏障的 server stop；
+- Acceptor active-callback stop、用户回调异常、EOF 部分/不消费和析构契约补测；
+- 独立 `iaisf_tcp_tests`，当前源码定义 50 项；Reactor 定义因内部清理补测由 44 增至 45。
 
-验收：
+已完成本地补充验证：
 
-- ET accept/read/write 均 drain 到 `EAGAIN`，不会因单次系统调用遗漏事件。
-- 多客户端基础回显或原始字节传输自动化测试通过。
-- `EPOLLOUT` 仅在有待发送数据时关注，不产生空转。
-- peer 半关闭后仍能处理已接收数据并按约定完成关闭。
-- Channel 移除和连接销毁遵守 active batch 延迟规则，无 fd 泄漏。
+- Windows VS2022 网络 OFF Debug/Release clean build 与 CTest 均为 43/43；
+- Windows Release version/config smoke 均 exit 0；
+- 非 Linux 显式开启网络选项按预期 configure 失败；
+- 三个 shell 脚本 `bash -n`、workflow YAML 解析和 `git diff --check` 通过；
+- Windows 项目源码 warning 为 0；已知 `pwsh.exe` 诊断仍来自本机 VS/vcpkg 环境。
+
+尚未完成的验收：
+
+- 当前 Phase 3 工作区尚未 commit/push；
+- 新 `iaisf_tcp`、`iaisf_tcp_tests` 和 50 项 TCP 测试，以及新增的 1 项 Reactor
+  cleanup 测试，尚未在真实 Linux 编译、发现或执行；
+- 当前源码静态定义基础 43、Reactor 45、TCP 50，合计 138；该数字不是 CTest PASS；
+- Linux Debug/Release CTest 总数、warning、fd/lifecycle 结果必须以新提交的 GitHub
+  Actions 日志为准，不能沿用 Phase 2 run 或由源码数量推断。
 
 明确不包含：
 
@@ -190,10 +205,42 @@ docs: complete phase 2 validation record
 建议 commit message：
 
 ```text
-feat(net): implement TCP connection layer
+feat: implement TCP transport layer
 ```
 
-## 7. Phase 4：线程池与任务系统
+## 7. Phase 4：HTTP 协议与健康路由
+
+状态：**planned，未开始**。
+
+目标：把 HTTP/1.1 增量协议适配到 Phase 3 TCP 字节流，不执行耗时业务。
+
+交付：
+
+- `HttpRequest`、`HttpResponse`、`HttpParser`、`HttpSession`、最小 `HttpRouter`
+- GET/POST、request line、headers、Content-Length、body、JSON
+- HTTP/1.1 keep-alive 基础语义
+- request line/header/body 大小与数量上限
+- `GET /health`
+- 完整、逐字节/分段、非法、超限和 keep-alive 自动化测试
+
+验收：
+
+- parser 不把 TCP read 边界当消息边界；
+- 非完整请求返回 NeedMore，不提前生成 400；
+- 未知路由、方法、非法 JSON、错误 Content-Length 和超限有稳定响应；
+- `/health` 通过真实 loopback 集成测试；
+- HTTP handler 仍在 owner 线程，只做短小处理。
+
+明确不包含 ThreadPool、TaskRepository、TaskManager、PluginManager、timerfd、
+signalfd、异步日志、TLS、文件上传、AI 推理或 benchmark。
+
+建议 commit message：
+
+```text
+feat(http): implement HTTP parser and health route
+```
+
+## 8. Phase 5：线程池与任务系统
 
 目标：实现无需插件也可测试的异步任务生命周期。
 
@@ -216,10 +263,10 @@ feat(net): implement TCP connection layer
 建议 commit message：
 
 ```text
-feat(task): complete phase 4 bounded async task system
+feat(task): complete phase 5 bounded async task system
 ```
 
-## 8. Phase 5：插件系统
+## 9. Phase 6：插件系统
 
 目标：通过静态注册插件完成工业任务服务化闭环。
 
@@ -242,10 +289,10 @@ feat(task): complete phase 4 bounded async task system
 建议 commit message：
 
 ```text
-feat(plugin): complete phase 5 static plugin execution
+feat(plugin): complete phase 6 static plugin execution
 ```
 
-## 9. Phase 6：定时器和任务超时
+## 10. Phase 7：定时器和任务超时
 
 目标：实现 EventLoop 内统一超时调度。
 
@@ -267,10 +314,10 @@ feat(plugin): complete phase 5 static plugin execution
 建议 commit message：
 
 ```text
-feat(timer): complete phase 6 connection and task timeouts
+feat(timer): complete phase 7 connection and task timeouts
 ```
 
-## 10. Phase 7：异步日志与配置完善
+## 11. Phase 8：异步日志与配置完善
 
 目标：用强类型配置和有界异步日志替换 Phase 1 占位。
 
@@ -292,10 +339,10 @@ feat(timer): complete phase 6 connection and task timeouts
 建议 commit message：
 
 ```text
-feat(ops): complete phase 7 validated config and async logging
+feat(ops): complete phase 8 validated config and async logging
 ```
 
-## 11. Phase 8：压力测试与工程完善
+## 12. Phase 9：压力测试与工程完善
 
 目标：测量而不是预设性能，并完善质量门禁。
 
@@ -320,10 +367,10 @@ feat(ops): complete phase 7 validated config and async logging
 建议 commit message：
 
 ```text
-test(perf): complete phase 8 measured performance baseline
+test(perf): complete phase 9 measured performance baseline
 ```
 
-## 12. Phase 9：真实工业视觉插件预留
+## 13. Phase 10：真实工业视觉插件预留
 
 目标：只设计可接入接口，不直接迁移 PTV2 代码。
 
@@ -339,17 +386,17 @@ test(perf): complete phase 8 measured performance baseline
 
 进入条件：
 
-- Phase 1—8 验收通过并有稳定性数据。
+- Phase 1—9 验收通过并有稳定性数据。
 - 用户明确批准开始。
 - PTV2 项目访问边界和许可证已确认。
 
 建议 commit message：
 
 ```text
-docs(vision): define phase 9 production vision plugin boundary
+docs(vision): define phase 10 production vision plugin boundary
 ```
 
-## 13. 风险登记
+## 14. 风险登记
 
 | 风险 | 影响 | 当前缓解 |
 |---|---|---|

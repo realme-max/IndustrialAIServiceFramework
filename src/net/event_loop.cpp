@@ -17,6 +17,21 @@
 
 namespace iaisf::net {
 
+EventLoop::DeferredCleanup::DeferredCleanup(
+    void* const context,
+    const Function function) noexcept
+    : context_(context), function_(function) {}
+
+EventLoop::DeferredCleanup::~DeferredCleanup() noexcept {
+    if (pending_) {
+        std::terminate();
+    }
+}
+
+bool EventLoop::DeferredCleanup::pending() const noexcept {
+    return pending_;
+}
+
 Result<std::unique_ptr<EventLoop>> EventLoop::create(
     ILogger& logger,
     const std::size_t max_events,
@@ -69,7 +84,9 @@ EventLoop::~EventLoop() noexcept {
     const State current = state_.load(std::memory_order_acquire);
     if (!is_in_loop_thread() ||
         current == State::Running ||
-        current == State::Stopping) {
+        current == State::Stopping ||
+        deferred_cleanup_head_ != nullptr ||
+        deferred_cleanup_tail_ != nullptr) {
         std::terminate();
     }
 
@@ -115,16 +132,24 @@ Result<void> EventLoop::run() {
         auto poll_result = poller_->poll(-1, active_channels);
         if (!poll_result) {
             safe_log(LogLevel::Error, "epoll_wait failed; EventLoop is stopping");
+            stop();
+            drain_wakeup();
+            execute_deferred_cleanups();
+            execute_pending_callbacks();
+            execute_deferred_cleanups();
             transition_to_stopped();
             return Result<void>::failure(std::move(poll_result).error());
         }
 
         handle_active_channels(active_channels);
+        execute_deferred_cleanups();
         execute_pending_callbacks();
+        execute_deferred_cleanups();
     }
 
     drain_wakeup();
     execute_pending_callbacks();
+    execute_deferred_cleanups();
     transition_to_stopped();
     return Result<void>::success();
 }
@@ -253,6 +278,42 @@ Result<void> EventLoop::queue_in_loop(Callback callback) {
     return Result<void>::success();
 }
 
+Result<void> EventLoop::defer_cleanup(DeferredCleanup& cleanup) {
+    if (!is_in_loop_thread()) {
+        return Result<void>::failure(make_error(
+            ErrorCode::InvalidState,
+            "deferred cleanup requires the EventLoop owner thread"));
+    }
+    if (cleanup.function_ == nullptr || cleanup.context_ == nullptr) {
+        return Result<void>::failure(make_error(
+            ErrorCode::InvalidArgument,
+            "deferred cleanup requires a function and context"));
+    }
+    const State current = state_.load(std::memory_order_acquire);
+    if (current != State::Running && current != State::Stopping) {
+        return Result<void>::failure(make_error(
+            ErrorCode::InvalidState,
+            "deferred cleanup requires a running EventLoop"));
+    }
+    if (cleanup.pending_) {
+        return Result<void>::success();
+    }
+
+    cleanup.next_ = nullptr;
+    cleanup.pending_ = true;
+    if (deferred_cleanup_tail_ == nullptr) {
+        deferred_cleanup_head_ = &cleanup;
+    } else {
+        deferred_cleanup_tail_->next_ = &cleanup;
+    }
+    deferred_cleanup_tail_ = &cleanup;
+    return Result<void>::success();
+}
+
+bool EventLoop::dispatching_active_channels() const noexcept {
+    return is_in_loop_thread() && dispatching_active_channels_;
+}
+
 std::size_t EventLoop::pending_callback_count() const {
     std::lock_guard<std::mutex> lock{pending_mutex_};
     return pending_callbacks_.size();
@@ -329,6 +390,20 @@ void EventLoop::execute_pending_callbacks() noexcept {
         } catch (...) {
             safe_log(LogLevel::Error, "EventLoop callback threw an unknown exception");
         }
+    }
+}
+
+void EventLoop::execute_deferred_cleanups() noexcept {
+    DeferredCleanup* current = deferred_cleanup_head_;
+    deferred_cleanup_head_ = nullptr;
+    deferred_cleanup_tail_ = nullptr;
+
+    while (current != nullptr) {
+        DeferredCleanup* const next = current->next_;
+        current->next_ = nullptr;
+        current->pending_ = false;
+        current->function_(current->context_);
+        current = next;
     }
 }
 

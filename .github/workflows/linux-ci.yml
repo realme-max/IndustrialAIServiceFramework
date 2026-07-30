@@ -40,6 +40,9 @@ jobs:
       - name: Build Debug
         run: ./scripts/build_linux.sh Debug
 
+      - name: Verify TCP targets Debug
+        run: cmake --build build/linux-debug --target iaisf_tcp iaisf_tcp_tests --parallel
+
       - name: Test Debug
         run: ./scripts/test_linux.sh Debug
 
@@ -56,6 +59,9 @@ jobs:
 
       - name: Build Release
         run: ./scripts/build_linux.sh Release
+
+      - name: Verify TCP targets Release
+        run: cmake --build build/linux-release --target iaisf_tcp iaisf_tcp_tests --parallel
 
       - name: Test Release
         run: ./scripts/test_linux.sh Release

@@ -54,6 +54,35 @@ if(TARGET iaisf_net)
   )
 endif()
 
+if(TARGET iaisf_tcp)
+  add_executable(
+    iaisf_tcp_tests
+    net/tcp/test_acceptor.cpp
+    net/tcp/test_buffer.cpp
+    net/tcp/test_ipv4_endpoint.cpp
+    net/tcp/test_tcp_connection.cpp
+    net/tcp/test_tcp_server.cpp
+  )
+  target_compile_features(iaisf_tcp_tests PRIVATE cxx_std_17)
+  target_link_libraries(
+    iaisf_tcp_tests
+    PRIVATE
+      iaisf::tcp
+      GTest::gtest
+      GTest::gtest_main
+      Threads::Threads
+  )
+  iaisf_enable_project_warnings(iaisf_tcp_tests)
+
+  gtest_add_tests(TARGET iaisf_tcp_tests TEST_LIST IAISF_TCP_TESTS)
+  set_tests_properties(
+    ${IAISF_TCP_TESTS}
+    PROPERTIES
+      LABELS "unit;integration;linux;tcp"
+      TIMEOUT 20
+  )
+endif()
+
 add_test(NAME iaisf_server_version COMMAND $<TARGET_FILE:iaisf_server> --version)
 set_tests_properties(
   iaisf_server_version

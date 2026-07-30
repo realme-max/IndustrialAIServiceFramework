@@ -3,35 +3,39 @@
 ## 当前结论
 
 ```text
-PHASE_2_REACTOR_CORE_COMPLETED
+PHASE_3_TCP_TRANSPORT_IMPLEMENTED_LINUX_VALIDATION_BLOCKED
 ```
 
-- 当前阶段：Phase 2 Linux Reactor Core
-- 实现状态：完成
-- Windows 验证：Visual Studio 2022 x64 Debug/Release Phase 1 回归完成，均为 43/43
-- Linux CI 验证：最终零 warning [run 30516007475](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30516007475) 已在 warning 修复提交上完成
+- 当前阶段：Phase 3 TCP Transport Layer
+- 实现状态：代码、容量/清理/生命周期审计测试、CMake、CI 与文档已实现；尚未 commit/push
+- Windows 验证：Visual Studio 2022 x64 Debug/Release 网络关闭回归完成，均为 43/43
+- Linux CI 验证：Phase 2 最终 run 已完成；Phase 3 对应提交尚不存在，未运行
 - 日期：2026-07-30（Asia/Shanghai）
-- 下一阶段：Phase 3 TCP 连接层，planned，尚未开始，需用户明确要求
+- 下一阶段：Phase 4 HTTP 协议与健康路由，planned，尚未开始
 
-Phase 2 只实现 Linux Reactor 原语，没有监听端口或建立 TCP 连接。Buffer、Acceptor、TcpConnection、TcpServer、HTTP、线程池、任务、插件、定时器与异步日志仍未实现。
+Phase 3 已实现有界 Buffer、numeric IPv4 endpoint、bind/listen/accept4、Acceptor、
+TcpConnection 和 TcpServer，并完成普通队列满载清理、整包 send、stop/析构与 EOF
+消费语义审计，但 `iaisf_server` 仍不启动监听。HTTP、线程池、任务、插件、定时器与
+异步日志仍未实现。
 
 ## Git 状态
 
 | 项目 | 结果 |
 |---|---|
-| 当前分支 | `phase/2-reactor-core` |
+| 当前分支 | `phase/3-tcp-transport` |
 | Phase 0 提交 | `5fbcec0 docs: complete phase 0 architecture design` |
 | Phase 1 最终实现提交 | `63b30cffcbe3e621af33664721b3675a647bd1a1` |
 | Phase 2 起始 HEAD / main / origin/main | `6065d91b277c07ed04e64b3f08034788965e6ac1` |
 | Phase 2 Reactor 实现提交 | `f76993e09767a2d6b6e1cbd2bcb22cfa1df6f74f` |
 | warning 修复 / 最终验证提交 | `4db8708a5121f8477d835addd0b16170a3e2054f` |
-| origin Phase 2 | `origin/phase/2-reactor-core` = `4db8708a5121f8477d835addd0b16170a3e2054f` |
+| Phase 2 文档封板 / Phase 3 基线 | `e14b23131eb917df5758a10a305c2c87997f24cf` |
+| Phase 3 开始时 main / origin/main | `e14b23131eb917df5758a10a305c2c87997f24cf` |
+| Phase 3 实现提交 | 尚未创建 |
 | origin | `https://github.com/realme-max/IndustrialAIServiceFramework.git` |
-| Phase 2E 开始时工作区 | 仅七份 Phase 2 验证文档有未提交修改 |
-| Phase 2E commit | 未执行 |
-| Phase 2E push | 未执行 |
+| Phase 3 开始时工作区 | clean |
+| Phase 3 commit / push | 均未执行 |
 
-本阶段没有 amend、reset、rebase、merge、commit、push 或修改 origin。
+本阶段没有 amend、reset、stash、rebase、merge、commit、push 或修改 origin。
 
 ## Phase 总览
 
@@ -40,13 +44,14 @@ Phase 2 只实现 Linux Reactor 原语，没有监听端口或建立 TCP 连接�
 | 0 | 只读调查与架构设计 | completed | 已提交为 `5fbcec0` |
 | 1 | C++17 基础工程与公共基础设施 | completed | Windows 补充回归完成；Linux CI run `30508113122` success |
 | 2 | Socket、epoll 与 EventLoop | completed | Debug/Release 均 87/87；44 个 Reactor 测试均实际执行 |
-| 3 | TCP 连接层 | planned | 未开始 |
-| 4 | 线程池与任务系统 | planned | 未开始 |
-| 5 | 插件系统 | planned | 未开始 |
-| 6 | 定时器与任务超时 | planned | 未开始 |
-| 7 | 异步日志与配置扩展 | planned | 未开始 |
-| 8 | 压力测试与工程完善 | planned | 未开始 |
-| 9 | 真实工业视觉插件预留 | planned | 未开始，需用户明确批准 |
+| 3 | TCP Transport Layer | implemented / Linux blocked | TCP 50 + 当前 Reactor 45 项源码定义；真实 Linux CI 待运行 |
+| 4 | HTTP 协议与健康路由 | planned | 未开始 |
+| 5 | 线程池与任务系统 | planned | 未开始 |
+| 6 | 插件系统 | planned | 未开始 |
+| 7 | 定时器与任务超时 | planned | 未开始 |
+| 8 | 异步日志与配置扩展 | planned | 未开始 |
+| 9 | 压力测试与工程完善 | planned | 未开始 |
+| 10 | 真实工业视觉插件预留 | planned | 未开始，需用户明确批准 |
 
 ## Phase 1 已实现
 
@@ -237,6 +242,102 @@ IndustrialAIServiceFramework 0.1.0
 完整日志中只有 `git init` 默认分支提示含有单词 “warning”；它不是项目源码、
 项目测试或第三方依赖的编译 warning。
 
+## Phase 3 已实现，Linux 验证阻塞
+
+### 构建边界
+
+```text
+iaisf_tcp (STATIC, Linux only)
+  PUBLIC -> iaisf::net
+
+iaisf_tcp_tests (Linux only)
+  PRIVATE -> iaisf::tcp
+  PRIVATE -> GTest::gtest / GTest::gtest_main / Threads::Threads
+```
+
+`iaisf::net` 继续包含底层 Socket/Reactor 和 Ipv4Endpoint 实现；`iaisf::tcp`
+包含 Buffer、Acceptor、TcpConnection、TcpServer。Windows
+`IAISF_BUILD_LINUX_NETWORK=OFF` 时两个 TCP target 都不存在，MSVC 不解析 Linux
+TCP 源码或 epoll/eventfd/accept4 头。
+
+### 实现契约
+
+- `Ipv4Endpoint`：IPv4 only、numeric parse、无 DNS、host-order port、清零
+  `sockaddr_in`、稳定字符串和 round-trip。
+- `Buffer`：maximum > 0、initial ≤ maximum；reader/writer index、prependable、
+  ensure/compact、retrieve 不 memmove、append 必要时前部复用或有界增长；超限与
+  `bad_alloc` 映射 `ResourceExhausted`。
+- `Socket`：bind/listen/local endpoint、`TCP_NODELAY`、`SO_ERROR`、
+  `accept4(SOCK_NONBLOCK | SOCK_CLOEXEC)`；EINTR/ECONNABORTED 重试，
+  EAGAIN 返回空 optional。
+- `Acceptor`：owner-thread-only，拥有 Socket 与 Channel，ET accept 到 EAGAIN；
+  EMFILE/ENFILE/其他错误记录并结束当前 batch，不 busy loop；callback 异常由
+  accepted Socket RAII 回收并继续 accept；active read callback 内 stop 延迟移除 Channel。
+- `TcpServerOptions`：使用有符号 factory 输入拒绝负数，验证 backlog、连接数、
+  input/output initial/max/high-water、可选 `SO_SNDBUF` 和 64 MiB hard bound，
+  不静默 clamp；默认不覆盖系统 socket buffer。
+- `TcpConnection`：server table 是主要 shared owner；Channel callback 捕获 weak；
+  `Connecting → Connected → Disconnecting → Disconnected`；close callback 至多一次。
+- read：recv 到 EAGAIN，EINTR 重试，input 超限 fail-closed；message callback
+  负责 retrieve，异常只关闭当前连接。
+- write：owner 线程 `send()` 先整包容量预留、登记 `EPOLLOUT`、再一次性追加；
+  返回 success 表示整包已接受，failure 不发送或缓存本次前缀。可写回调使用
+  `MSG_NOSIGNAL` 循环，部分写/EAGAIN 后缀仍在 Buffer；排空即停用。
+- high-water：只在 below→at/above 跨越时通知，降到 below 后重武装；通知异常隔离，
+  不冒充完整限流。
+- peer EOF：停止读取但仍交付本轮已读数据一次；应用负责 retrieve，部分或完全未
+  消费的数据不会重复回调，销毁时丢弃；输出非空先排空。force-close 用于 server
+  stop，本地主动 graceful shutdown 无 timerfd timeout。
+- `TcpServer`：有界 `unordered_map<uint64_t, shared_ptr<TcpConnection>>`；达到
+  max 时 accepted Socket 由 RAII 立即关闭；连接先入表再 established。close 进入
+  预分配待移除向量并幂等登记 intrusive cleanup 节点，不依赖普通 pending queue；
+  顺序为 remove Channel → close Socket → erase table → 最后 shared_ptr 释放。
+- `TcpServer::stop()` owner-thread-only、幂等、停止 accept、force-close 现有连接且
+  永久禁止 restart。非 active 调用同步清空表；active callback 内调用在 batch 后
+  完成，`stopped()` 是完成屏障。started server 未完成 stop 就析构会终止进程。
+
+### 测试定义
+
+| 文件 | `TEST` 定义 |
+|---|---:|
+| Buffer | 13 |
+| Ipv4Endpoint | 4 |
+| Acceptor/Socket server operations | 7 |
+| TcpConnection | 6 |
+| TcpServer integration | 20 |
+| 合计 | 50 |
+
+覆盖 port 0、burst accept、binary/fragment/128 KiB Echo、8 客户端、最大连接数、
+input/output hard maximum、small `SO_SNDBUF` 的动态 EPOLLOUT/high-water 二次跨越、
+peer half-close、RST、callback exception、close once、active batch 后延迟 remove、
+最后强引用释放、满普通队列清理、多连接 active stop、EOF 部分/不消费、析构契约和
+连接表清理。另新增 1 项 Reactor intrusive cleanup 测试；当前源码定义基础 43、
+Reactor 45、TCP 50，合计 138，但 Linux 实际发现/执行仍未知。测试无固定端口、无
+外网、无 fixed sleep、无 detached thread，CTest timeout 20 秒。
+
+### 本地实际验证
+
+| 检查 | 结果 |
+|---|---|
+| Windows VS2022 configure，network OFF | pass |
+| Windows Debug clean build / CTest | pass / 43/43 |
+| Windows Release clean build / CTest | pass / 43/43 |
+| Release `--version` | exit 0；`IndustrialAIServiceFramework 0.1.0` |
+| Release example config | exit 0；包含 `configuration validated` |
+| Windows 项目 C++ warning | 0 |
+| 非 Linux network ON 负向 configure | 预期失败，明确要求 Linux epoll/eventfd |
+| 三个 shell 脚本 `bash -n` | pass |
+| workflow YAML parse | pass；jobs 为 linux-debug/linux-release |
+| `git diff --check` | pass |
+
+本机仍无 Linux/WSL；没有执行 `iaisf_tcp` 或 `iaisf_tcp_tests` 的本地 Linux build。
+workflow 已增加 Debug/Release 显式 TCP target 构建步骤，但当前 revision 尚未
+commit/push/run。Phase 2 run `30516007475` 不得作为 Phase 3 证据。
+
+本轮 Windows clean build 的项目 C++ warning 为 0。MSBuild 的 vcpkg applocal
+仍打印缺少 `pwsh.exe` 的非致命辅助诊断，但 configure/build 退出码、43/43 CTest
+和两项 smoke 均成功；该诊断不属于 Linux/TCP 结果。
+
 ## 环境调查
 
 ### Windows
@@ -380,11 +481,11 @@ Linux/WSL 环境，因此本地未复现这次 CI。
 |---:|---:|---|
 | 62 | 59,240,225 | `83AE7E469DEA30C860DEFD4D26CB313B7B3C87EFCD9387414741E152EE46CF27` |
 
-任务结束复核仍为 62 个文件、59,240,225 字节和相同聚合 SHA-256。参考工程未被构建、格式化、添加到 Git 或修改。
+Phase 3 开始和交付前均复核为 62 个文件、59,240,225 字节和相同聚合 SHA-256。
+参考工程未被构建、格式化或添加到 Git。
 
 ## 未实现
 
-- Buffer、Acceptor、TcpConnection、TcpServer、bind/listen/accept/connect、连接缓冲和网络监听
 - HTTP request/response/parser/router
 - ThreadPool 和运行时任务队列
 - TaskManager、TaskRepository、TaskExecutor
@@ -393,6 +494,7 @@ Linux/WSL 环境，因此本地未复现这次 CI。
 - 异步日志、文件日志和轮转
 - 数据库、用户、HTML、TLS、Docker、部署和 Release 发布
 - benchmark、性能数据、真实 AI
+- Phase 3 对应提交的真实 Linux build/CTest/warning/sanitizer 结果
 
 `worker_threads` 和 `task_queue_capacity` 当前只是经过校验的后续配置基线，不会创建 worker 或队列。
 
@@ -400,30 +502,30 @@ Linux/WSL 环境，因此本地未复现这次 CI。
 
 - Phase 1 没有剩余验收阻塞。
 - Phase 2 没有剩余验收阻塞。
+- Phase 3 实现尚未 commit/push，新的 GitHub Actions 尚未运行；这是当前封板阻塞。
 - 本机仍无 Linux/WSL；当前 Linux 结论来自可追溯的 GitHub Actions run。
 - 默认 FetchContent 首次 Linux 配置需要 GitHub 网络和有效 CA 证书。
 - 系统依赖模式已设计但未在已安装 Linux 包环境验证。
 - Windows/NTFS 工作区不能可靠表达新 shell 脚本的 POSIX executable bit；workflow 会在运行时执行 `chmod +x scripts/*.sh`，人工 Linux 使用前仍应确认权限。
 - Visual Studio 本机 vcpkg applocal 集成的非致命 `pwsh.exe` 诊断不影响当前测试，但应与 Linux 结果分开记录。
 
-## Phase 3 入口
+## Phase 4 建议入口
 
-Phase 3 尚未开始，需用户明确要求。建议范围：
+Phase 4 尚未开始。建议只包含：
 
-- Buffer、Acceptor、TcpConnection、TcpServer；
-- ET accept/read/write 到 `EAGAIN`；
-- `EPOLLOUT` 动态启停；
-- 输出缓冲高水位；
-- 连接建立、半关闭和关闭生命周期；
-- 原始字节 Echo 集成测试。
+- HttpRequest、HttpResponse、增量 HttpParser、HttpSession、最小 HttpRouter；
+- GET/POST、request line、headers、Content-Length、body、JSON；
+- keep-alive 基础语义和请求大小限制；
+- `GET /health`；
+- 完整/分段/非法/超限/keep-alive 单元与 loopback 集成测试。
 
-Phase 3 不包含 HTTP parser、HttpRouter、ThreadPool、TaskRepository、TaskManager、
-PluginManager、timerfd、signalfd、异步日志、AI 推理或 benchmark。
+Phase 4 暂不包含 ThreadPool、TaskRepository、TaskManager、PluginManager、
+timerfd、signalfd、异步日志、TLS、AI 推理或 benchmark。
 
 ## 建议 commit
 
 未执行 commit。建议：
 
 ```text
-docs: complete phase 2 validation record
+feat: implement TCP transport layer
 ```

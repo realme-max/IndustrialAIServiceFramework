@@ -2,7 +2,7 @@
 
 面向工业 AI 应用的 C++ 高性能任务服务框架。
 
-> 当前状态：`PHASE_2_REACTOR_CORE_COMPLETED`。Reactor 实现提交 `f76993e09767a2d6b6e1cbd2bcb22cfa1df6f74f` 和 warning 修复提交 `4db8708a5121f8477d835addd0b16170a3e2054f` 已完成；最终 [GitHub Actions Linux CI run 30516007475](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30516007475) 在 `ubuntu-24.04` 上完成 Debug/Release 构建，两套 CTest 均为 87/87，其中 Reactor 测试 44/44，项目源码和测试编译 warning 均为 0。Windows Visual Studio 2022 Debug/Release Phase 1 回归均为 43/43。TCP 连接层和 HTTP 尚未实现。
+> 当前状态：`PHASE_3_TCP_TRANSPORT_IMPLEMENTED_LINUX_VALIDATION_BLOCKED`。Phase 2 已由最终 [GitHub Actions Linux CI run 30516007475](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30516007475) 完成零 warning 验证；Phase 3 TCP Transport 已在当前未提交工作区实现并完成容量、清理和生命周期审计，当前定义 50 个 Linux-only TCP 测试，另为 Reactor 内部清理通道增加 1 项测试。代码尚未 commit、push，也未在对应提交上运行真实 Linux CI，因此不能标记 completed。Windows Visual Studio 2022 Debug/Release 网络关闭回归均为 43/43，版本与示例配置 smoke 均 exit 0。HTTP 尚未实现。
 
 ## 项目定位
 
@@ -10,7 +10,7 @@
 
 框架层只负责网络、协议、路由、任务调度、插件管理、状态、日志、配置和错误处理。焊缝、点云、机器人等领域语义只能进入插件层。
 
-Phase 1 只建立可测试的公共基础设施，不启动网络服务，也不进入常驻循环。
+当前 `iaisf_server` 仍只验证 CLI 和配置后退出；Phase 3 的 TCP 传输能力通过独立库和测试使用，尚未接入常驻服务组合根。
 
 ## Phase 1 已实现
 
@@ -47,14 +47,34 @@ Phase 2B 固定了以下并发语义：
 
 - `EPOLLRDHUP` 属于 read-side 通知；`EPOLLHUP` 只有在没有 read-side 事件时才直接触发 close，因此 `HUP|IN` 仍可读取剩余数据。
 - Channel 只通知事件，不自动把 ET fd 读写到 `EAGAIN`；该职责属于未来连接层。
-- 注册期内 Channel 地址必须稳定，fd 必须有效；析构前必须移除。active 批次中的 Channel 必须活到整批分派结束，移除和销毁通过 `queue_in_loop` 延迟。
+- 注册期内 Channel 地址必须稳定，fd 必须有效；析构前必须移除。active 批次中的 Channel 必须活到整批分派结束。应用短回调使用有界 `queue_in_loop`；框架生命周期清理使用独立的内嵌 intrusive 节点，不能被普通队列容量拒绝。
 - `queue_in_loop` 在同一互斥区内完成状态/容量检查、入队、eventfd 唤醒和失败回滚；Stopping/Stopped 拒绝新回调。
 - Created 允许预先入队；run 前 stop 会直接进入 Stopped 并取消尚未执行的回调。Running stop 进入 Stopping，唤醒 epoll，处理已接受回调后进入 Stopped。
 - 一个 Channel 回调抛异常时，该 Channel 本次剩余回调停止；EventLoop 记录异常并继续后续 active Channel。pending callback 异常同样不会终止循环。
 
+## Phase 3 已实现，等待 Linux CI
+
+- Linux-only `iaisf_tcp` 静态库与 `iaisf::tcp` alias，PUBLIC 依赖 `iaisf::net`
+- 仅支持数值 IPv4 的 `Ipv4Endpoint`，含端口 0、loopback/any、`sockaddr_in` round-trip
+- 初始容量与硬上限分离的二进制 `Buffer`，支持前部复用、显式 compact、溢出安全增长与 `ResourceExhausted`
+- `Socket` 的 bind/listen/local endpoint、`TCP_NODELAY`、`SO_ERROR` 与 `accept4`
+- owner-thread-only `Acceptor`，对监听 fd 使用 epoll ET 并 accept 到 `EAGAIN`
+- shared-owned `TcpConnection`，Channel 回调只捕获 weak pointer
+- ET recv/send 循环、`MSG_NOSIGNAL`、部分写缓存与动态 `EPOLLOUT`
+- 输入/输出 hard maximum 与仅在阈值跨越时通知的 output high-water
+- peer EOF 后先交付已读数据、再排空输出并延迟移除连接
+- `TcpServerOptions` 严格有符号输入和跨字段/硬上限校验，含可选的受验证
+  `SO_SNDBUF` 调优值（默认不覆盖系统值）
+- `TcpServer` 有界连接表、单调连接 ID、过载 RAII 拒绝和延迟销毁
+- `send()` 采用 all-accepted-or-failure：首次系统发送前整包预留，failure 不写出或缓存本次前缀；可写回调中的部分内核写始终保留完整未写后缀
+- 普通 pending queue 满时，Acceptor stop 和连接表清理仍由不分配的内部 deferred-cleanup lane 最终执行
+- `TcpServer::stop()` owner-thread-only、幂等、永久禁止 restart；非 active 调用同步清空连接表，active 回调内调用则在批次后完成，`stopped()` 是完成屏障
+- 独立 `iaisf_tcp_tests`，当前源码定义 50 个测试；真实 Linux 发现数和结果待 CI
+
+Phase 3 的线程边界不是“TCP 层整体线程安全”：只有 `EventLoop::queue_in_loop()` 和 `stop()` 可跨线程；Acceptor、TcpServer、TcpConnection、Buffer 和 Channel 的普通操作都属于 EventLoop owner 线程。
+
 ## 尚未实现
 
-- Acceptor、TcpConnection、TcpServer、bind/listen/accept 和网络监听
 - HTTP request/response/parser/router
 - 线程池和有界工作队列
 - Task、TaskManager、TaskRepository 和任务 API
@@ -63,6 +83,7 @@ Phase 2B 固定了以下并发语义：
 - 异步日志、文件日志和日志轮转
 - TensorRT、PCL、真实点云、机器人或 Agent 能力
 - 性能压测和任何 QPS/延迟结论
+- Phase 3 对应提交的 Linux Debug/Release 构建、CTest、warning 与 fd/lifecycle 验证
 
 ## 架构 Roadmap
 
@@ -73,13 +94,13 @@ Phase 1 (completed)
 Phase 2 (completed)
   UniqueFd / Socket / Channel / EpollPoller / EventLoop / eventfd
 
-Phase 3 (planned)
-  Acceptor / TcpConnection / TcpServer / buffers / ET I/O lifecycle
+Phase 3 (implemented, Linux validation blocked)
+  IPv4 endpoint / bounded Buffer / Acceptor / TcpConnection / TcpServer
 
 Later phases (planned)
   HTTP -> task system -> static plugins -> timers -> async logging
 
-Phase 8—9 (planned)
+Phase 9—10 (planned)
   measured engineering baseline -> production vision-plugin boundary
 ```
 
@@ -134,6 +155,8 @@ Smoke：
 ```
 
 脚本会显式传入 `-DIAISF_BUILD_LINUX_NETWORK=ON`。首次功能 [Linux CI run 30514521602](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30514521602) 对应 Reactor 实现提交 `f76993e09767a2d6b6e1cbd2bcb22cfa1df6f74f`，功能和测试通过，但 Release 测试构建存在 2 条 `-Wunused-result` warning。提交 `4db8708a5121f8477d835addd0b16170a3e2054f` 修复这两处返回值检查；最终 [Linux CI run 30516007475](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30516007475) 在 Ubuntu 24.04.4 LTS、GCC 13.3.0、CMake 3.31.6 上完成 Debug/Release configure、build 和 87/87 CTest，两个配置均实际执行 44/44 Reactor 测试，Release 两项 CLI smoke 成功，项目源码和测试 warning 均为 0。两个 job 和所有步骤均成功，没有 failed、cancelled、skipped、neutral 或 `continue-on-error`。完整状态见 [stage_status.md](docs/stage_status.md)，构建说明见 [linux_build.md](docs/linux_build.md)。
+
+Phase 3 修改后的 workflow 会在两个 job 中显式构建 `iaisf_tcp` 和 `iaisf_tcp_tests`，随后执行完整 CTest；该 workflow revision 尚未 push 或运行。上段 run 只能证明 Phase 2 基线，不能证明当前 TCP 代码可在 Linux 编译或通过测试。
 
 ## 命令行
 
@@ -228,7 +251,7 @@ Phase 1 的 `ConsoleLogger`：
 - 输出 UTC 时间、level、component 和 message；
 - 转义换行和控制字符。
 
-它没有后台线程、异步队列、文件 sink、轮转或压缩。这些属于 Phase 7。
+它没有后台线程、异步队列、文件 sink、轮转或压缩。这些属于 Phase 8。
 
 ## 测试
 
@@ -250,7 +273,7 @@ ctest --test-dir build/linux-release --output-on-failure
 - CTest CLI version 和 example-config smoke
 - Linux `UniqueFd`、Socket、Channel、EpollPoller 和 EventLoop
 
-真实结果见 [stage_status.md](docs/stage_status.md)。Windows/MSVC Debug/Release Phase 1 回归均为 43/43；Phase 2 最终 Linux CI 的 Debug/Release 均实际执行 87 项并全部通过，其中 Reactor 测试 44/44，项目源码和测试 warning 均为 0。当前仍没有 Buffer、Acceptor、TcpConnection、TcpServer 或 HTTP 实现。
+真实结果见 [stage_status.md](docs/stage_status.md)。Windows/MSVC Debug/Release 网络关闭回归均为 43/43；Phase 2 最终 Linux CI 的 Debug/Release 均实际执行 87 项并全部通过，其中当时 Reactor 测试 44/44，项目源码和测试 warning 均为 0。当前源码定义基础 43、Reactor 45、TCP 50，合计 138；新增或修改的 Linux-only 测试尚未在 Linux 实际发现或执行，不能提前声称 138 项通过。
 
 ## 项目结构
 
@@ -271,6 +294,7 @@ IndustrialAIServiceFramework/
 │   ├── core/
 │   ├── logging/
 │   ├── net/
+│   │   └── tcp/
 │   └── version.hpp.in
 ├── src/
 │   ├── app/
@@ -278,6 +302,7 @@ IndustrialAIServiceFramework/
 │   ├── core/
 │   ├── logging/
 │   ├── net/
+│   │   └── tcp/
 │   └── main.cpp
 ├── tests/
 │   └── net/
@@ -285,7 +310,7 @@ IndustrialAIServiceFramework/
 └── docs/
 ```
 
-`net` 只包含 Phase 2 Reactor 原语，没有 Acceptor、TcpConnection、HTTP、任务或插件空壳类。
+`net` 包含 Phase 2 Reactor 原语和 Phase 3 `tcp/` 字节传输层。仍没有 HTTP、任务或插件空壳类。
 
 ## 与 TinyWebServer 的差异
 
@@ -295,7 +320,7 @@ IndustrialAIServiceFramework/
 
 ## 性能
 
-未执行性能测试，没有 QPS、并发连接数、延迟、CPU 或内存结论。性能只能在 Phase 8 按真实硬件和原始命令测量后填写。
+未执行性能测试，没有 QPS、并发连接数、延迟、CPU 或内存结论。性能只能在 Phase 9 按真实硬件和原始命令测量后填写。
 
 ## 许可证
 
