@@ -2,14 +2,16 @@
 
 ## 1. 范围与状态
 
-Phase 4 HTTP 协议库状态为 `PHASE_4_HTTP_PROTOCOL_COMPLETED`。可移植
+Phase 4 HTTP 协议库状态保持 `PHASE_4_HTTP_PROTOCOL_COMPLETED`。Phase 5 总体状态为
+`PHASE_5_TASK_RUNTIME_IMPLEMENTED_LINUX_VALIDATION_BLOCKED`。可移植
 `iaisf_http_core` 已在 Windows Debug/Release 各通过 84/84 HTTP Core 测试；
 最终 [Linux CI run 30539245789](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30539245789)
 的 Debug/Release 均为 239/239，其中 HTTP Core 84/84、Linux-only
 HttpSession/HttpServer integration 16/16。
 
 当前 CLI 不启动监听；`/health`、`/version` 是显式注册到 `HttpRouter` 后由
-`HttpServer` API 提供的能力。后文任务 JSON API 仍是 planned，不得当作当前端点。
+`HttpServer` API 提供的能力。Phase 5 Task Runtime 不依赖 HTTP，后文任务 JSON API
+仍是 planned，不得当作当前端点；当前不存在 `/v1/tasks` 或 `/api/v1/tasks` 路由。
 服务不提供 HTML、文件下载、任意路径读取、shell 或客户端代码执行。
 
 ## 2. HTTP 基线
@@ -320,7 +322,8 @@ Location: /api/v1/tasks/task_opaque
 }
 ```
 
-超时任务返回 HTTP 504 和状态 `timeout`。Cancelled 返回 409；若未来增加取消 API，可再评估 410 语义。
+计划中的超时任务响应拟使用 HTTP 504 和状态 `timed_out`。Phase 5 没有 Cancelled
+状态；若未来增加取消 API，必须先扩展状态机和协议测试，再评估 409/410 语义。
 
 ### 6.5 POST /api/v1/plugins/{plugin_name}/execute
 
@@ -445,3 +448,26 @@ payload_length bytes UTF-8 JSON
 - 在 v1 内只增加可选响应字段，不改变字段意义。
 - 破坏性 schema 变更使用 `/api/v2` 或插件结果独立 schema version。
 - 插件结果由插件负责版本字段；核心只保证 JSON envelope。
+
+## 11. Phase 5 Task Runtime 协议边界
+
+Phase 5 只定义进程内 C++ API：
+
+- `TaskRequest` 只含通用 `operation` 与 `input` JSON，不含 HTTP request、
+  TcpConnection、Socket 或插件对象。
+- `TaskId` 由服务端仓库生成，稳定文本形态为 `task-` 加最少 16 位十进制数字；
+  rollback/erase 后不复用，耗尽 `uint64_t` 后永久返回 ResourceExhausted；当前没有
+  公开字符串解析入口。
+- `TaskState` 只含 `queued`、`running`、`succeeded`、`failed`、`timed_out`。
+- queue/repository/JSON 容量失败返回项目 `ErrorCode::ResourceExhausted`；
+  not found 返回 `ErrorCode::NotFound`。Phase 5 不把它们映射为 HTTP 状态码。
+- `mark_timed_out` 是未来定时器的接入点，不表示自动超时已实现。
+- `erase_terminal` 可删除 Succeeded/Failed/TimedOut；删除 TimedOut 不终止仍在
+  运行的 handler，晚到完成得到 NotFound 并被计数丢弃。
+- 同一 TaskHandler 可被多个 worker 并发调用；调用者负责线程安全，且 handler
+  不得依赖 EventLoop owner thread 或操作网络对象。
+- `TaskManager::shutdown` 先关闭 admission，再等待所有 in-flight submit 完整提交
+  或回滚，最后 drain/join；它不会自动删除终态记录。
+
+第 6、7 节中的任务与插件 JSON 均继续属于 planned schema。只有后续阶段显式实现并
+测试 Router/TaskManager 适配后，才能把这些文档结构描述为可访问 API。

@@ -60,6 +60,7 @@ TEST(ErrorTest, ConvertsKnownAndUnknownCodesToStableStrings) {
     EXPECT_EQ(
         iaisf::to_string(iaisf::ErrorCode::ResourceExhausted),
         "resource_exhausted");
+    EXPECT_EQ(iaisf::to_string(iaisf::ErrorCode::NotFound), "not_found");
     EXPECT_EQ(iaisf::to_string(iaisf::ErrorCode::InternalError), "internal_error");
     EXPECT_EQ(
         iaisf::to_string(static_cast<iaisf::ErrorCode>(999)),

@@ -270,33 +270,52 @@ signalfd、异步日志、TLS、文件上传、AI 推理或 benchmark。
 
 ## 8. Phase 5：线程池与任务系统
 
-状态：**planned，未开始**。
+状态：**implemented，Linux validation blocked**。
 
-目标：实现无需插件也可测试的异步任务生命周期。
+目标：实现无需插件也可测试、与网络层解耦的跨平台异步任务生命周期。
 
 交付：
 
-- `BoundedQueue<std::function<void()>>`、`ThreadPool`
-- `Task`、`TaskStatus`、`TaskRepository`、`TaskManager`
-- 合法状态转换、内存容量和终态快照
-- `POST /api/v1/tasks`、状态查询、结果查询的服务层与路由
-- 暂用内置测试执行器，不冒充插件系统
+- `iaisf_task` / `iaisf::task` 和跨平台 `iaisf_task_tests`
+- `ThreadPoolOptions`、固定 worker/有界 FIFO 的 `BoundedThreadPool`
+- `TaskId`、`TaskState`、`TaskRequest`、独立 `TaskSnapshot`、`TaskLimits`
+- 有界内存 `TaskRepository`、注入式 `TaskHandler`、`TaskExecutor`、`TaskManager`
+- 合法状态转换、first-terminal-wins、Timeout 晚到结果丢弃
+- queue/repository 容量错误、submit 失败回滚和 drain-then-join shutdown
+- `NotFound` ErrorCode 及稳定字符串映射
+- Linux CI 显式构建 `iaisf_task` 与 `iaisf_task_tests`
 
 验收：
 
-- 任务在 worker 执行，EventLoop 不运行耗时函数。
-- 队列满返回 503；停止后拒绝新任务。
-- worker 捕获异常并继续执行下一任务。
-- drain 与 immediate reject 语义有确定测试。
-- 并发状态转换无数据竞争；ThreadSanitizer 可用时作为附加检查。
+- Phase 5B 已专项审计 Pool 并发 shutdown、Manager submit/shutdown 屏障、终态出口、
+  TimedOut erase 晚到结果、TaskId 溢出和析构生命周期。
+- Windows Visual Studio 2022 Debug/Release 均已实际执行 212/212 CTest，其中 Task Runtime 85/85。
+- 队列满与 Repository 满均返回 `ResourceExhausted`；本层不实现 HTTP 503 映射。
+- worker 捕获标准/未知异常并继续；handler/logger 异常不能逃逸 worker。
+- `submit` 要么完整接受，要么完整回滚，不留下无 worker closure 的 Queued 记录。
+- shutdown 先关闭 admission，再等待 in-flight submission 完整成功或回滚，随后
+  排空已接受任务并 join；并发 caller 幂等，worker self-shutdown 返回 `InvalidState`。
+- 协作 handler 的 success/Error/异常/非法或超限 result 都有终态出口；TimedOut
+  被 erase 后的 late NotFound 只计数并丢弃。
+- 状态竞争测试使用 promise/future 等有界同步，不依赖固定 sleep。
+- Phase 5 Linux CI 尚未运行，状态保持 blocked；不能沿用 Phase 4 的 239/239 作为 Phase 5 证据。
+
+明确未包含：
+
+- HTTP 任务提交/查询路由或 `/v1/tasks`
+- PluginManager、IPlugin、EchoPlugin、MockVisionPlugin 或动态 `.so`
+- timerfd、自动任务超时扫描、连接超时、取消、重试、优先级或 work stealing
+- 异步日志、GPU executor、TensorRT/PCL、数据库持久化、benchmark 或 AI 推理
 
 建议 commit message：
 
 ```text
-feat(task): complete phase 5 bounded async task system
+feat: implement bounded task runtime
 ```
 
 ## 9. Phase 6：插件系统
+
+状态：**planned，未开始**。
 
 目标：通过静态注册插件完成工业任务服务化闭环。
 

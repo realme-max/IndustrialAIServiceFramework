@@ -3,24 +3,25 @@
 ## 当前结论
 
 ```text
-PHASE_4_HTTP_PROTOCOL_COMPLETED
+PHASE_5_TASK_RUNTIME_IMPLEMENTED_LINUX_VALIDATION_BLOCKED
 ```
 
-- 当前阶段：Phase 4 HTTP/1.1 Protocol Layer
-- 实现状态：HTTP Core 与 Linux adapter 已实现并完成最终 Linux 验证
-- Windows 验证：Visual Studio 2022 x64 Debug/Release 均为 127/127（Foundation 43 + HTTP Core 84）
-- Linux CI 验证：最终 push run `30539245789` success；Debug/Release 均 239/239
+- 当前阶段：Phase 5 Bounded Thread Pool and Task Runtime
+- 实现状态：跨平台 Task Runtime 已实现，尚未 commit/push
+- Windows 验证：Visual Studio 2022 x64 Debug/Release 均为 212/212（Foundation 43 + HTTP Core 84 + Task Runtime 85）
+- Linux CI 验证：尚未运行包含 Phase 5 提交的真实 CI；Phase 4 run `30539245789` 不能替代
 - 日期：2026-07-30（Asia/Shanghai）
-- 下一阶段：Phase 5 线程池与任务系统，尚未开始
+- 下一阶段：Phase 6 插件系统；必须等待 Phase 5 Linux 封板后开始
 
-Phase 4 已实现 HTTP/1.1 增量解析、有界响应、精确路由、每连接 Session 和 HttpServer
-API，但 `iaisf_server` 仍不启动监听。线程池、任务、插件、定时器与异步日志未实现。
+Phase 5 已实现固定有界线程池、Task 值类型与限制、线程安全 Repository、Executor 和
+Manager；`iaisf_server` 仍不启动监听，也没有 Task HTTP API。插件、自动超时、
+定时器和异步日志未实现。
 
 ## Git 状态
 
 | 项目 | 结果 |
 |---|---|
-| 当前分支 | `phase/4-http-protocol` |
+| 当前分支 | `phase/5-task-runtime` |
 | Phase 0 提交 | `5fbcec0 docs: complete phase 0 architecture design` |
 | Phase 1 最终实现提交 | `63b30cffcbe3e621af33664721b3675a647bd1a1` |
 | Phase 2 起始 HEAD / main / origin/main | `6065d91b277c07ed04e64b3f08034788965e6ac1` |
@@ -32,10 +33,11 @@ API，但 `iaisf_server` 仍不启动监听。线程池、任务、插件、定�
 | Phase 3 文档封板 / Phase 4 基线 / main / origin/main | `7096191ca8f7a3fe9e9acfb31ceba0a2c2fc3483` |
 | Phase 4 HTTP 实现提交 | `9b87fdb8804ee37a8cf3b87a7b9193a3130b85d3` |
 | Phase 4 测试修复 / 最终验证提交 | `0818ebf4f71366cc3cd2fe4e36e95fe667b687a5` |
-| 当前 HEAD / `phase/4-http-protocol` upstream | `0818ebf4f71366cc3cd2fe4e36e95fe667b687a5` |
+| Phase 4 文档封板 / Phase 5 基线 / main / origin/main / 当前 HEAD | `fe5b58446a14ebedf13978b0339f3ad0171f0ffa` |
+| Phase 5 upstream | 尚未配置 |
 | origin | `https://github.com/realme-max/IndustrialAIServiceFramework.git` |
 | Phase 3 开始时工作区 | clean |
-| Phase 4 实现与测试修复 commit / push | 已完成；本轮只产生未提交文档 diff |
+| Phase 5 commit / push / PR | 均未执行；当前为源码、测试、构建/CI 与文档 diff |
 
 本阶段没有 amend、reset、stash、rebase、merge、commit、push 或修改 origin。
 
@@ -48,7 +50,7 @@ API，但 `iaisf_server` 仍不启动监听。线程池、任务、插件、定�
 | 2 | Socket、epoll 与 EventLoop | completed | Debug/Release 均 87/87；44 个 Reactor 测试均实际执行 |
 | 3 | TCP Transport Layer | completed | Debug/Release 138/138；Foundation 43、Reactor 45、TCP 50 |
 | 4 | HTTP 协议与健康路由 | completed | Windows 127/127；Linux Debug/Release 239/239 |
-| 5 | 线程池与任务系统 | planned | 未开始 |
+| 5 | 线程池与任务系统 | implemented / Linux blocked | Phase 5B 审计完成；Windows Debug/Release 212/212；Linux CI 待新提交 |
 | 6 | 插件系统 | planned | 未开始 |
 | 7 | 定时器与任务超时 | planned | 未开始 |
 | 8 | 异步日志与配置扩展 | planned | 未开始 |
@@ -580,6 +582,75 @@ bash -n \
 `4db8708a5121f8477d835addd0b16170a3e2054f` 上执行。本机仍没有可运行的
 Linux/WSL 环境，因此本地未复现这次 CI。
 
+## Phase 5 Task Runtime 实现与验证
+
+### Targets 与文件边界
+
+- `iaisf_task` / `iaisf::task` 是跨平台静态库；PUBLIC 依赖 `iaisf::core`、
+  `Threads::Threads`、`nlohmann_json::nlohmann_json`。
+- `iaisf_task_tests` 在 Windows 与 Linux 均构建，Phase 5B 后定义 85 项 `unit;task` 测试。
+- Linux workflow 的 Debug/Release 显式 target 列表均加入 `iaisf_task` 和
+  `iaisf_task_tests`，同时保留已有 HTTP targets、完整 CTest 和 Release smoke。
+- 未修改 AppConfig JSON schema；现有 `worker_threads`/`task_queue_capacity` 没有
+  在 CLI 启动 pool。
+
+### 线程池与任务契约
+
+- `ThreadPoolOptions`：`worker_threads` 与 `queue_capacity` 都必须大于 0；
+  hard maximum 分别为 256 和 1,000,000，不 clamp。
+- `BoundedThreadPool`：固定 worker、有界 FIFO、condition variable 等待、
+  non-blocking `try_submit`。队列满为 ResourceExhausted，停止后为 InvalidState。
+- worker 在队列锁外执行；标准与未知异常均被计数和隔离。shutdown 停止 admission、
+  drain、join，幂等；并发 caller 只有一个执行 join，其他等待 Stopped；join 后清空
+  thread 对象。worker self-shutdown 在修改状态前失败，不 restart/resize/detach。
+- `TaskId` 在 Repository mutex 内单调生成；默认无效，文本为 `task-` +
+  最少 16 位十进制。不声明跨进程/重启唯一；rollback/erase 后不复用，耗尽后永久
+  ResourceExhausted，不回绕。
+- `TaskState` 只有 Queued、Running、Succeeded、Failed、TimedOut。合法转换只有
+  Queued→Running 与 Running→三个终态。
+- `TaskRepository` 是 first-terminal-wins 唯一裁决者；首个终态为 Applied，
+  其余为 AlreadyTerminal。不存在与非法转换分别是 NotFound/InvalidState。
+- `TaskLimits` 在保存前限制 operation、input/result 序列化 bytes、error message
+  bytes 和 Repository 记录数；超限结果不部分写入。
+- `TaskExecutor` 在仓库锁外调用可并发 `TaskHandler`；异常文本不进入 Snapshot，
+  logger 异常不逃逸，超限/不可序列化 result 转 Failed。AlreadyTerminal 和
+  TimedOut erase 后的 NotFound late completion 均有计数。
+- `TaskManager::submit` 在 admission mutex 下增加 in-flight 计数后，于锁外 create
+  Queued、构造闭包并 `try_submit`；RAII guard 在所有返回路径减计数，队列/分配失败
+  只 rollback 仍为 Queued 的记录。
+- Manager shutdown 先把 accepting 设为 false，等待 in-flight submission 归零，
+  再调用 Pool drain/join；并发 caller 幂等，handler 执行期间不持 lifecycle lock。
+- Repository 不自动驱逐、不做 TTL 或持久化；只有 `erase_terminal` 释放容量。
+- 非协作 handler 会延迟 shutdown；Phase 5 不提供强杀、取消 token 或自动 timeout。
+
+### Windows 实际结果
+
+| 配置 | Foundation | HTTP Core | Task Runtime | 合计 | 失败 |
+|---|---:|---:|---:|---:|---:|
+| VS2022 x64 Debug | 43 | 84 | 85 | 212 | 0 |
+| VS2022 x64 Release | 43 | 84 | 85 | 212 | 0 |
+
+Release version smoke：
+
+```text
+IndustrialAIServiceFramework 0.1.0
+```
+
+Release example-config smoke：
+
+```text
+2026-07-30T13:23:45.738Z [INFO] [Application] configuration validated for service IndustrialAIServiceFramework
+```
+
+项目 MSVC 源码和测试编译 warning 为 0。现有 Visual Studio/vcpkg applocal 阶段仍
+打印非致命 `pwsh.exe` 诊断，但构建 exit 0、CTest 全通过；它不是编译器 warning。
+
+### Linux 当前结论
+
+本机没有 `bash`、WSL 或 Linux，`bash -n scripts/build_linux.sh` 无法执行，也没有
+本地 Linux configure/build/CTest。Phase 5 尚未 commit/push，因此不存在同一提交的
+GitHub Actions 证据。workflow 按当前定义预计发现 324 项，但该数量不是 PASS 结论。
+
 ## 参考工程保护
 
 任务开始基线：
@@ -588,47 +659,46 @@ Linux/WSL 环境，因此本地未复现这次 CI。
 |---:|---:|---|
 | 62 | 59,240,225 | `83AE7E469DEA30C860DEFD4D26CB313B7B3C87EFCD9387414741E152EE46CF27` |
 
-Phase 4 开始和交付前均复核为 62 个文件、59,240,225 字节和相同聚合 SHA-256。
+Phase 5 开始和交付前均复核为 62 个文件、59,240,225 字节和相同聚合 SHA-256。
 参考工程未被构建、格式化或添加到 Git。
 
 ## 未实现
 
-- ThreadPool 和运行时任务队列
-- TaskManager、TaskRepository、TaskExecutor
+- Task HTTP API、`/v1/tasks` 或 `/api/v1/tasks` 实际路由
 - PluginManager、EchoPlugin、MockVisionPlugin
-- timerfd/signalfd 实现和超时
+- timerfd/signalfd、自动任务/连接超时和取消
 - 异步日志、文件日志和轮转
 - 数据库、用户、HTML、TLS、Docker、部署和 Release 发布
 - benchmark、性能数据、真实 AI
 - sanitizer 和 `/proc` fd 长时间稳定性结果
 
-`worker_threads` 和 `task_queue_capacity` 当前只是经过校验的后续配置基线，不会创建 worker 或队列。
+`worker_threads` 和 `task_queue_capacity` 仍只是 CLI/AppConfig 中经过校验的配置
+字段；Phase 5 TaskManager 由显式 C++ options 创建，当前 CLI 不创建 worker 或队列。
 
 ## 当前阻塞与风险
 
 - Phase 1 没有剩余验收阻塞。
 - Phase 2 没有剩余验收阻塞。
 - Phase 3 没有剩余封板阻塞；本机仍无 Linux/WSL，当前 Linux 结论来自可追溯的 GitHub Actions run。
-- Phase 4 已完成最终 Linux 封板；本机仍无 Linux/WSL，Linux 结论来自可追溯的最终 GitHub Actions run。
+- Phase 4 已完成最终 Linux 封板；Phase 5 的真实 Linux CI 尚不存在，当前状态必须 blocked。
 - 默认 FetchContent 首次 Linux 配置需要 GitHub 网络和有效 CA 证书。
 - 系统依赖模式已设计但未在已安装 Linux 包环境验证。
 - Windows/NTFS 工作区不能可靠表达新 shell 脚本的 POSIX executable bit；workflow 会在运行时执行 `chmod +x scripts/*.sh`，人工 Linux 使用前仍应确认权限。
 - Visual Studio 本机 vcpkg applocal 集成的非致命 `pwsh.exe` 诊断不影响当前测试，但应与 Linux 结果分开记录。
 
-## Phase 5 建议入口
+## Phase 6 建议入口
 
-Phase 5 尚未开始。建议只包含有界队列、
-固定线程池、Task/TaskStatus、内存 TaskRepository、合法状态转换、TaskManager 和
-不依赖插件的测试执行器。worker 必须通过跨线程完成通道返回结果，不能操作
-TcpConnection、HttpSession、Channel、Socket 或 epoll。
+Phase 6 尚未开始。只有 Phase 5 提交并由同 SHA 的 Linux Debug/Release CI 封板后，
+才建议实现静态 IPlugin/PluginManager、PluginRequest/Result、EchoPlugin 和明确
+`mock: true` 的 MockVisionPlugin，并把它们适配到既有 TaskHandler 边界。
 
-Phase 5 暂不包含 PluginManager、AI/mock vision、timerfd/signalfd、异步日志、
-动态 `.so`、真实机器人、Agent 或 benchmark。
+Phase 6 暂不包含动态 `.so`、timerfd/signalfd、异步日志、真实 TensorRT/PCL/GPU、
+机器人、Agent、数据库或 benchmark，也不允许插件操作网络对象。
 
 ## 建议 commit
 
 本轮未执行 commit。建议：
 
 ```text
-docs: complete phase 4 validation record
+feat: implement bounded task runtime
 ```

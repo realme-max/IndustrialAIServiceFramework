@@ -13,6 +13,7 @@ enum class ErrorCode {
     SystemError,
     InvalidState,
     ResourceExhausted,
+    NotFound,
     InternalError,
 };
 
