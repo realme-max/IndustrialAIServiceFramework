@@ -10,20 +10,21 @@
 - Phase 2 Reactor 实现提交：`f76993e09767a2d6b6e1cbd2bcb22cfa1df6f74f`
 - warning 修复 / 最终验证提交：`4db8708a5121f8477d835addd0b16170a3e2054f`
 - Phase 2 文档封板 / Phase 3 基线：`e14b23131eb917df5758a10a305c2c87997f24cf`
+- Phase 3 TCP 实现提交：`0a45658d0e450dd9dfde052808a27ae92ad08881`
 - 当前阶段：Phase 3 TCP Transport Layer
-- 状态：`PHASE_3_TCP_TRANSPORT_IMPLEMENTED_LINUX_VALIDATION_BLOCKED`
+- 状态：`PHASE_3_TCP_TRANSPORT_COMPLETED`
 - 日期：2026-07-30
 - Phase 1 GitHub Actions run：[30508113122](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30508113122)
 - Phase 2 首次功能 GitHub Actions run：[30514521602](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30514521602)
 - Phase 2 最终零 warning GitHub Actions run：[30516007475](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30516007475)
+- Phase 3 最终 GitHub Actions run：[30524686201](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30524686201)
 - Phase 2 实现、warning 修复和文档封板：已合并 main
-- Phase 3 commit/push：未执行
-- 阻塞：Phase 3 TCP 代码没有对应 commit 和真实 Linux CI；本机仍无 Linux/WSL
+- Phase 3 实现 commit/push：已由用户完成
+- 阻塞：Phase 3 无剩余封板阻塞；本机仍无 Linux/WSL，但真实 CI 已完成
 
-Phase 2 Reactor 已通过 Ubuntu 24.04 Debug/Release 零 warning CI。Phase 3 TCP
-代码及容量、清理、生命周期语义审计已在当前工作区实现；当前 TCP 定义 50 项，
-Reactor 因内部清理补测增至 45 项。CMake/CI 和文档已更新，Windows 网络关闭回归
-通过，但不能据此判断 Linux TCP 编译或测试通过。
+Phase 3 TCP 代码及容量、清理、生命周期语义审计已由 Ubuntu 24.04 Debug/Release
+零 warning CI 验证。两种配置均为 138/138：Foundation 43、Reactor 45、TCP 50；
+Windows 网络关闭回归仍为 Debug/Release 43/43。HTTP 尚未实现，Phase 4 尚未开始。
 
 ## 2. Phase 1 文件
 
@@ -520,7 +521,7 @@ EpollPoller: 7
 EventLoop: 18
 ```
 
-Phase 2B 增加/加强了 RDHUP/HUP 分派、fd 复用、状态矩阵、Stopping 拒绝、容量竞争、失败回调不执行、唤醒失败回滚、active 批次延迟移除、回调异常边界、eventfd drain 和饱和计数器 EAGAIN。Phase 3B 新增的第 45 项验证普通 callback queue 满时 intrusive cleanup 仍只执行一次。测试使用 eventfd/socketpair，不监听端口；并发等待均有 condition variable/future 的有限超时，CTest timeout 为 10 秒。历史 Phase 2 Linux Debug/Release 实际执行 44 项；新增第 45 项尚未经过 Linux CI。
+Phase 2B 增加/加强了 RDHUP/HUP 分派、fd 复用、状态矩阵、Stopping 拒绝、容量竞争、失败回调不执行、唤醒失败回滚、active 批次延迟移除、回调异常边界、eventfd drain 和饱和计数器 EAGAIN。Phase 3B 新增的第 45 项验证普通 callback queue 满时 intrusive cleanup 仍只执行一次。测试使用 eventfd/socketpair，不监听端口；并发等待均有 condition variable/future 的有限超时，CTest timeout 为 10 秒。最终 Phase 3 Linux Debug/Release 均实际执行 Reactor 45/45。
 
 Phase 3 当前源码 `TEST` 定义：
 
@@ -533,8 +534,8 @@ TcpServer integration: 20
 Total definitions: 50
 ```
 
-50 是源码定义数，不是 Linux CTest 实际结果。当前静态组合为基础 43 + Reactor 45
-+ TCP 50 = 138，也不能写成 PASS。测试只使用 loopback/port 0 或
+最终 Linux Debug/Release 均实际发现并执行 TCP 50/50；与 Foundation 43、Reactor 45
+合计 138/138。测试只使用 loopback/port 0 或
 socketpair，有限 future/condition variable/socket timeout，无 fixed sleep、无
 detached thread；CTest timeout 20 秒。覆盖 binary/fragment/large Echo、burst、
 multi-client、容量、dynamic EPOLLOUT/high-water rearm、half-close、RST、异常隔离、
@@ -688,20 +689,45 @@ IndustrialAIServiceFramework 0.1.0
 所有 job/step 均成功，没有 failed、cancelled、skipped、neutral、失败重试或
 `continue-on-error` 掩盖。
 
-Phase 3 Linux 状态：
+Phase 3 Linux 最终验证：
 
 ```text
-working-tree commit: not created
-GitHub Actions run: not available
-iaisf_tcp Linux build: not run
-iaisf_tcp_tests Linux build/discovery/execution: not run
-Linux Debug/Release CTest total: unknown
-Linux project/test warnings: unknown
-status: PHASE_3_TCP_TRANSPORT_IMPLEMENTED_LINUX_VALIDATION_BLOCKED
+workflow: Linux CI
+run ID / attempt: 30524686201 / 1
+run URL: https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30524686201
+event / branch: push / phase/3-tcp-transport
+head SHA: 0a45658d0e450dd9dfde052808a27ae92ad08881
+checkout SHA: 0a45658d0e450dd9dfde052808a27ae92ad08881 (both jobs)
+local HEAD / upstream: 0a45658d0e450dd9dfde052808a27ae92ad08881
+runner / OS: ubuntu-24.04 / Ubuntu 24.04.4 LTS
+kernel: 6.17.0-1020-azure x86_64
+GCC / CMake: 13.3.0 / 3.31.6
+Linux Debug configure/build: pass
+Linux Debug CTest: 138/138 pass, 0 failed
+Linux Release configure/build: pass
+Linux Release CTest: 138/138 pass, 0 failed
+actual suites per configuration: Foundation 43/43; Reactor 45/45; TCP 50/50
+targets: iaisf_tcp and iaisf_tcp_tests built in both jobs
+Release smoke: version/config pass
+project source warnings: Debug 0; Release 0
+project test warnings: Debug 0; Release 0
+run status / conclusion: completed / success
+non-success jobs/steps: 0
+continue-on-error: 0
+status: PHASE_3_TCP_TRANSPORT_COMPLETED
 ```
 
-workflow 当前修改会在 Debug/Release 中显式 build `iaisf_tcp` 和
-`iaisf_tcp_tests`，然后运行全部 CTest；不得用 Phase 2 run 代替。
+Release smoke 实际输出：
+
+```text
+IndustrialAIServiceFramework 0.1.0
+2026-07-30T07:58:10.003Z [INFO] [Application] configuration validated for service IndustrialAIServiceFramework
+```
+
+两个 job 均实际构建 `iaisf_tcp` 和 `iaisf_tcp_tests`。Actions job/step conclusion
+全部为 success；CMake 的 compiler capability “skipped” 行不是被跳过的 Actions
+步骤。完整 build/test 日志没有项目源码或测试 warning；checkout 的 `git init`
+默认分支提示不是项目 warning。
 
 ## 15. Linux 命令
 
@@ -759,25 +785,24 @@ aggregate sha256:
 - 异步日志、文件日志、轮转
 - 数据库、登录、HTML、TLS
 - benchmark、性能测试、真实 AI
-- Phase 3 对应提交的 Linux build、CTest、warning、sanitizer 和 `/proc` fd 统计
+- sanitizer、benchmark 和 `/proc` fd 长时间稳定性统计
 
 禁止把 `worker_threads` 和 `task_queue_capacity` 配置字段解释为线程池已经实现。
 
 ## 19. 当前阻塞和遗留
 
-1. Phase 1、Phase 2 均无剩余验收阻塞。
-2. Phase 3 尚未 commit/push，新的 Linux CI 尚未运行。
-3. 默认 FetchContent 的首次 Linux 配置需要 GitHub 网络和 CA。
-4. 系统依赖模式尚未在 Linux 系统包环境验证。
-5. 本机没有可运行 Linux/WSL，不能在本机复现 CI。
-6. Windows/NTFS 不可靠保存 shell executable bit；workflow 会执行 `chmod +x scripts/*.sh`。
-7. 本机 Visual Studio vcpkg applocal 集成的非致命 `pwsh.exe` 诊断与代码无关。
-8. graceful shutdown 没有 timerfd deadline，非协作 peer 可能长期 Disconnecting；
+1. Phase 1、Phase 2、Phase 3 均无剩余验收阻塞。
+2. 默认 FetchContent 的首次 Linux 配置需要 GitHub 网络和 CA。
+3. 系统依赖模式尚未在 Linux 系统包环境验证。
+4. 本机没有可运行 Linux/WSL，不能在本机复现 CI。
+5. Windows/NTFS 不可靠保存 shell executable bit；workflow 会执行 `chmod +x scripts/*.sh`。
+6. 本机 Visual Studio vcpkg applocal 集成的非致命 `pwsh.exe` 诊断与代码无关。
+7. graceful shutdown 没有 timerfd deadline，非协作 peer 可能长期 Disconnecting；
    server stop 因此使用 force-close。
 
 ## 20. Phase 4 入口
 
-Phase 4 尚未开始；必须先让 Phase 3 对应提交通过真实 Linux CI。建议只包含：
+Phase 4 尚未开始。建议只包含：
 
 ```text
 HttpRequest
@@ -785,9 +810,11 @@ HttpResponse
 incremental HttpParser
 HttpSession
 minimal HttpRouter
-GET / POST / Content-Length / JSON / keep-alive
+request line / headers / Content-Length / body / keep-alive
 request-line/header/body limits
 GET /health
+GET /version
+malformed request fail-closed tests
 parser unit tests and loopback HTTP integration
 ```
 
@@ -810,8 +837,8 @@ benchmark
 - 不 amend 或重写已有提交。
 - 本轮不 commit、push、创建 PR 或 merge。
 - build、FetchContent、compile_commands 和日志不能进入 Git。
-- 最终建议 commit：
+- 本轮文档封板不 commit/push；建议 commit：
 
 ```text
-feat: implement TCP transport layer
+docs: complete phase 3 validation record
 ```

@@ -5,7 +5,7 @@
 - 项目：IndustrialAIServiceFramework
 - 阶段：Phase 3 TCP Transport Layer
 - 日期：2026-07-30
-- 状态：`PHASE_3_TCP_TRANSPORT_IMPLEMENTED_LINUX_VALIDATION_BLOCKED`；TCP 代码已实现，真实 Linux CI 尚未运行，HTTP 和任务架构仍为 planned
+- 状态：`PHASE_3_TCP_TRANSPORT_COMPLETED`；TCP Transport 已由真实 Linux Debug/Release CI 验证，HTTP 和任务架构仍为 planned
 - 目标平台：Linux x86_64，C++17
 
 本文同时记录已实现的 Phase 1 基础设施、Phase 2 Reactor 核心、当前 Phase 3 TCP 传输实现和后续目标边界。只有明确列入已实现边界的类才是当前能力。
@@ -61,7 +61,7 @@ signalfd、异步日志、AI 推理或 benchmark。
 
 ### 1.4 Phase 3 已实现边界
 
-当前未提交工作区新增 Linux-only `iaisf_tcp` / `iaisf::tcp`，PUBLIC 依赖
+Phase 3 实现提交新增 Linux-only `iaisf_tcp` / `iaisf::tcp`，PUBLIC 依赖
 `iaisf::net`。实现边界为：
 
 - `Ipv4Endpoint` 是 numeric IPv4 + host-order `uint16_t` port 值类型；使用
@@ -86,10 +86,13 @@ signalfd、异步日志、AI 推理或 benchmark。
 - `TcpServerOptions` 的可选 `socket_send_buffer_bytes` 是通用、受硬上限验证的
   `SO_SNDBUF` 调优项；默认不覆盖系统值，测试用它构造确定性 backpressure。
 
-当前源码定义 50 个 `iaisf_tcp_tests` 测试，并为 Reactor 内部清理通道增加 1 项
-测试（当前 Reactor 定义 45 项）。Windows 网络关闭回归已通过，然而
-本机没有 Linux/WSL，当前 TCP 代码尚未在真实 Linux 编译或执行；因此本节不是
-Phase 3 完成验收记录。
+Phase 3 实现提交 `0a45658d0e450dd9dfde052808a27ae92ad08881` 已由
+[Linux CI run 30524686201](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30524686201)
+验证。Ubuntu 24.04.4 LTS、GCC 13.3.0、CMake 3.31.6 的 Debug/Release 均成功
+configure/build，均为 138/138 CTest 通过，其中 Foundation 43、Reactor 45、TCP 50。
+两个配置均实际构建 `iaisf_tcp` 和 `iaisf_tcp_tests`；Release 版本/示例配置 smoke
+成功，项目源码和测试 warning 均为 0。run、两个 job 和全部步骤均为 success，
+没有 failed、cancelled、skipped、neutral 或 `continue-on-error`。
 
 ## 2. 调查结果与设计来源
 
@@ -322,7 +325,7 @@ Phase 2 的 wakeup Channel 和 Phase 3 的监听/连接 Channel 均使用 epoll 
 - 当前 EventLoop 只做 accept/read/write 和原始字节回调；未来业务计算必须交给工作线程。
 - 首版不使用 `EPOLLONESHOT`：只有 EventLoop 线程执行连接 I/O，不存在多个 I/O worker 同时处理同一 fd；事件通常关注 `EPOLLET | EPOLLRDHUP` 加实际读写位。
 
-### 8.2 Phase 3 accept/read/write 规则（implemented，待 Linux 验证）
+### 8.2 Phase 3 accept/read/write 规则（implemented and validated）
 
 - 使用 `socket(..., SOCK_NONBLOCK | SOCK_CLOEXEC, ...)`，不提供阻塞回退。
 - 监听设置 `SO_REUSEADDR`；`SO_REUSEPORT` 首版不启用。
@@ -714,11 +717,12 @@ Phase 1 的 `Error` 保留公开字段以维持轻量值语义，因此调用者
 
 ## 19. Phase 4 建议边界
 
-下一阶段建议只把 HTTP/1.1 字节协议适配到已经验证的 TCP 层：
+Phase 4 尚未开始。下一阶段建议只把 HTTP/1.1 字节协议适配到已经验证的 TCP 层：
 
-- `HttpRequest`、`HttpResponse`、增量 `HttpParser`、`HttpSession` 和最小 `HttpRouter`；
-- GET/POST、request line、headers、Content-Length、body、JSON、keep-alive；
-- request line/header/body 硬上限、分段输入、非法请求和 `GET /health`；
+- `HttpRequest`、`HttpResponse`、增量 `HttpParser`、`HttpSession` 和最小 Router；
+- request line、headers、Content-Length、body 和 HTTP/1.1 keep-alive；
+- request line/header/body 硬上限、分段输入、malformed request fail-closed；
+- `GET /health`、`GET /version` 和对应 loopback 集成测试；
 - HTTP 回调仍在 EventLoop owner 线程执行，不运行耗时业务。
 
 Phase 4 暂不包含 ThreadPool、TaskRepository、TaskManager、PluginManager、timerfd、

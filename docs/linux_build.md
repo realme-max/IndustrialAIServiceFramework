@@ -249,9 +249,9 @@ GitHub Actions run，不代表本机 Linux 编译。
 
 Reactor 测试覆盖 HUP/RDHUP read-side 语义、active Channel 延迟移除、fd 复用、`queue_in_loop` 失败回滚、多线程容量竞争、EventLoop 状态矩阵、异常隔离和 eventfd drain。它们不访问外部网络或固定端口。
 
-## 12. Phase 3 待验证矩阵
+## 12. Phase 3 最终验证矩阵
 
-当前工作区新增 `iaisf_tcp` 和 `iaisf_tcp_tests`，源码定义 50 项 TCP 测试：
+Phase 3 提交新增 `iaisf_tcp` 和 `iaisf_tcp_tests`，包含 50 项 TCP 测试：
 
 ```text
 Buffer 13
@@ -262,26 +262,37 @@ TcpServer integration 20
 ```
 
 Phase 3B 还为 EventLoop intrusive internal cleanup lane 新增 1 项 Reactor 测试，
-因此当前源码静态定义为基础 43 + Reactor 45 + TCP 50 = 138。内部 cleanup lane
+因此最终矩阵为基础 43 + Reactor 45 + TCP 50 = 138。内部 cleanup lane
 不使用普通有界 `queue_in_loop`，调度时不分配，并由 Acceptor/TcpServer 内嵌节点
-提供容量满载下的生命周期清理保证。该算术只用于检查 discovery 完整性，不是 PASS。
+提供容量满载下的生命周期清理保证。
 
 测试只使用 loopback port 0 或 socketpair，无外部服务、固定 sleep 或 detached
-thread，单项 CTest timeout 为 20 秒。当前没有 Phase 3 commit/run URL，故下列
-结果都保持 unknown，而不是由源码定义数推算：
+thread，单项 CTest timeout 为 20 秒。最终证据为
+[Linux CI run 30524686201](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30524686201)，
+对应提交 `0a45658d0e450dd9dfde052808a27ae92ad08881`、分支
+`phase/3-tcp-transport`、push event、attempt 1。run head SHA、两个 job 的 checkout
+SHA、本地 HEAD 和 upstream 完全一致。
 
-| 项目 | 当前状态 |
-|---|---|
-| Ubuntu runner / GCC / CMake | 待新 run 记录 |
-| Debug configure/build | 未运行 |
-| Debug CTest 总数/通过/失败 | 未运行 |
-| Release configure/build | 未运行 |
-| Release CTest 总数/通过/失败 | 未运行 |
-| TCP 50 项实际执行 | 未确认 |
-| Reactor 当前 45 项实际执行 | 未确认；Phase 2 历史 run 只执行当时 44 项 |
-| Release smoke | 未运行 |
-| 项目源码/测试 warning | 未确认 |
+| 项目 | Debug | Release |
+|---|---|---|
+| runner / OS | `ubuntu-24.04` / Ubuntu 24.04.4 LTS | `ubuntu-24.04` |
+| GCC / CMake | 13.3.0 / 3.31.6 | 同一 workflow 工具环境 |
+| configure/build | pass / pass | pass / pass |
+| CTest | 138/138，0 failed | 138/138，0 failed |
+| Foundation / Reactor / TCP | 43/43；45/45；50/50 | 43/43；45/45；50/50 |
+| TCP targets | `iaisf_tcp`、`iaisf_tcp_tests` built | 两个 target built |
+| 项目源码/测试 warning | 0 / 0 | 0 / 0 |
+| 独立 smoke | 不适用 | version/config pass |
 
-Phase 2 run `30516007475` 只证明 `iaisf_net` 基线，不包含当前 TCP revision。用户
-完成 commit/push 后，应使用同一 head SHA 的完整 Debug/Release jobs，确认两个 TCP
-target 构建、全部 TCP 测试执行、smoke 成功且无被隐藏的失败，再更新阶段状态。
+Release smoke 实际输出：
+
+```text
+IndustrialAIServiceFramework 0.1.0
+2026-07-30T07:58:10.003Z [INFO] [Application] configuration validated for service IndustrialAIServiceFramework
+```
+
+workflow conclusion 为 `success`，两个 job 和全部 Actions steps 均为 success，没有
+failed、cancelled、skipped、neutral、timeout 或 `continue-on-error`。日志中仅
+checkout 阶段的 `git init` 默认分支提示包含单词 “warning”；项目源码和测试编译
+warning 均为 0。当前 Windows 宿主仍没有可运行的 Linux/WSL；上述结论来自 CI，
+不代表本机执行过 Linux build。
