@@ -29,7 +29,7 @@ cmake \
   -B "${build_dir}" \
   -DCMAKE_BUILD_TYPE="${build_type}" \
   -DIAISF_BUILD_TESTS=ON \
+  -DIAISF_BUILD_LINUX_NETWORK=ON \
   -DIAISF_USE_SYSTEM_DEPS=OFF
 
 cmake --build "${build_dir}" --parallel
-

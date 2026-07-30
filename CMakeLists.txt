@@ -10,6 +10,25 @@ project(
 option(IAISF_BUILD_TESTS "Build IndustrialAIServiceFramework tests" ON)
 option(IAISF_USE_SYSTEM_DEPS "Use system-provided dependencies" OFF)
 
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  set(IAISF_BUILD_LINUX_NETWORK_DEFAULT ON)
+else()
+  set(IAISF_BUILD_LINUX_NETWORK_DEFAULT OFF)
+endif()
+option(
+  IAISF_BUILD_LINUX_NETWORK
+  "Build the Linux-only epoll/eventfd Reactor core"
+  "${IAISF_BUILD_LINUX_NETWORK_DEFAULT}"
+)
+unset(IAISF_BUILD_LINUX_NETWORK_DEFAULT)
+
+if(IAISF_BUILD_LINUX_NETWORK AND NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  message(
+    FATAL_ERROR
+    "IAISF_BUILD_LINUX_NETWORK=ON requires Linux with epoll and eventfd"
+  )
+endif()
+
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
@@ -45,6 +64,38 @@ target_include_directories(
 )
 target_link_libraries(iaisf_core PRIVATE nlohmann_json::nlohmann_json)
 iaisf_enable_project_warnings(iaisf_core)
+
+if(IAISF_BUILD_LINUX_NETWORK)
+  find_package(Threads REQUIRED)
+
+  add_library(
+    iaisf_net
+    STATIC
+    src/net/channel.cpp
+    src/net/epoll_poller.cpp
+    src/net/event_loop.cpp
+    src/net/socket.cpp
+  )
+  add_library(iaisf::net ALIAS iaisf_net)
+
+  target_compile_features(iaisf_net PUBLIC cxx_std_17)
+  target_include_directories(
+    iaisf_net
+    PUBLIC
+      "$<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>"
+      "$<BUILD_INTERFACE:${IAISF_GENERATED_INCLUDE_DIR}>"
+    PRIVATE
+      "${PROJECT_SOURCE_DIR}/src/net"
+  )
+  target_link_libraries(
+    iaisf_net
+    PUBLIC
+      iaisf::core
+    PRIVATE
+      Threads::Threads
+  )
+  iaisf_enable_project_warnings(iaisf_net)
+endif()
 
 add_executable(iaisf_server src/main.cpp)
 target_compile_features(iaisf_server PRIVATE cxx_std_17)

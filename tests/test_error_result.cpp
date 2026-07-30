@@ -55,6 +55,11 @@ TEST(ErrorTest, ConvertsKnownAndUnknownCodesToStableStrings) {
     EXPECT_EQ(iaisf::to_string(iaisf::ErrorCode::InvalidArgument), "invalid_argument");
     EXPECT_EQ(iaisf::to_string(iaisf::ErrorCode::ConfigError), "config_error");
     EXPECT_EQ(iaisf::to_string(iaisf::ErrorCode::IoError), "io_error");
+    EXPECT_EQ(iaisf::to_string(iaisf::ErrorCode::SystemError), "system_error");
+    EXPECT_EQ(iaisf::to_string(iaisf::ErrorCode::InvalidState), "invalid_state");
+    EXPECT_EQ(
+        iaisf::to_string(iaisf::ErrorCode::ResourceExhausted),
+        "resource_exhausted");
     EXPECT_EQ(iaisf::to_string(iaisf::ErrorCode::InternalError), "internal_error");
     EXPECT_EQ(
         iaisf::to_string(static_cast<iaisf::ErrorCode>(999)),

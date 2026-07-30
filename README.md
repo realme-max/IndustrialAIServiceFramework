@@ -2,7 +2,7 @@
 
 面向工业 AI 应用的 C++ 高性能任务服务框架。
 
-> 当前状态：Phase 1 基础工程、Phase 1B 代码审计和跨平台验证已经完成，状态标记为 `PHASE_1_FOUNDATION_COMPLETED`。Windows Visual Studio 2022 Debug/Release 已完成补充验证；Ubuntu 24.04 GCC Debug/Release、CTest 和 Release smoke 已由 [GitHub Actions run 30508113122](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30508113122) 在提交 `63b30cffcbe3e621af33664721b3675a647bd1a1` 上真实验证。
+> 当前状态：Phase 2 Linux Reactor Core 已实现，Windows Visual Studio 2022 Debug/Release 基础层回归均为 43/43；新增 Linux Reactor 测试尚未在真实 Linux CI 中运行。当前状态标记为 `PHASE_2_REACTOR_CORE_IMPLEMENTED_LINUX_VALIDATION_BLOCKED`，不能写成 Phase 2 completed。
 
 ## 项目定位
 
@@ -28,9 +28,33 @@ Phase 1 只建立可测试的公共基础设施，不启动网络服务，也不
 
 Phase 1B 审计修正了 Error 非空消息的文档边界，移除了未实现的 CMake 安装接口，并加强了 Result 引用类别、配置类型和 UTF-8 字节上限测试。2026-07-30 的 Windows/MSVC Debug、Release 补充回归和 Ubuntu 24.04 GCC Debug、Release CI 回归均为 43/43 CTest 通过；Linux `--version` 与示例配置 smoke 也已通过。
 
+## Phase 2 已实现
+
+- Linux-only `iaisf_net` 静态库和 `iaisf::net` alias
+- move-only `UniqueFd`，析构只尝试一次 `close`
+- 非阻塞、close-on-exec 的 IPv4 TCP `Socket` 基础封装
+- 不拥有 fd 的 `Channel`、稳定事件掩码和 read/write/error/close 回调
+- 有界事件数组的 `EpollPoller`
+- 单线程 `EventLoop` 与 `Created/Running/Stopping/Stopped` 状态
+- `eventfd(EFD_NONBLOCK | EFD_CLOEXEC)` 跨线程唤醒
+- 有界待执行回调队列，满时返回 `ResourceExhausted`
+- 回调异常隔离和注入式 `ILogger`
+- 44 个 Linux-only Reactor 测试定义
+
+Phase 2 没有把 Reactor 接入 `iaisf_server`；命令行程序仍只验证版本和配置后退出。
+
+Phase 2B 固定了以下并发语义：
+
+- `EPOLLRDHUP` 属于 read-side 通知；`EPOLLHUP` 只有在没有 read-side 事件时才直接触发 close，因此 `HUP|IN` 仍可读取剩余数据。
+- Channel 只通知事件，不自动把 ET fd 读写到 `EAGAIN`；该职责属于未来连接层。
+- 注册期内 Channel 地址必须稳定，fd 必须有效；析构前必须移除。active 批次中的 Channel 必须活到整批分派结束，移除和销毁通过 `queue_in_loop` 延迟。
+- `queue_in_loop` 在同一互斥区内完成状态/容量检查、入队、eventfd 唤醒和失败回滚；Stopping/Stopped 拒绝新回调。
+- Created 允许预先入队；run 前 stop 会直接进入 Stopped 并取消尚未执行的回调。Running stop 进入 Stopping，唤醒 epoll，处理已接受回调后进入 Stopped。
+- 一个 Channel 回调抛异常时，该 Channel 本次剩余回调停止；EventLoop 记录异常并继续后续 active Channel。pending callback 异常同样不会终止循环。
+
 ## 尚未实现
 
-- Socket、epoll、Channel、Poller、EventLoop 和网络监听
+- Acceptor、TcpConnection、TcpServer、bind/listen/accept 和网络监听
 - HTTP request/response/parser/router
 - 线程池和有界工作队列
 - Task、TaskManager、TaskRepository 和任务 API
@@ -46,7 +70,7 @@ Phase 1B 审计修正了 Error 非空消息的文档边界，移除了未实现�
 Phase 1 (completed)
   C++17 / CMake / Error / Result / AppConfig / ConsoleLogger / CLI / tests
 
-Phase 2 (planned)
+Phase 2 (implemented, Linux validation blocked)
   UniqueFd / Socket / Channel / EpollPoller / EventLoop / eventfd
 
 Phase 3—7 (planned)
@@ -70,9 +94,12 @@ Phase 8—9 (planned)
 ```text
 IAISF_BUILD_TESTS=ON
 IAISF_USE_SYSTEM_DEPS=OFF
+IAISF_BUILD_LINUX_NETWORK=ON  # Linux 默认；非 Linux 默认 OFF
 ```
 
 启用 `IAISF_USE_SYSTEM_DEPS=ON` 时使用 `find_package`，缺少兼容依赖会明确失败，不会静默切换模式。关闭 `IAISF_BUILD_TESTS` 后不获取 GoogleTest。
+
+`IAISF_BUILD_LINUX_NETWORK=ON` 只允许在 Linux 使用。非 Linux 平台显式开启会在 CMake configure 阶段报错；Windows 默认关闭并继续只构建 `iaisf_core`、`iaisf_server` 和 Phase 1 测试。
 
 ## Linux 构建
 
@@ -103,7 +130,7 @@ Smoke：
 ./scripts/smoke_linux.sh
 ```
 
-[Linux CI workflow](.github/workflows/linux-ci.yml) 已在 GitHub 托管的 `ubuntu-24.04` runner 上真实执行这些脚本。run `30508113122` 记录 Ubuntu 24.04.4 LTS、GCC 13.3.0 和 CMake 3.31.6；Debug、Release configure/build 成功，两个配置均为 43/43 CTest 通过，Release smoke 输出版本 `IndustrialAIServiceFramework 0.1.0` 并成功校验示例配置。完整证据见 [stage_status.md](docs/stage_status.md)，构建说明见 [linux_build.md](docs/linux_build.md)。
+脚本会显式传入 `-DIAISF_BUILD_LINUX_NETWORK=ON`。Phase 1 的 [Linux CI run 30508113122](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30508113122) 已成功；Phase 2 当前改动尚未 commit/push，因此没有对应的真实 Linux run。完整状态见 [stage_status.md](docs/stage_status.md)，构建说明见 [linux_build.md](docs/linux_build.md)。
 
 ## 命令行
 
@@ -174,10 +201,11 @@ Phase 1 不支持 YAML、TOML、环境变量覆盖、热更新、多文件合并
 
 ## Error 与 Result
 
-`ErrorCode` 当前只包含 Phase 1 必需值：
+`ErrorCode` 当前包含 Phase 1 基础值和 Phase 2 Reactor 通用值：
 
 ```text
-InvalidArgument / ConfigError / IoError / InternalError
+InvalidArgument / ConfigError / IoError / SystemError /
+InvalidState / ResourceExhausted / InternalError
 ```
 
 `Result<T>` 使用标准库 `std::variant`，支持 move-only 类型且不要求 `T` 默认构造。`Result<void>` 表达只返回成功/错误的操作。
@@ -217,8 +245,9 @@ ctest --test-dir build/linux-release --output-on-failure
 - 日志解析、阈值、格式、换行和清洗
 - Application 的 help/version/config/非法参数
 - CTest CLI version 和 example-config smoke
+- Linux `UniqueFd`、Socket、Channel、EpollPoller 和 EventLoop
 
-真实结果见 [stage_status.md](docs/stage_status.md)。Windows/MSVC Debug/Release 已完成补充回归；Ubuntu 24.04 GCC Debug/Release 已通过 GitHub Actions 验证。
+真实结果见 [stage_status.md](docs/stage_status.md)。本轮 Windows/MSVC Debug/Release 均为 43/43；Phase 2 当前有 44 个 Linux-only 测试定义，若全部被发现则 Linux CTest 预计接近 87 项，但尚未在目标平台运行，不能把定义数或预计数写成 PASS。
 
 ## 项目结构
 
@@ -238,19 +267,22 @@ IndustrialAIServiceFramework/
 │   ├── config/
 │   ├── core/
 │   ├── logging/
+│   ├── net/
 │   └── version.hpp.in
 ├── src/
 │   ├── app/
 │   ├── config/
 │   ├── core/
 │   ├── logging/
+│   ├── net/
 │   └── main.cpp
 ├── tests/
+│   └── net/
 ├── scripts/
 └── docs/
 ```
 
-Phase 2 及以后目录当前可以为空；没有创建误导性的网络、任务或插件空壳类。
+`net` 只包含 Phase 2 Reactor 原语，没有 Acceptor、TcpConnection、HTTP、任务或插件空壳类。
 
 ## 与 TinyWebServer 的差异
 
