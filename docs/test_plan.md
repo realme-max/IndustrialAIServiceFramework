@@ -2,7 +2,7 @@
 
 ## 1. 状态与原则
 
-Phase 1 已实现基础单元测试和 CLI smoke，并在 Phase 1B 加强 Error 边界、Result 引用类别、配置数值类型和 UTF-8 字节限制覆盖。Phase 2 Reactor 最终 [GitHub Actions Linux CI run 30516007475](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30516007475) 已完成 Debug、Release、87/87 CTest 和 Release smoke 零 warning 验证。Phase 3 最终 [Linux CI run 30524686201](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30524686201) 已完成 Debug/Release 138/138 CTest，其中 Foundation 43、Reactor 45、TCP 50，当前状态为 `PHASE_3_TCP_TRANSPORT_COMPLETED`。
+Phase 1 已实现基础单元测试和 CLI smoke，并在 Phase 1B 加强 Error 边界、Result 引用类别、配置数值类型和 UTF-8 字节限制覆盖。Phase 2 Reactor 最终 [GitHub Actions Linux CI run 30516007475](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30516007475) 已完成 Debug、Release、87/87 CTest 和 Release smoke 零 warning 验证。Phase 3 最终 [Linux CI run 30524686201](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30524686201) 已完成 Debug/Release 138/138 CTest，其中 Foundation 43、Reactor 45、TCP 50。当前 Phase 4 状态为 `PHASE_4_HTTP_PROTOCOL_IMPLEMENTED_LINUX_VALIDATION_BLOCKED`：Windows Debug/Release 126/126 已通过，Linux HTTP 尚未执行。
 
 测试原则：
 
@@ -302,28 +302,78 @@ vcpkg applocal 在 executable 后打印缺少 `pwsh.exe` 的非致命辅助诊�
 仍 exit 0，Debug/Release CTest 均 43/43，Release 两项 smoke 均 exit 0。该诊断不是
 Linux/TCP 测试结果。
 
-## 7. HTTP Parser 测试
+## 7. Phase 4 HTTP 测试
 
-必须覆盖：
+状态：implementation complete，Linux validation blocked。
 
-- 完整 GET。
-- 完整 POST + JSON body。
-- request line、每个 header、CRLF 分界和 body 的所有关键分段点。
-- 一字节一字节输入。
-- body 后紧跟下一请求，解析器保留剩余字节。
-- 非完整请求返回 NeedMore，不产生 400。
-- 非法 method/version/target。
-- 裸 LF、错误 CRLF、header 缺冒号、非法 header name。
-- 缺 Host。
-- Content-Length 缺失（POST 规则）、非数字、负数、溢出、冲突重复。
-- Transfer-Encoding、TE + CL、chunked。
-- 请求行/header 数/header 总量/body 超限。
-- 空 JSON、畸形 JSON、合法但顶层非 object。
-- keep-alive 和 `Connection: close`。
-- 路由 404、方法 405、路径参数提取。
-- `..`、编码斜杠、NUL/反斜杠路径拒绝。
+### 7.1 可移植 HTTP Core
 
-解析测试不需要真实 Socket；向 parser 多次 feed 字节片段即可。
+`iaisf_http_core_tests` 当前有 **83 个 TEST 定义**：
+
+| 文件 | 定义数 | 重点 |
+|---|---:|---|
+| `test_http_limits.cpp` | 8 | 默认/有符号 factory、零/负数/硬上限、CRLF 与跨字段关系 |
+| `test_http_parser.cpp` | 40 | incremental CRLF/line/header/body、pipeline、重复 header、Connection token、歧义与全部限制 |
+| `test_http_request_response.cpp` | 20 | owning request、binary body、framing、响应 count/line/total 精确边界、稳定顺序与失败不变性 |
+| `test_http_router.cpp` | 15 | exact/freeze/capacity/404/405/Allow、handler response 限制、异常、built-ins |
+
+实际 Windows 矩阵：
+
+| 配置 | Configure | Clean build | Foundation | HTTP Core | CTest 总计 | smoke | 项目 warning |
+|---|---|---|---:|---:|---:|---|---:|
+| VS2022 Debug | pass | pass | 43/43 | 83/83 | 126/126 | CTest 内 2 项 | 0 |
+| VS2022 Release | 同一 multi-config tree | pass | 43/43 | 83/83 | 126/126 | version/config exit 0 | 0 |
+
+最终规定的 Debug/Release clean build 均成功。没有项目源码/测试编译错误或 warning。
+现有 VS/vcpkg applocal 仍可能打印缺失 `pwsh.exe` 的非致命诊断，应与项目 warning 分开。
+
+Core 覆盖：
+
+- 最小 GET、query、CL=0、binary body、逐字节/多段输入、CRLF 跨片、pipeline
+  consumed count、take/reset 和 Error 终态；
+- method/target/request line、header line/total/count、body 和 response body 上限；
+  line/total 的 exact-limit 与 limit+1 均包含 CRLF；
+- 缺失/空/重复 Host，任意普通/特殊/大小写变体重复 header，CL OWS、加号/负号/
+  逗号/小数/溢出，CL+TE、chunked、Expect、Upgrade，以及组合错误的稳定优先级；
+- `Connection` 完整 token 的大小写不敏感匹配、相似子串、空 token 与非法 token；
+- bare CR/LF、obs-fold、colon 前空白、NUL/control、fragment、absolute/authority/
+  asterisk target、HTTP/1.0 和 HTTP/2 preface；
+- Response Content-Length/Connection、binary body、Content-Type/Allow、自定义 header
+  稳定顺序、header name/value 注入、保留 framing header；header count/line/head
+  total 的 exact-limit 与 limit+1 均计入自动 framing，preflight 失败不返回部分结果；
+- Router 大小写敏感 path、query 忽略、404/405 + sorted Allow、duplicate/freeze、
+  handler Error、标准/未知异常后的 500 与后续健康 dispatch；
+- built-in health/version 的稳定 JSON。
+
+bad_alloc/length_error 由生产边界转换为 `ResourceExhausted`/500；当前没有稳定 allocator
+故障注入，因此只做代码边界审计并明确记录，未伪造故障注入结果。
+
+### 7.2 Linux-only HTTP integration
+
+`iaisf_http_tests` 当前有 **16 个 TEST 定义**，覆盖：
+
+- loopback `127.0.0.1` + port 0 的 health、version、404、405/Allow；
+- 顺序 keep-alive、同 Buffer pipeline、顺序保持和 `max_requests_per_dispatch=1`
+  continuation；continuation pending 期间追加的新数据不会产生重复 dispatch，
+  三个请求各响应一次且顺序稳定；
+- request line/header/body 分片、test-only POST echo 和 binary NUL；
+- `Connection: close` 大响应在小 socket buffer 下仍完整写出后主动 EOF，客户端不先
+  `shutdown`；malformed 只发一个错误、missing Host、duplicate CL、TE、
+  body/header 超限；
+- handler Error/异常、response body 超限、peer RST 后健康客户端；
+- 6 个并发客户端、continuation queue 满载关闭、重复连接的 Session/fd 回收；
+- continuation queue 满载关闭后 Session 表为空；首个 handler 内 stop 时已排队的第二
+  请求不再路由；stop、禁止 restart、stop 后拒绝新连接和 Session 表最终为空。
+
+测试无固定端口、外网、fixed sleep 或 detached thread；客户端 fd 是 RAII，socket
+读写有 10 秒 timeout，CTest 单项 timeout 20 秒，线程全部 join。`/proc/self/fd`
+测试在单独 gtest filter 进程中比较完整创建/销毁前后数量。
+
+这些 integration 只在 Linux target 存在时注册。本机无 Linux/WSL，**尚未执行**；
+当前源码定义数为 Foundation 43 + Reactor 45 + TCP 51 + HTTP Core 83 +
+HTTP integration 16 = 238，但必须以未来 CI 的 CTest 输出为准，不能写成 238 PASS。
+Phase 3 历史 CI 的 TCP 50/50 与总计 138/138 保持不变；新增 TCP 测试只验证
+`close_after_write()` 的 Phase 4 传输契约，尚未取得 Linux PASS。
 
 ## 8. ThreadPool 与队列测试
 

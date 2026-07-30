@@ -3,9 +3,9 @@
 ## 1. 文档状态
 
 - 项目：IndustrialAIServiceFramework
-- 阶段：Phase 3 TCP Transport Layer
+- 阶段：Phase 4 HTTP/1.1 Protocol Layer
 - 日期：2026-07-30
-- 状态：`PHASE_3_TCP_TRANSPORT_COMPLETED`；TCP Transport 已由真实 Linux Debug/Release CI 验证，HTTP 和任务架构仍为 planned
+- 状态：`PHASE_4_HTTP_PROTOCOL_IMPLEMENTED_LINUX_VALIDATION_BLOCKED`；HTTP Core 已完成 Windows Debug/Release 验证，Linux adapter 等待真实 CI
 - 目标平台：Linux x86_64，C++17
 
 本文同时记录已实现的 Phase 1 基础设施、Phase 2 Reactor 核心、当前 Phase 3 TCP 传输实现和后续目标边界。只有明确列入已实现边界的类才是当前能力。
@@ -93,6 +93,20 @@ configure/build，均为 138/138 CTest 通过，其中 Foundation 43、Reactor 4
 两个配置均实际构建 `iaisf_tcp` 和 `iaisf_tcp_tests`；Release 版本/示例配置 smoke
 成功，项目源码和测试 warning 均为 0。run、两个 job 和全部步骤均为 success，
 没有 failed、cancelled、skipped、neutral 或 `continue-on-error`。
+
+### 1.5 Phase 4 已实现边界
+
+Phase 4 新增两个清晰 target：
+
+- 可移植 `iaisf_http_core` / `iaisf::http_core`，只依赖 `iaisf::core`，包含
+  HttpStatus、HttpLimits、HttpRequest/Response、增量 Parser、Router 和 built-ins。
+- Linux-only `iaisf_http` / `iaisf::http`，依赖 `iaisf::http_core` 与
+  `iaisf::tcp`，包含 HttpSession 和 HttpServer。
+
+Windows Debug/Release 已各实际执行 Foundation 43 + HTTP Core 83，共 126/126
+CTest；Release CLI smoke 成功，项目 warning 为 0。Linux adapter 源码和 16 项
+loopback 集成测试已实现，但当前提交尚无真实 Linux CI，因此不能写成已通过。
+`iaisf_server` 没有进入常驻模式。
 
 ## 2. 调查结果与设计来源
 
@@ -261,6 +275,7 @@ classDiagram
     class Acceptor
     class TcpServer
     class TcpConnection
+    class HttpServer
     class HttpSession
     class HttpParser
     class HttpRouter
@@ -290,7 +305,10 @@ classDiagram
     Acceptor *-- Channel
     TcpServer o-- TcpConnection
     TcpConnection *-- Channel
-    TcpConnection *-- HttpSession
+    HttpServer *-- TcpServer
+    HttpServer *-- HttpRouter
+    HttpServer o-- HttpSession
+    HttpSession ..> TcpConnection : weak/non-owning
     HttpSession *-- HttpParser
     HttpSession --> HttpRouter
 
@@ -357,7 +375,7 @@ Phase 2 的 wakeup Channel 和 Phase 3 的监听/连接 Channel 均使用 epoll 
 stateDiagram-v2
     [*] --> Connecting
     Connecting --> Connected: connect_established
-    Connected --> Disconnecting: peer EOF / shutdown / force_close / error
+    Connected --> Disconnecting: peer EOF / shutdown / close-after-write / force_close / error
     Disconnecting --> Disconnected: deferred connect_destroyed
     Connecting --> Disconnected: establishment cleanup
 ```
@@ -368,6 +386,11 @@ Disconnecting。因此服务停止采用明确的 force-close 策略。peer EOF 
 已读数据；若 message callback 产生输出，则排空后关闭。重复关闭不重复调用 close
 callback。TCP 不保留消息边界；message callback 负责 retrieve。EOF 后只交付本轮新增
 字节一次，部分或完全未消费的数据不会触发重复回调，并在连接销毁时丢弃。
+
+Phase 4 为 HTTP close 新增 `close_after_write()`：同样停止新 send，但排空 output
+后主动进入完整关闭与延迟销毁，不执行 write-half shutdown，也不等待 peer EOF。
+该操作 owner-thread-only、幂等，close callback 仍恰好一次。它不改变
+`shutdown()` 的半关闭契约。
 
 ### 8.5 内部清理、停止和回调边界
 
@@ -459,7 +482,7 @@ sequenceDiagram
 
 worker 完成任务后不得操作 Socket、Channel 或 epoll，也不得持有能直接操作连接的裸指针。需要通知网络侧时，worker 先写入跨线程完成队列，再写 `eventfd`；EventLoop 醒来后读取完成项，并由 EventLoop 线程更新连接状态或生成网络响应。
 
-## 9. HTTP 解析与会话
+## 9. HTTP 解析与会话（Phase 4 implemented）
 
 状态机：
 
@@ -476,17 +499,58 @@ stateDiagram-v2
     Complete --> RequestLine: keep-alive and buffered next request
 ```
 
-解析器按字节增量工作，不依赖 NUL 结尾，也不在不完整数据上保存悬空指针。限制在解析过程中立即检查：
+解析器按字节增量工作，不依赖 NUL 结尾，也不在不完整数据上保存悬空指针。每次返回本次消费字节数，HttpSession 立即从 TCP Buffer retrieve；body 分段复制到 Parser 自有有界字符串。限制在解析过程中立即检查：
 
-- 请求行长度、单 header 行、header 总字节数和 header 数量。
+- 请求行长度、单 header 行、header 总字节数和 header 数量；行限制包含 CRLF，
+  header total 包含所有行结尾和终止空行。
 - body 最大字节数。
-- `Content-Length` 必须是唯一、十进制、非负、无溢出的值。
+- 所有规范化 header name 必须唯一；`Content-Length` 必须是唯一、十进制、非负、
+  无溢出的值。
 - 同时出现 `Transfer-Encoding` 和 `Content-Length` 时拒绝。
-- chunked、multipart 和未知 transfer coding 首版不支持。
-- HTTP/1.1 要求 Host；GET/POST 之外按路由能力返回 405。
-- 路径只用于路由，不提供通用文件读取；拒绝 NUL、反斜杠、编码斜杠和 `..` 段。
+- chunked、trailers、Upgrade、Expect、multipart 和所有 transfer coding 不支持。
+- HTTP/1.1 要求恰好一个非空 Host；method 只做 token 校验，是否允许由精确路由决定。
+- 只接受 origin-form；不做 percent decode 或路径规范化，路径只用于精确路由，不提供通用文件读取。
 
-HTTP keep-alive 遵循 HTTP/1.1 默认持久连接和 `Connection: close`。首版允许顺序处理缓冲中的下一个请求，但不承诺并行 pipeline。
+`Connection` 按完整、大小写不敏感 token 解析；相似子串不等于 `close`，空 token
+和非法 token 被拒绝。HTTP keep-alive 遵循 HTTP/1.1 默认持久连接和
+`Connection: close`。顺序 pipeline
+每轮最多处理 `max_requests_per_dispatch`；剩余数据通过普通有界
+`queue_in_loop` continuation 继续，入队失败即 fail-closed。请求声明 close 或任一
+协议/内部错误后不再处理后续 pipeline。任意组合错误的映射由固定检查顺序决定，
+不依赖无序容器迭代。
+
+响应序列化在生成输出前预检 body、header count、单行和整个 head。响应计数包含
+自动生成的 `Content-Length` 与 `Connection`；字节限制包含状态行、每行 CRLF 和
+终止空行。失败不返回部分响应。HTTP `Connection: close` 调用
+`TcpConnection::close_after_write()`：拒绝后续 send，写尽当前输出后主动全关闭，
+不等待 peer EOF。原有 `shutdown()` 仍保留为写半关闭并等待 peer EOF 的独立契约。
+
+### 9.1 所有权和线程边界
+
+```mermaid
+flowchart LR
+    HS["HttpServer shared owner"] --> TS["TcpServer"]
+    HS --> R["frozen HttpRouter"]
+    HS --> M["connection-id → HttpSession"]
+    TS --> C["shared TcpConnection"]
+    M --> S["shared HttpSession"]
+    S -. "weak, non-owning" .-> C
+    S --> P["per-connection HttpParser"]
+    HS -. "non-owning" .-> E["EventLoop / ILogger"]
+```
+
+- TcpServer 继续拥有 TcpConnection；HTTP 层不改变 Channel/Socket/连接表销毁顺序。
+  `close_after_write()` 最终调用同一 close callback，连接表和 Session 表移除沿用
+  active batch 结束后执行的内部 `DeferredCleanup`，不受普通 pending queue 容量影响。
+- HttpSession 不拥有连接，也不注册 Channel；其 continuation 同时捕获 session 和
+  connection weak pointer，同时至多存在一个；只有二者仍存活、Session 非 terminal
+  且连接仍为 Connected 时才使用连接内部稳定 Buffer 地址继续 dispatch。
+- HttpServer callback 只捕获 weak server，不捕获裸 `this`；断连回调先标记 Session
+  terminal 再从表删除。
+- start/stop、解析、路由和 send 都是 owner-thread-only。Router handler 必须快速，
+  不得阻塞磁盘、网络或执行 AI；未来 worker 仍不得操作 HTTP/TCP/epoll 对象。
+- HttpServer stop 镜像 TcpServer：禁止 restart，active batch 内可能异步完成，
+  `stopped()` 同时要求底层 stopped 且 Session 表为空；未完成 stop 前析构是契约错误。
 
 ## 10. 请求数据流
 
@@ -565,7 +629,8 @@ flowchart LR
 
 - 连接、Channel、Buffer 和 HTTP 会话只在 EventLoop 线程访问。
 - Phase 3 只有 `EventLoop::queue_in_loop()` 与 `EventLoop::stop()` 是跨线程入口；
-  Acceptor start/stop、TcpServer start/stop、TcpConnection send/shutdown/force-close、
+  Acceptor start/stop、TcpServer start/stop、TcpConnection send/shutdown/close-after-write/
+  force-close、
   callback setter 和连接表操作均不保证线程安全，必须由 owner 执行。
 - `TaskRepository`、`ThreadPool::submit/stop` 和 Logger 写接口内部同步。
 - 插件初始化/关闭在工作线程启动前/停止后串行执行。
@@ -715,15 +780,12 @@ Phase 1 的 `Error` 保留公开字段以维持轻量值语义，因此调用者
 - 持久任务：以 `ITaskRepository` 抽象替换内存实现，但首版不引入数据库。
 - 可观测性：后续增加 metrics/tracing，不在当前阶段宣称已有。
 
-## 19. Phase 4 建议边界
+## 19. Phase 5 建议边界
 
-Phase 4 尚未开始。下一阶段建议只把 HTTP/1.1 字节协议适配到已经验证的 TCP 层：
+Phase 4 已实现但 Linux 验证仍 blocked。只有新提交的 Debug/Release Linux CI 完整
+通过后才可进入 Phase 5。下一阶段建议只实现有界工作队列、固定线程池、Task 值对象、
+内存 TaskRepository、合法状态转换、TaskManager 和不依赖插件的测试执行器。
 
-- `HttpRequest`、`HttpResponse`、增量 `HttpParser`、`HttpSession` 和最小 Router；
-- request line、headers、Content-Length、body 和 HTTP/1.1 keep-alive；
-- request line/header/body 硬上限、分段输入、malformed request fail-closed；
-- `GET /health`、`GET /version` 和对应 loopback 集成测试；
-- HTTP 回调仍在 EventLoop owner 线程执行，不运行耗时业务。
-
-Phase 4 暂不包含 ThreadPool、TaskRepository、TaskManager、PluginManager、timerfd、
-signalfd、异步日志、TLS、文件上传、AI 推理或 benchmark。
+Phase 5 不应提前实现 PluginManager、MockVision、timerfd/signalfd、异步日志、真实
+AI、机器人、Agent、动态 `.so`、多 Reactor 或 benchmark。worker 不能直接持有或
+操作 TcpConnection、HttpSession、Channel、Socket 或 epoll。

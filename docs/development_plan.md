@@ -212,26 +212,41 @@ docs: complete phase 3 validation record
 
 ## 7. Phase 4：HTTP 协议与健康路由
 
-状态：**planned，未开始**。
+状态：**implemented，Linux validation blocked（2026-07-30）**。
 
 目标：把 HTTP/1.1 增量协议适配到 Phase 3 TCP 字节流，不执行耗时业务。
 
-交付：
+已交付：
 
-- `HttpRequest`、`HttpResponse`、`HttpParser`、`HttpSession`、最小 `HttpRouter`
-- request line、headers、Content-Length、body
-- HTTP/1.1 keep-alive 基础语义
-- request line/header/body 大小与数量上限
-- `GET /health`、`GET /version`
-- 完整、逐字节/分段、malformed fail-closed、超限和 keep-alive 自动化测试
+- 可移植 `iaisf_http_core`：HttpStatus、严格 HttpLimits、HttpRequest/Response、
+  增量 HttpParser、冻结式 HttpRouter、built-in routes；
+- Linux-only `iaisf_http`：每连接 HttpSession、拥有 TcpServer/Router/Session 表的
+  HttpServer；
+- HTTP/1.1 only、origin-form、strict CRLF、Content-Length only、binary body；
+- Host/CL/TE/Expect/Upgrade 歧义防护、稳定 400/413/414/417/431/500/501/505；
+- 默认 keep-alive、Connection close、有限顺序 pipelining 和有界 continuation；
+- close-after-write 写尽后主动关闭、任意重复 header fail-closed、完整 Connection token；
+- 请求/响应共享 header count/line/total 硬限制，响应自动 framing 同样计入；
+- continuation 单实例和 active-batch-safe Session 清理；
+- `/health`、`/version`，但 CLI 仍不启动常驻服务；
+- 83 项 portable Core 测试和 16 项 Linux loopback integration 测试定义；
+- workflow 显式构建四个 HTTP target。
 
-验收：
+已完成的本地验收：
 
-- parser 不把 TCP read 边界当消息边界；
-- 非完整请求返回 NeedMore，不提前生成 400；
-- 未知路由、方法、非法 JSON、错误 Content-Length 和超限有稳定响应；
-- `/health` 通过真实 loopback 集成测试；
-- HTTP handler 仍在 owner 线程，只做短小处理。
+- Windows VS2022 Debug/Release clean build 均成功；
+- 每个配置 Foundation 43/43 + HTTP Core 83/83，共 126/126 CTest；
+- Release version/config smoke exit 0；
+- 项目 MSVC warning 0；本机仍有既知 vcpkg applocal `pwsh.exe` 非致命诊断；
+- Parser 不依赖 TCP read 边界，NeedMore 不生成错误；走私与超限映射由 core tests
+  覆盖。
+
+尚未完成的验收：
+
+- 本机没有 Linux/WSL，未编译 `iaisf_http` 或运行 16 项 integration；
+- 需要 warning-free Ubuntu 24.04 Debug/Release CI，实际构建 HTTP targets 并执行
+  Foundation/Reactor/TCP/HTTP 全矩阵；
+- CI 前不得标记 completed，也不得开始 Phase 5。
 
 明确不包含 ThreadPool、TaskRepository、TaskManager、PluginManager、timerfd、
 signalfd、异步日志、TLS、文件上传、AI 推理或 benchmark。
@@ -239,10 +254,12 @@ signalfd、异步日志、TLS、文件上传、AI 推理或 benchmark。
 建议 commit message：
 
 ```text
-feat(http): implement HTTP parser and health route
+feat: implement HTTP protocol layer
 ```
 
 ## 8. Phase 5：线程池与任务系统
+
+状态：**planned，未开始**。
 
 目标：实现无需插件也可测试的异步任务生命周期。
 
