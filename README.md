@@ -2,7 +2,7 @@
 
 面向工业 AI 应用的 C++ 高性能任务服务框架。
 
-> 当前状态：`PHASE_4_HTTP_PROTOCOL_IMPLEMENTED_LINUX_VALIDATION_BLOCKED`。Phase 4 已实现可移植 HTTP/1.1 Core 和 Linux TCP adapter；Windows Visual Studio 2022 Debug/Release 均实际构建 `iaisf_http_core`、执行 Foundation 43 + HTTP Core 83，共 126/126 CTest 通过，项目 warning 为 0。Linux-only `HttpSession/HttpServer` 与 16 项集成测试尚未由新提交的真实 Linux CI 验证，因此不能标记 Phase 4 completed。
+> 当前状态：`PHASE_4_HTTP_PROTOCOL_COMPLETED`。Phase 4 HTTP/1.1 Core 与 Linux TCP adapter 已完成；Windows Visual Studio 2022 Debug/Release 均为 127/127，最终 [Linux CI run 30539245789](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30539245789) 在 Ubuntu 24.04.4 LTS、GCC 13.3.0、CMake 3.31.6 上完成 Debug/Release configure、build 和 239/239 CTest，项目源码与测试 warning 为 0。
 
 ## 项目定位
 
@@ -73,7 +73,7 @@ Phase 2B 固定了以下并发语义：
 
 Phase 3 的线程边界不是“TCP 层整体线程安全”：只有 `EventLoop::queue_in_loop()` 和 `stop()` 可跨线程；Acceptor、TcpServer、TcpConnection、Buffer 和 Channel 的普通操作都属于 EventLoop owner 线程。
 
-## Phase 4 已实现，等待 Linux CI
+## Phase 4 已完成
 
 - Windows/Linux 可移植 `iaisf_http_core` / `iaisf::http_core`：`HttpStatus`、`HttpLimits`、`HttpRequest`、`HttpResponse`、增量 `HttpParser`、冻结式 `HttpRouter` 和内置路由
 - Linux-only `iaisf_http` / `iaisf::http`：每连接 `HttpSession` 和组合 `TcpServer` 的 `HttpServer`
@@ -83,11 +83,12 @@ Phase 3 的线程边界不是“TCP 层整体线程安全”：只有 `EventLoop
 - 所有重复 header name（ASCII 大小写不敏感）均 fail-closed；Host 必须恰好一个；CL+TE、歧义长度和 obs-fold 拒绝；Transfer-Encoding/chunked 返回 501，Expect 返回 417
 - `Connection` 只按 comma-separated 的完整、大小写不敏感 token 识别 `close`，相似子串不匹配，空 token 或非法 token 拒绝
 - `HttpResponse` 自动生成 Content-Length/Connection，拒绝 framing header 覆盖和 CRLF 注入；响应 header count、单行和 head total 预检包含自动 framing 行，失败不返回部分响应
+- 请求和响应共享 Header 容量限制；若配置小到无法容纳框架标准错误响应，序列化预检失败且连接 fail-closed，不发送截断或无 framing 的响应
 - 精确 method+path 路由、稳定 404/405 + Allow、handler Error/异常隔离为关闭连接的 500
 - `Connection: close` 使用写尽后全关闭，不等待客户端先发 EOF；`shutdown()` 保留为独立的半关闭契约
 - 每个 Session 同时至多一个 continuation；弱引用和连接状态检查避免停服/断连后再次 dispatch；Session 移除沿用不受普通 pending queue 容量影响的 `DeferredCleanup`
 - 显式注册 `GET /health`（只表示 HTTP/EventLoop 可响应）与 `GET /version`
-- 83 项可移植 HTTP Core 测试已在 Windows Debug/Release 实际通过；16 项 Linux loopback/port-0 集成测试已定义，等待真实 CI
+- 84 项可移植 HTTP Core 与 16 项 Linux loopback/port-0 集成测试已由最终 CI 验证；原失败的 framing/limits 集成测试在 Debug/Release 均通过
 
 不支持 HTTP/1.0、HTTP/2、absolute/authority/asterisk-form、chunked、trailers、Upgrade、Expect、percent-decoding、路径规范化、动态路由、流式 body、TLS 或 WebSocket。
 
@@ -113,7 +114,7 @@ Phase 2 (completed)
 Phase 3 (completed)
   IPv4 endpoint / bounded Buffer / Acceptor / TcpConnection / TcpServer
 
-Phase 4 (implemented; Linux validation blocked)
+Phase 4 (completed)
   HTTP/1.1 core / Router / Session / HttpServer / built-in health and version
 
 Later phases (planned)
@@ -176,7 +177,7 @@ Smoke：
 脚本会显式传入 `-DIAISF_BUILD_LINUX_NETWORK=ON`。首次功能 [Linux CI run 30514521602](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30514521602) 对应 Reactor 实现提交 `f76993e09767a2d6b6e1cbd2bcb22cfa1df6f74f`，功能和测试通过，但 Release 测试构建存在 2 条 `-Wunused-result` warning。提交 `4db8708a5121f8477d835addd0b16170a3e2054f` 修复这两处返回值检查；最终 [Linux CI run 30516007475](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30516007475) 在 Ubuntu 24.04.4 LTS、GCC 13.3.0、CMake 3.31.6 上完成 Debug/Release configure、build 和 87/87 CTest，两个配置均实际执行 44/44 Reactor 测试，Release 两项 CLI smoke 成功，项目源码和测试 warning 均为 0。两个 job 和所有步骤均成功，没有 failed、cancelled、skipped、neutral 或 `continue-on-error`。完整状态见 [stage_status.md](docs/stage_status.md)，构建说明见 [linux_build.md](docs/linux_build.md)。
 
 Phase 3 最终 [Linux CI run 30524686201](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30524686201) 在两个 job 中实际构建 `iaisf_tcp` 和 `iaisf_tcp_tests`，随后执行完整 CTest；Debug/Release 均为 138/138，通过数按实际日志核对为 Foundation 43、Reactor 45、TCP 50。
-Phase 4 workflow 已增加对 `iaisf_http_core`、`iaisf_http_core_tests`、`iaisf_http`、`iaisf_http_tests` 的显式构建；当前尚无对应新提交的真实 run URL/结果，不能沿用 Phase 3 run 作为 HTTP 验证。
+Phase 4 实现提交为 `9b87fdb8804ee37a8cf3b87a7b9193a3130b85d3`。首次 [Linux CI run 30537924856](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30537924856) 的 Debug/Release 各有 237/238 通过；唯一失败源于集成测试把响应 Header 单行上限设为 32 字节，小于框架固定错误响应 `Content-Type` 行的 41 字节，导致预检后 fail-closed。修复提交 `0818ebf4f71366cc3cd2fe4e36e95fe667b687a5` 将 fixture 调整到精确 41 字节并增加 portable 边界回归。最终 push [Linux CI run 30539245789](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30539245789) 实际构建四个 HTTP target，Debug/Release 均为 Foundation 43、Reactor 45、TCP 51、HTTP Core 84、HTTP Integration 16，合计 239/239；Release version/config smoke 成功，项目 warning 为 0。
 
 ## 命令行
 
@@ -293,7 +294,7 @@ ctest --test-dir build/linux-release --output-on-failure
 - CTest CLI version 和 example-config smoke
 - Linux `UniqueFd`、Socket、Channel、EpollPoller 和 EventLoop
 
-真实结果见 [stage_status.md](docs/stage_status.md)。Phase 4 Windows/MSVC Debug/Release 均为 126/126：Foundation 43/43、HTTP Core 83/83；Release `--version` 与示例配置 smoke 均成功，项目 warning 为 0。当前 Linux 源码定义矩阵为 Foundation 43 + Reactor 45 + TCP 51 + HTTP Core 83 + HTTP integration 16 = 238 项，但这只是源码定义合计，必须等 Phase 4 CI 的 CTest 实际输出后才能写成通过。Phase 3 的历史封板结果仍是 TCP 50/50、合计 138/138；新增的 1 项 TCP close-after-write 回归属于本轮未验证源码，不能回写为历史 CI 结果。
+真实结果见 [stage_status.md](docs/stage_status.md)。Phase 4 Windows/MSVC Debug/Release 均为 127/127：Foundation 43/43、HTTP Core 84/84。Linux Debug/Release 均实际执行 Foundation 43/43、Reactor 45/45、TCP 51/51、HTTP Core 84/84、HTTP Integration 16/16，合计 239/239；Release `--version` 与示例配置 smoke 成功，项目源码和测试 warning 为 0。Phase 3 的历史封板结果仍保持 TCP 50/50、合计 138/138，不回写后续新增测试。
 
 ## 项目结构
 

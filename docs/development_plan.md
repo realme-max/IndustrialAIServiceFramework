@@ -212,7 +212,7 @@ docs: complete phase 3 validation record
 
 ## 7. Phase 4：HTTP 协议与健康路由
 
-状态：**implemented，Linux validation blocked（2026-07-30）**。
+状态：**completed（2026-07-30）**。
 
 目标：把 HTTP/1.1 增量协议适配到 Phase 3 TCP 字节流，不执行耗时业务。
 
@@ -229,32 +229,43 @@ docs: complete phase 3 validation record
 - 请求/响应共享 header count/line/total 硬限制，响应自动 framing 同样计入；
 - continuation 单实例和 active-batch-safe Session 清理；
 - `/health`、`/version`，但 CLI 仍不启动常驻服务；
-- 83 项 portable Core 测试和 16 项 Linux loopback integration 测试定义；
+- 84 项 portable Core 测试和 16 项 Linux loopback integration 测试；
 - workflow 显式构建四个 HTTP target。
 
 已完成的本地验收：
 
 - Windows VS2022 Debug/Release clean build 均成功；
-- 每个配置 Foundation 43/43 + HTTP Core 83/83，共 126/126 CTest；
+- 每个配置 Foundation 43/43 + HTTP Core 84/84，共 127/127 CTest；
 - Release version/config smoke exit 0；
 - 项目 MSVC warning 0；本机仍有既知 vcpkg applocal `pwsh.exe` 非致命诊断；
 - Parser 不依赖 TCP read 边界，NeedMore 不生成错误；走私与超限映射由 core tests
   覆盖。
 
-尚未完成的验收：
+最终 Linux 验收：
 
-- 本机没有 Linux/WSL，未编译 `iaisf_http` 或运行 16 项 integration；
-- 需要 warning-free Ubuntu 24.04 Debug/Release CI，实际构建 HTTP targets 并执行
-  Foundation/Reactor/TCP/HTTP 全矩阵；
-- CI 前不得标记 completed，也不得开始 Phase 5。
+- Phase 4 实现提交：`9b87fdb8804ee37a8cf3b87a7b9193a3130b85d3`；
+- 首次 run `30537924856` 的 Debug/Release 均为 237/238；唯一失败是测试 fixture
+  的 32 字节响应 Header 单行上限无法容纳 41 字节固定错误 `Content-Type` 行，
+  Parser 已得到 400，但错误响应预检后按既定策略 fail-closed；
+- 修复提交：`0818ebf4f71366cc3cd2fe4e36e95fe667b687a5`，将集成 fixture 调整为
+  精确 41 字节并增加 portable 响应边界测试；
+- 最终 push [Linux CI run 30539245789](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30539245789)
+  在 Ubuntu 24.04.4 LTS、GCC 13.3.0、CMake 3.31.6 上完成 Debug/Release
+  configure/build；两个配置均为 239/239，分项为 Foundation 43、Reactor 45、
+  TCP 51、HTTP Core 84、HTTP Integration 16；
+- 原失败测试 `HttpServerTest.RejectsFramingAmbiguitiesAndConfiguredLimits` 在两个
+  配置中均实际通过；Release version/config smoke 成功，项目源码与测试 warning 为 0；
+- run、两个 job 和全部步骤均为 success，没有 failed、cancelled、skipped、neutral、
+  timeout 或 `continue-on-error`。
 
 明确不包含 ThreadPool、TaskRepository、TaskManager、PluginManager、timerfd、
 signalfd、异步日志、TLS、文件上传、AI 推理或 benchmark。
 
-建议 commit message：
+实现提交：
 
 ```text
-feat: implement HTTP protocol layer
+9b87fdb feat: implement HTTP protocol layer
+0818ebf test: fix HTTP error response limit fixture
 ```
 
 ## 8. Phase 5：线程池与任务系统

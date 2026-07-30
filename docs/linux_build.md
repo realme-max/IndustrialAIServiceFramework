@@ -4,8 +4,8 @@
 
 IndustrialAIServiceFramework 的 Phase 2 Reactor、Phase 3 TCP Transport 和 Phase 4
 HTTP adapter 直接使用 epoll、eventfd、accept4 和 POSIX Socket；HTTP Core 本身可移植，
-但 HttpSession/HttpServer 与 loopback integration 仍必须在 Linux 验证。timerfd 与
-signalfd 仍是后续计划。
+HttpSession/HttpServer 与 loopback integration 已由最终 GitHub Actions Linux CI
+验证。timerfd 与 signalfd 仍是后续计划。
 Windows MinGW 或 MSVC 可以帮助发现一部分可移植 C++ 问题，但不能替代真实 Linux
 构建、测试和运行验证。
 
@@ -302,7 +302,7 @@ checkout 阶段的 `git init` 默认分支提示包含单词 “warning”；项
 warning 均为 0。当前 Windows 宿主仍没有可运行的 Linux/WSL；上述结论来自 CI，
 不代表本机执行过 Linux build。
 
-## 13. Phase 4 Linux 验证入口
+## 13. Phase 4 Linux 最终验证
 
 Phase 4 保持相同命令和 `IAISF_BUILD_LINUX_NETWORK=ON`。成功 configure 后应存在：
 
@@ -313,28 +313,65 @@ iaisf_http
 iaisf_http_tests
 ```
 
-测试定义：
+最终测试矩阵：
 
 ```text
 Foundation 43
 Reactor 45
 TCP 51
-HTTP Core 83
+HTTP Core 84
 HTTP integration 16
-Source-defined total 238
+CTest total 239
 ```
 
-238 目前只是源码定义合计，不是 Linux PASS 数。Phase 3 的最终 CI 历史结果仍是
-TCP 50/50、总计 138/138；新增第 51 项 TCP 测试验证 HTTP 所需的
-`close_after_write()` 传输契约，尚未由 Linux 执行。正式 Phase 4 run 必须确认 Debug/Release
-configure/build、四个 HTTP target、完整 CTest、Release version/config smoke 和项目
-源码/测试 warning 0；还必须核对没有 failed/cancelled/skipped/neutral 或
-`continue-on-error`。CI 证据必须对应 Phase 4 提交的 head/checkout SHA。
+Phase 3 的最终 CI 历史结果仍是 TCP 50/50、总计 138/138；第 51 项 TCP 测试验证
+HTTP 所需的 `close_after_write()` 传输契约，已在 Phase 4 最终矩阵中通过，不回写
+Phase 3 历史结果。
 
 当前本机没有可运行 WSL/Linux，因此：
 
-- Windows Debug/Release 已验证 `iaisf_http_core` 和 83 项 core tests；
+- Windows Debug/Release 已验证 `iaisf_http_core` 和 84 项 core tests，均为 127/127；
 - 本机没有编译 `iaisf_http`，没有运行 loopback integration；
 - Phase 3 run `30524686201` 不能作为 Phase 4 结果；
-- Phase 4 当前状态保持
-  `PHASE_4_HTTP_PROTOCOL_IMPLEMENTED_LINUX_VALIDATION_BLOCKED`。
+- Phase 4 Linux 结论来自下述可追溯的最终 push run。
+
+### 13.1 失败与修复历史
+
+实现提交 `9b87fdb8804ee37a8cf3b87a7b9193a3130b85d3` 对应的首次
+[run 30537924856](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30537924856)
+在 Debug/Release 各执行 238 项，均为 237/238。唯一失败测试
+`HttpServerTest.RejectsFramingAmbiguitiesAndConfiguredLimits` 使用 32 字节响应
+Header 单行上限，小于固定错误 `Content-Type` 行含 CRLF 的 41 字节。Parser 已将
+缺失 Host 映射为 400，但错误响应序列化预检失败，Session 按既有策略 fail-closed。
+
+修复提交 `0818ebf4f71366cc3cd2fe4e36e95fe667b687a5` 把 fixture 调整为精确
+41 字节，仍由 44 字节请求 Header 验证 431，并新增 portable exact-limit 测试。
+
+### 13.2 最终 CI 证据
+
+| 项目 | 结果 |
+|---|---|
+| workflow | Linux CI |
+| run | [30539245789](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30539245789) |
+| attempt / event / conclusion | 1 / push / success |
+| branch | `phase/4-http-protocol` |
+| head / checkout / local / upstream | `0818ebf4f71366cc3cd2fe4e36e95fe667b687a5` |
+| runner / OS | `ubuntu-24.04` / Ubuntu 24.04.4 LTS |
+| GCC / CMake | 13.3.0 / 3.31.6 |
+| Debug | configure/build pass；239/239，0 failed |
+| Release | configure/build pass；239/239，0 failed |
+| HTTP | Core 84/84；Integration 16/16；原失败测试通过 |
+| HTTP targets | 四个 target 在 Debug/Release 均实际构建 |
+| warning | 项目源码 0；项目测试 0 |
+| 非成功或掩盖 | failed/cancelled/skipped/neutral/timeout/continue-on-error 均为 0 |
+
+Release smoke：
+
+```text
+IndustrialAIServiceFramework 0.1.0
+2026-07-30T11:38:17.579Z [INFO] [Application] configuration validated for service IndustrialAIServiceFramework
+```
+
+同 SHA 的 PR run checkout 了 GitHub 临时 merge commit，因此最终封板选择 checkout
+SHA 与本地 HEAD/upstream 完全一致的 push run。Phase 4 状态为
+`PHASE_4_HTTP_PROTOCOL_COMPLETED`。

@@ -2,10 +2,11 @@
 
 ## 1. 范围与状态
 
-Phase 4 已实现 HTTP 协议库，状态为
-`PHASE_4_HTTP_PROTOCOL_IMPLEMENTED_LINUX_VALIDATION_BLOCKED`。可移植
-`iaisf_http_core` 已在 Windows Debug/Release 各通过 83/83 HTTP Core 测试；
-Linux-only `iaisf_http` 和 16 项 loopback 集成测试仍等待新提交的真实 Linux CI。
+Phase 4 HTTP 协议库状态为 `PHASE_4_HTTP_PROTOCOL_COMPLETED`。可移植
+`iaisf_http_core` 已在 Windows Debug/Release 各通过 84/84 HTTP Core 测试；
+最终 [Linux CI run 30539245789](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30539245789)
+的 Debug/Release 均为 239/239，其中 HTTP Core 84/84、Linux-only
+HttpSession/HttpServer integration 16/16。
 
 当前 CLI 不启动监听；`/health`、`/version` 是显式注册到 `HttpRouter` 后由
 `HttpServer` API 提供的能力。后文任务 JSON API 仍是 planned，不得当作当前端点。
@@ -62,6 +63,10 @@ Linux-only `iaisf_http` 和 16 项 loopback 集成测试仍等待新提交的真
 request line、method/target 和 header line/total 做跨字段校验，不静默 clamp。
 `max_header_line_bytes`、`max_header_bytes` 与 `max_header_count` 同时约束请求和响应；
 请求 total 从第一个 header 字节计至终止空行，响应 total 还包含状态行和自动 framing。
+若响应限制小到连框架标准错误响应也无法容纳，`serialize()` 在发送任何字节前失败，
+Session 按 fail-closed 策略关闭连接；不会发送缺少 `Content-Length`/`Connection`
+的降级响应，也不会发送部分 Header。当前固定错误 `Content-Type` 行含 CRLF 为
+41 字节，边界测试明确覆盖该精确容量。
 
 ### 3.1 Parser 状态与错误映射
 
@@ -395,9 +400,10 @@ Echo 用于框架验证，不代表工业算法。
 | 分段但合法的 request line/header/body | 缓存并等待更多字节 |
 | 裸 LF、非法 header 名、header 无冒号 | 400，关闭 |
 | 重复且值不同的 Content-Length | 400，关闭 |
-| Content-Length 溢出/负数/非十进制 | 400，关闭 |
+| Content-Length 负数/非十进制 | 400，关闭 |
+| Content-Length 数字溢出或超过 body 上限 | 413，关闭 |
 | 同时有 Transfer-Encoding 和 Content-Length | 400，关闭 |
-| chunked | 501 或 400，固定一种实现并测试，关闭 |
+| chunked / 其他 Transfer-Encoding | 501，关闭 |
 | body 超限 | 尽早 413，关闭，不继续缓存 body |
 | JSON 解析失败 | 400，可按 keep-alive 策略关闭 |
 | 未知路由 | 404 |
