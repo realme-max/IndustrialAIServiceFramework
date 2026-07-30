@@ -842,7 +842,7 @@ TEST(HttpServerTest, SequentialKeepAliveServesVersion404And405Allow) {
 
 TEST(HttpServerTest, RejectsFramingAmbiguitiesAndConfiguredLimits) {
     auto limits_result =
-        HttpLimits::create(256, 32, 128, 32, 256, 8, 4, 1024, 16, 4);
+        HttpLimits::create(256, 32, 128, 41, 256, 8, 4, 1024, 16, 4);
     ASSERT_TRUE(limits_result);
     auto limits = std::move(limits_result).value();
     RecordingLogger logger;
@@ -902,7 +902,8 @@ TEST(HttpServerTest, RejectsFramingAmbiguitiesAndConfiguredLimits) {
     auto run = loop->run();
     client.join();
     ASSERT_TRUE(run);
-    EXPECT_TRUE(client_result.get().empty());
+    const std::string client_error = client_result.get();
+    EXPECT_TRUE(client_error.empty()) << client_error;
     EXPECT_TRUE(server->stop());
     EXPECT_EQ(server->session_count(), 0U);
     server.reset();
