@@ -718,7 +718,9 @@ TEST(EventLoopTest, ChannelRemovalIsDeferredUntilTheActiveBatchCompletes) {
         &deferred_queue_succeeded,
         &first_callback_count] {
         std::uint64_t value = 0U;
-        static_cast<void>(::read(first_channel.fd(), &value, sizeof(value)));
+        const ssize_t bytes_read =
+            ::read(first_channel.fd(), &value, sizeof(value));
+        EXPECT_EQ(bytes_read, static_cast<ssize_t>(sizeof(value)));
         ++first_callback_count;
 
         auto direct_result = second_channel.remove();
@@ -743,7 +745,9 @@ TEST(EventLoopTest, ChannelRemovalIsDeferredUntilTheActiveBatchCompletes) {
         &second_channel,
         &second_callback_count] {
         std::uint64_t value = 0U;
-        static_cast<void>(::read(second_channel.fd(), &value, sizeof(value)));
+        const ssize_t bytes_read =
+            ::read(second_channel.fd(), &value, sizeof(value));
+        EXPECT_EQ(bytes_read, static_cast<ssize_t>(sizeof(value)));
         ++second_callback_count;
     });
     auto first_update = first_channel.update();
