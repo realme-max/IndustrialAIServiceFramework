@@ -2,7 +2,7 @@
 
 ## 1. 状态与原则
 
-Phase 1 已实现基础单元测试和 CLI smoke，并在 Phase 1B 加强 Error 边界、Result 引用类别、配置数值类型和 UTF-8 字节限制覆盖。Phase 2 Reactor 最终 [GitHub Actions Linux CI run 30516007475](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30516007475) 已完成 Debug、Release、87/87 CTest 和 Release smoke 零 warning 验证。Phase 3 当前源码定义 50 个 TCP 测试，并新增 1 个 Reactor internal-cleanup 测试，但尚未在对应提交上运行真实 Linux CI，当前状态为 `PHASE_3_TCP_TRANSPORT_IMPLEMENTED_LINUX_VALIDATION_BLOCKED`。
+Phase 1 已实现基础单元测试和 CLI smoke，并在 Phase 1B 加强 Error 边界、Result 引用类别、配置数值类型和 UTF-8 字节限制覆盖。Phase 2 Reactor 最终 [GitHub Actions Linux CI run 30516007475](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30516007475) 已完成 Debug、Release、87/87 CTest 和 Release smoke 零 warning 验证。Phase 3 最终 [Linux CI run 30524686201](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30524686201) 已完成 Debug/Release 138/138 CTest，其中 Foundation 43、Reactor 45、TCP 50，当前状态为 `PHASE_3_TCP_TRANSPORT_COMPLETED`。
 
 测试原则：
 
@@ -247,13 +247,9 @@ RAII 客户端 fd 覆盖；`/proc/<pid>/fd` 数量稳定性仍需真实 Linux �
 | `test_tcp_connection.cpp` | 6 | 参数/状态、close once、non-owner/state send、all-or-failure、graceful shutdown、确定性 EPOLLOUT/high-water 重武装与异常 |
 | `test_tcp_server.cpp` | 20 | binary/分片/大流 Echo、多连接、容量、半关闭/输入消费、RST、回调异常、满队列清理、延迟移除/最后强引用释放、stop/table/destructor lifecycle |
 
-合计 **50 个源码 `TEST` 定义**。Phase 3B 另在 `test_event_loop.cpp` 增加 1 项内部
-clean-up lane 测试，使当前 Reactor 源码定义为 45。这不是 CTest 的真实 Linux
-发现/通过数；只有新提交
-在 GitHub Actions 的 Debug/Release 日志中实际发现并执行后才能记录总数。若全部被
-GoogleTest discovery 注册，源码算术组合为 Phase 1 的 43 + Reactor 45 + TCP 50 =
-138，
-但不得把该算术值写成 CI 结果。
+合计 **50 个 `TEST`**。Phase 3B 另在 `test_event_loop.cpp` 增加 1 项内部
+clean-up lane 测试，使 Reactor 为 45 项。Linux CI 的 Debug/Release CTest 日志均
+实际发现并执行 Foundation 43、Reactor 45、TCP 50，合计 138 项，并全部通过。
 
 关键测试策略：
 
@@ -289,13 +285,17 @@ GoogleTest discovery 注册，源码算术组合为 Phase 1 的 43 + Reactor 45 
 | Windows VS2022 Debug，network OFF | pass | pass | 43/43 | CTest 内 2 项 pass | 只验证 Phase 1 回归 |
 | Windows VS2022 Release，network OFF | pass | pass | 43/43 | version/config exit 0 | 不编译 TCP |
 | 本机 Linux/WSL | unavailable | 未执行 | 未执行 | 未执行 | 不能替代 CI |
-| Phase 3 GitHub Actions | workflow 已更新 | 尚未运行 | 尚未运行 | 尚未运行 | 当前封板阻塞 |
+| Phase 3 GitHub Actions Debug | pass | pass | 138/138 | CTest 内 2 项 pass | TCP 50/50 |
+| Phase 3 GitHub Actions Release | pass | pass | 138/138 | version/config pass | TCP 50/50 |
 
-workflow 在 Debug/Release build 后分别显式构建 `iaisf_tcp` 和
-`iaisf_tcp_tests`，再运行完整 CTest；不使用 `continue-on-error`。正式 Linux
-验收必须记录两个 job 的真实 configure/build、CTest 总数、50 项 TCP 和新增 Reactor
-cleanup 测试是否实际
-执行、smoke 和项目源码/测试 warning。
+最终证据为 [Linux CI run 30524686201](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30524686201)，
+对应提交 `0a45658d0e450dd9dfde052808a27ae92ad08881`、push event、attempt 1。两个 job
+均实际构建 `iaisf_tcp` 和 `iaisf_tcp_tests`，再运行完整 CTest。Debug 与 Release
+均为 138/138、0 failed；按实际 CTest 顺序核对为 Foundation 43/43、Reactor 45/45、
+TCP 50/50。Release smoke 输出版本 `IndustrialAIServiceFramework 0.1.0`，示例配置
+输出包含 `configuration validated for service IndustrialAIServiceFramework`。
+项目源码 warning 0、项目测试 warning 0；没有失败、取消、跳过、中性结论或
+`continue-on-error`。
 
 2026-07-30 的本轮 Windows clean build 未出现项目 C++ warning。Visual Studio 本机
 vcpkg applocal 在 executable 后打印缺少 `pwsh.exe` 的非致命辅助诊断；两个 build

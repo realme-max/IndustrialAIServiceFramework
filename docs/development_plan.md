@@ -156,7 +156,7 @@ docs: complete phase 2 validation record
 
 ## 6. Phase 3：TCP 连接层
 
-状态：**implemented，Linux validation blocked（2026-07-30）**。
+状态：**completed（2026-07-30）**。
 
 目标：在现有单 Reactor Core 上建立完整、可测试的 TCP 连接生命周期，不引入 HTTP 或业务执行。
 
@@ -186,14 +186,16 @@ docs: complete phase 2 validation record
 - 三个 shell 脚本 `bash -n`、workflow YAML 解析和 `git diff --check` 通过；
 - Windows 项目源码 warning 为 0；已知 `pwsh.exe` 诊断仍来自本机 VS/vcpkg 环境。
 
-尚未完成的验收：
+已完成 Linux 验收：
 
-- 当前 Phase 3 工作区尚未 commit/push；
-- 新 `iaisf_tcp`、`iaisf_tcp_tests` 和 50 项 TCP 测试，以及新增的 1 项 Reactor
-  cleanup 测试，尚未在真实 Linux 编译、发现或执行；
-- 当前源码静态定义基础 43、Reactor 45、TCP 50，合计 138；该数字不是 CTest PASS；
-- Linux Debug/Release CTest 总数、warning、fd/lifecycle 结果必须以新提交的 GitHub
-  Actions 日志为准，不能沿用 Phase 2 run 或由源码数量推断。
+- Phase 3 最终实现提交：`0a45658d0e450dd9dfde052808a27ae92ad08881`；
+- GitHub Actions：[Linux CI run 30524686201](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30524686201)，push event，attempt 1，conclusion `success`；
+- runner/工具链：`ubuntu-24.04`、Ubuntu 24.04.4 LTS、GCC 13.3.0、CMake 3.31.6；
+- Debug/Release configure 与 build 均成功，`iaisf_tcp` 和 `iaisf_tcp_tests` 均实际构建；
+- Debug/Release 均为 138/138 CTest 通过：Foundation 43、Reactor 45、TCP 50；
+- Release version/config smoke 成功，项目源码和测试 warning 均为 0；
+- head SHA、两个 job 的 checkout SHA、本地 HEAD 和 upstream 完全一致；没有
+  failed、cancelled、skipped、neutral 或 `continue-on-error`。
 
 明确不包含：
 
@@ -202,10 +204,10 @@ docs: complete phase 2 validation record
 - timerfd、signalfd、异步日志
 - AI 推理、工业业务插件或 benchmark
 
-建议 commit message：
+Phase 3 验证记录建议 commit message：
 
 ```text
-feat: implement TCP transport layer
+docs: complete phase 3 validation record
 ```
 
 ## 7. Phase 4：HTTP 协议与健康路由
@@ -217,11 +219,11 @@ feat: implement TCP transport layer
 交付：
 
 - `HttpRequest`、`HttpResponse`、`HttpParser`、`HttpSession`、最小 `HttpRouter`
-- GET/POST、request line、headers、Content-Length、body、JSON
+- request line、headers、Content-Length、body
 - HTTP/1.1 keep-alive 基础语义
 - request line/header/body 大小与数量上限
-- `GET /health`
-- 完整、逐字节/分段、非法、超限和 keep-alive 自动化测试
+- `GET /health`、`GET /version`
+- 完整、逐字节/分段、malformed fail-closed、超限和 keep-alive 自动化测试
 
 验收：
 

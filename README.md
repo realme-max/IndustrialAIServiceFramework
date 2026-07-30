@@ -2,7 +2,7 @@
 
 面向工业 AI 应用的 C++ 高性能任务服务框架。
 
-> 当前状态：`PHASE_3_TCP_TRANSPORT_IMPLEMENTED_LINUX_VALIDATION_BLOCKED`。Phase 2 已由最终 [GitHub Actions Linux CI run 30516007475](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30516007475) 完成零 warning 验证；Phase 3 TCP Transport 已在当前未提交工作区实现并完成容量、清理和生命周期审计，当前定义 50 个 Linux-only TCP 测试，另为 Reactor 内部清理通道增加 1 项测试。代码尚未 commit、push，也未在对应提交上运行真实 Linux CI，因此不能标记 completed。Windows Visual Studio 2022 Debug/Release 网络关闭回归均为 43/43，版本与示例配置 smoke 均 exit 0。HTTP 尚未实现。
+> 当前状态：`PHASE_3_TCP_TRANSPORT_COMPLETED`。Phase 3 实现提交 `0a45658d0e450dd9dfde052808a27ae92ad08881` 已由 [GitHub Actions Linux CI run 30524686201](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30524686201) 在 Ubuntu 24.04.4 LTS、GCC 13.3.0、CMake 3.31.6 上完成 Debug/Release 验证：两种配置均为 138/138 CTest 通过，其中 Foundation 43、Reactor 45、TCP 50；`iaisf_tcp` 与 `iaisf_tcp_tests` 均实际构建，Release 版本与示例配置 smoke 成功，项目源码和测试 warning 均为 0。Windows Visual Studio 2022 Debug/Release 网络关闭回归均为 43/43。HTTP 尚未实现，Phase 4 尚未开始。
 
 ## 项目定位
 
@@ -52,7 +52,7 @@ Phase 2B 固定了以下并发语义：
 - Created 允许预先入队；run 前 stop 会直接进入 Stopped 并取消尚未执行的回调。Running stop 进入 Stopping，唤醒 epoll，处理已接受回调后进入 Stopped。
 - 一个 Channel 回调抛异常时，该 Channel 本次剩余回调停止；EventLoop 记录异常并继续后续 active Channel。pending callback 异常同样不会终止循环。
 
-## Phase 3 已实现，等待 Linux CI
+## Phase 3 已完成
 
 - Linux-only `iaisf_tcp` 静态库与 `iaisf::tcp` alias，PUBLIC 依赖 `iaisf::net`
 - 仅支持数值 IPv4 的 `Ipv4Endpoint`，含端口 0、loopback/any、`sockaddr_in` round-trip
@@ -69,7 +69,7 @@ Phase 2B 固定了以下并发语义：
 - `send()` 采用 all-accepted-or-failure：首次系统发送前整包预留，failure 不写出或缓存本次前缀；可写回调中的部分内核写始终保留完整未写后缀
 - 普通 pending queue 满时，Acceptor stop 和连接表清理仍由不分配的内部 deferred-cleanup lane 最终执行
 - `TcpServer::stop()` owner-thread-only、幂等、永久禁止 restart；非 active 调用同步清空连接表，active 回调内调用则在批次后完成，`stopped()` 是完成屏障
-- 独立 `iaisf_tcp_tests`，当前源码定义 50 个测试；真实 Linux 发现数和结果待 CI
+- 独立 `iaisf_tcp_tests`；Linux Debug/Release 均实际发现并执行 50/50 TCP 测试
 
 Phase 3 的线程边界不是“TCP 层整体线程安全”：只有 `EventLoop::queue_in_loop()` 和 `stop()` 可跨线程；Acceptor、TcpServer、TcpConnection、Buffer 和 Channel 的普通操作都属于 EventLoop owner 线程。
 
@@ -83,7 +83,6 @@ Phase 3 的线程边界不是“TCP 层整体线程安全”：只有 `EventLoop
 - 异步日志、文件日志和日志轮转
 - TensorRT、PCL、真实点云、机器人或 Agent 能力
 - 性能压测和任何 QPS/延迟结论
-- Phase 3 对应提交的 Linux Debug/Release 构建、CTest、warning 与 fd/lifecycle 验证
 
 ## 架构 Roadmap
 
@@ -94,7 +93,7 @@ Phase 1 (completed)
 Phase 2 (completed)
   UniqueFd / Socket / Channel / EpollPoller / EventLoop / eventfd
 
-Phase 3 (implemented, Linux validation blocked)
+Phase 3 (completed)
   IPv4 endpoint / bounded Buffer / Acceptor / TcpConnection / TcpServer
 
 Later phases (planned)
@@ -156,7 +155,7 @@ Smoke：
 
 脚本会显式传入 `-DIAISF_BUILD_LINUX_NETWORK=ON`。首次功能 [Linux CI run 30514521602](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30514521602) 对应 Reactor 实现提交 `f76993e09767a2d6b6e1cbd2bcb22cfa1df6f74f`，功能和测试通过，但 Release 测试构建存在 2 条 `-Wunused-result` warning。提交 `4db8708a5121f8477d835addd0b16170a3e2054f` 修复这两处返回值检查；最终 [Linux CI run 30516007475](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30516007475) 在 Ubuntu 24.04.4 LTS、GCC 13.3.0、CMake 3.31.6 上完成 Debug/Release configure、build 和 87/87 CTest，两个配置均实际执行 44/44 Reactor 测试，Release 两项 CLI smoke 成功，项目源码和测试 warning 均为 0。两个 job 和所有步骤均成功，没有 failed、cancelled、skipped、neutral 或 `continue-on-error`。完整状态见 [stage_status.md](docs/stage_status.md)，构建说明见 [linux_build.md](docs/linux_build.md)。
 
-Phase 3 修改后的 workflow 会在两个 job 中显式构建 `iaisf_tcp` 和 `iaisf_tcp_tests`，随后执行完整 CTest；该 workflow revision 尚未 push 或运行。上段 run 只能证明 Phase 2 基线，不能证明当前 TCP 代码可在 Linux 编译或通过测试。
+Phase 3 最终 [Linux CI run 30524686201](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30524686201) 在两个 job 中实际构建 `iaisf_tcp` 和 `iaisf_tcp_tests`，随后执行完整 CTest；Debug/Release 均为 138/138，通过数按实际日志核对为 Foundation 43、Reactor 45、TCP 50。
 
 ## 命令行
 
@@ -273,7 +272,7 @@ ctest --test-dir build/linux-release --output-on-failure
 - CTest CLI version 和 example-config smoke
 - Linux `UniqueFd`、Socket、Channel、EpollPoller 和 EventLoop
 
-真实结果见 [stage_status.md](docs/stage_status.md)。Windows/MSVC Debug/Release 网络关闭回归均为 43/43；Phase 2 最终 Linux CI 的 Debug/Release 均实际执行 87 项并全部通过，其中当时 Reactor 测试 44/44，项目源码和测试 warning 均为 0。当前源码定义基础 43、Reactor 45、TCP 50，合计 138；新增或修改的 Linux-only 测试尚未在 Linux 实际发现或执行，不能提前声称 138 项通过。
+真实结果见 [stage_status.md](docs/stage_status.md)。Windows/MSVC Debug/Release 网络关闭回归均为 43/43。Phase 3 Linux CI 的 Debug/Release 均实际执行 138 项并全部通过：Foundation 43/43、Reactor 45/45、TCP 50/50；项目源码和测试 warning 均为 0，Release `--version` 与示例配置 smoke 均成功。
 
 ## 项目结构
 
