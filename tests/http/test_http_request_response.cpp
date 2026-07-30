@@ -283,5 +283,31 @@ TEST(HttpResponseTest, SerializesEveryRequiredErrorStatusWithoutPartialFailure) 
     }
 }
 
+TEST(HttpResponseTest, SerializesClosedErrorAtExactHeaderLineLimit) {
+    auto constrained_limits =
+        HttpLimits::create(256, 32, 128, 41, 256, 8, 4, 1024, 16, 4);
+    ASSERT_TRUE(constrained_limits);
+
+    const auto response = HttpResponse::error(HttpStatus::BadRequest);
+    const auto serialized =
+        response.serialize(constrained_limits.value());
+
+    ASSERT_TRUE(serialized);
+    EXPECT_NE(
+        serialized.value().find(
+            "Content-Type: text/plain; charset=utf-8\r\n"),
+        std::string::npos);
+    EXPECT_NE(
+        serialized.value().find("Content-Length: "),
+        std::string::npos);
+    EXPECT_NE(
+        serialized.value().find("Connection: close\r\n"),
+        std::string::npos);
+    EXPECT_EQ(
+        serialized.value().substr(
+            serialized.value().size() - response.body().size()),
+        response.body());
+}
+
 }  // namespace
 }  // namespace iaisf::http
