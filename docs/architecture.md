@@ -3,12 +3,12 @@
 ## 1. 文档状态
 
 - 项目：IndustrialAIServiceFramework
-- 阶段：Phase 2 Linux Reactor Core
+- 阶段：Phase 3 TCP Transport Layer
 - 日期：2026-07-30
-- 状态：`PHASE_2_REACTOR_CORE_COMPLETED`；TCP 连接、HTTP 和任务架构仍为 planned
+- 状态：`PHASE_3_TCP_TRANSPORT_IMPLEMENTED_LINUX_VALIDATION_BLOCKED`；TCP 代码已实现，真实 Linux CI 尚未运行，HTTP 和任务架构仍为 planned
 - 目标平台：Linux x86_64，C++17
 
-本文同时记录已实现的 Phase 1 基础设施、Phase 2 Reactor 核心和后续目标边界。只有明确列入已实现边界的类才是当前能力。
+本文同时记录已实现的 Phase 1 基础设施、Phase 2 Reactor 核心、当前 Phase 3 TCP 传输实现和后续目标边界。只有明确列入已实现边界的类才是当前能力。
 
 ### 1.1 Phase 1 已实现边界
 
@@ -36,7 +36,7 @@ Linux-only `iaisf_net` 当前实现：
 - `EventLoop` 在构造线程运行；`update_channel/remove_channel/run` 仅允许所属线程调用。
 - `queue_in_loop/stop` 可跨线程调用，通过 nonblocking、close-on-exec 的 `eventfd` 唤醒。
 - 待执行回调队列按元素数硬限制；空回调返回 `InvalidArgument`，满队列返回 `ResourceExhausted`。
-- active Channel 批次分派期间直接 remove 被拒绝；移除和销毁通过 `queue_in_loop` 延迟到整批处理结束。
+- active Channel 批次分派期间直接 remove 被拒绝；应用回调仍使用有界 `queue_in_loop`，Phase 3 框架生命周期对象则使用独立的 intrusive `DeferredCleanup` 节点在整批处理后清理。
 - Channel 回调和待执行回调的异常被记录并隔离。一个 Channel 抛出后停止其本次剩余回调，但后续 active Channel 继续。Logger 不归 EventLoop 所有，必须活得更久。
 
 Phase 2 直接由 EventLoop 持有 `EpollPoller`，没有为了未来替换性创建空壳 `Poller` 基类。
@@ -53,11 +53,43 @@ Reactor 实现提交 `f76993e09767a2d6b6e1cbd2bcb22cfa1df6f74f` 的首次功能
 都实际执行。Release smoke 的版本和示例配置检查成功，项目源码和测试 warning 均为
 0；没有 failed、cancelled、skipped、neutral 或 `continue-on-error`。
 
-Phase 3 只建议实现连接层：`Buffer`、`Acceptor`、`TcpConnection`、`TcpServer`，
+Phase 2 封板时只建议 Phase 3 实现连接层：`Buffer`、`Acceptor`、`TcpConnection`、`TcpServer`，
 ET accept/read/write 到 `EAGAIN`、动态启停 `EPOLLOUT`、输出缓冲高水位、
 连接建立/半关闭/关闭生命周期和原始字节 Echo 集成测试。Phase 3 不包含 HTTP parser、
 HttpRouter、ThreadPool、TaskRepository、TaskManager、PluginManager、timerfd、
 signalfd、异步日志、AI 推理或 benchmark。
+
+### 1.4 Phase 3 已实现边界
+
+当前未提交工作区新增 Linux-only `iaisf_tcp` / `iaisf::tcp`，PUBLIC 依赖
+`iaisf::net`。实现边界为：
+
+- `Ipv4Endpoint` 是 numeric IPv4 + host-order `uint16_t` port 值类型；使用
+  `inet_pton/inet_ntop`，不查询 DNS，不支持 IPv6。
+- `Buffer` 是 owner-thread-only 有界二进制缓冲；retrieve 只移动 reader index，
+  append 需要空间时才 compact/grow，增长前使用 `length > max - readable`。
+- `Socket` 增加 bind/listen/local endpoint、`TCP_NODELAY`、`SO_ERROR` 和
+  `accept4(SOCK_NONBLOCK | SOCK_CLOEXEC)`。
+- `Acceptor` 拥有监听 Socket 和非 owning Channel，以 ET 循环 accept 到
+  `EAGAIN`；监听 Channel 的声明/销毁顺序保证先 remove/destroy Channel，再关闭 fd。
+- `TcpConnection` 使用 server table 的 `shared_ptr` 作为主要所有者；Channel
+  回调捕获 `weak_ptr`，构造期间不调用 `shared_from_this`。
+- `TcpServer` 拥有 Acceptor 和有界连接表，不拥有 EventLoop；close callback
+  只把强连接引用加入预分配待移除向量，并幂等登记内嵌 cleanup 节点。真正流程是
+  remove Channel → 关闭 Socket → erase table → 释放最后一个 `shared_ptr`。
+- read/write 都循环到 `EAGAIN`；发送使用 `MSG_NOSIGNAL`。`send()` 先为整包预留
+  Buffer 并登记 `EPOLLOUT`，再一次性追加；可写回调排空到 `EAGAIN`，排空后停用。
+- input/output hard maximum 独立强制；output high-water 只在 below→at/above
+  跨越时通知，降到阈值以下后重武装，不等同于完整应用层限流。
+- peer EOF 停止后续读取，但本轮已读取字节仍交给 message callback；有待发送
+  数据时先排空，再进入延迟关闭。
+- `TcpServerOptions` 的可选 `socket_send_buffer_bytes` 是通用、受硬上限验证的
+  `SO_SNDBUF` 调优项；默认不覆盖系统值，测试用它构造确定性 backpressure。
+
+当前源码定义 50 个 `iaisf_tcp_tests` 测试，并为 Reactor 内部清理通道增加 1 项
+测试（当前 Reactor 定义 45 项）。Windows 网络关闭回归已通过，然而
+本机没有 Linux/WSL，当前 TCP 代码尚未在真实 Linux 编译或执行；因此本节不是
+Phase 3 完成验收记录。
 
 ## 2. 调查结果与设计来源
 
@@ -192,11 +224,11 @@ scripts/         构建、启动、smoke、sanitizer 辅助脚本
 | 类/概念 | 职责 | 线程安全与生命周期 |
 |---|---|---|
 | `UniqueFd` | 独占 fd，移动语义，析构关闭 | 不共享；所有权明确 |
-| `InetAddress` | `sockaddr` 值对象和格式转换 | 不可变值对象 |
-| `Buffer` | 连续/分段输入输出缓冲，消费游标 | 仅归属 EventLoop |
+| `Ipv4Endpoint` | numeric IPv4、host-order port 和 `sockaddr_in` 转换 | 无资源值对象 |
+| `Buffer` | 有界连续字节缓冲、reader/writer 游标与前部复用 | 仅归属 EventLoop |
 | `Channel` | fd、关注事件、回调，不拥有 fd | 仅 EventLoop 修改 |
 | `EpollPoller` | RAII 管理 epoll fd 和 `epoll_ctl/wait` | 仅 EventLoop 使用 |
-| `EventLoop` | epoll 轮询、eventfd 唤醒、跨线程待执行函数 | 本体单线程；`queue_in_loop()`/`stop()` 可跨线程 |
+| `EventLoop` | epoll 轮询、eventfd 唤醒、跨线程待执行函数、owner-thread internal cleanup lane | 本体单线程；`queue_in_loop()`/`stop()` 可跨线程 |
 | `Acceptor` | 创建监听 fd、accept 循环、连接上限前置检查 | EventLoop 线程 |
 | `TcpServer` | 持有连接表、创建和移除连接、停止接收 | EventLoop 线程 |
 | `TcpConnection` | 连接状态、读写缓冲、半关闭和回压 | EventLoop 线程；外部只持弱引用/投递操作 |
@@ -271,9 +303,11 @@ classDiagram
 
 - `Application` 控制顶层服务的启动与销毁顺序。
 - `TcpServer` 的连接表拥有 `shared_ptr<TcpConnection>`；Channel 回调避免形成强引用环。
+- `TcpServer` 本身使用 shared ownership，使延迟回调捕获 server weak pointer 和
+  connection strong pointer；server 必须在所有连接之后、EventLoop 之前销毁。
 - fd 由 `UniqueFd` 独占，Channel 永不关闭 fd；fd 生命周期必须覆盖 Channel 的完整注册周期。
 - Poller 只保存非 owning Channel 指针。Channel 禁止复制/移动；注册期地址稳定，析构断言要求它已从 Poller 移除。
-- `epoll_wait` 返回的 active 指针在整个批次结束前都必须有效。任何回调都不能直接销毁本批次内的 Channel；EventLoop 在分派期间拒绝 remove，回调应通过 `queue_in_loop` 延迟移除和销毁。
+- `epoll_wait` 返回的 active 指针在整个批次结束前都必须有效。任何回调都不能直接销毁本批次内的 Channel；EventLoop 在分派期间拒绝 remove。应用对象通过 `queue_in_loop` 延迟，Acceptor/TcpServer 的框架清理通过内部 `DeferredCleanup` 延迟。
 - Router handler 只捕获生命周期稳定的服务引用。
 - 工作任务不持有连接强引用；POST 提交立即响应，后续通过任务 ID 查询。
 
@@ -281,35 +315,88 @@ classDiagram
 
 ### 8.1 模式选择
 
-Phase 2 的 wakeup Channel 已使用 epoll ET；后续连接层计划对监听和连接 fd 也使用 ET：
+Phase 2 的 wakeup Channel 和 Phase 3 的监听/连接 Channel 均使用 epoll ET：
 
 - ET 减少事件重复通知，能体现正确的非阻塞 I/O 边界处理。
 - 单 Reactor 降低首版生命周期和跨线程连接状态的复杂度。
-- 业务计算完全交给工作线程；EventLoop 只做 accept/read/parse/route/serialize/write 和短小状态更新。
+- 当前 EventLoop 只做 accept/read/write 和原始字节回调；未来业务计算必须交给工作线程。
 - 首版不使用 `EPOLLONESHOT`：只有 EventLoop 线程执行连接 I/O，不存在多个 I/O worker 同时处理同一 fd；事件通常关注 `EPOLLET | EPOLLRDHUP` 加实际读写位。
 
-### 8.2 后续 accept/read/write 规则（planned）
+### 8.2 Phase 3 accept/read/write 规则（implemented，待 Linux 验证）
 
-- 使用 `socket(..., SOCK_NONBLOCK | SOCK_CLOEXEC, ...)`，必要时以 `fcntl` 回退。
+- 使用 `socket(..., SOCK_NONBLOCK | SOCK_CLOEXEC, ...)`，不提供阻塞回退。
 - 监听设置 `SO_REUSEADDR`；`SO_REUSEPORT` 首版不启用。
 - `accept4(..., SOCK_NONBLOCK | SOCK_CLOEXEC)` 循环直到 `EAGAIN/EWOULDBLOCK`。
 - 连接读取循环调用 `recv`，直到返回 `EAGAIN/EWOULDBLOCK`；`EINTR` 重试；`0` 表示 peer EOF。
-- 输出优先使用 `send(..., MSG_NOSIGNAL)`；进程启动时同时忽略 `SIGPIPE` 作为防御。
+- 输出使用 `send(..., MSG_NOSIGNAL)`；不依赖全局忽略 SIGPIPE。
 - 写缓冲未清空时关注 `EPOLLOUT`；每次可写事件循环发送到 `EAGAIN`，清空后取消 `EPOLLOUT`，避免 busy loop。
 - `EPOLLERR` 路径读取 `SO_ERROR` 并决定关闭；`EPOLLRDHUP` 或 `EPOLLHUP` 同时可读时先循环读取剩余数据。只有 HUP 且没有 read-side 事件时才直接进入关闭流程。
-- `TcpConnection::close` 必须幂等：先从 epoll 删除，再从连接表移除，最后让 `UniqueFd` 关闭。
-- 可选启用 `TCP_NODELAY`，默认对小 JSON 响应启用，且通过配置覆盖。
+- close notification 以布尔门闩保证最多一次；TcpServer 使用与普通
+  `queue_in_loop` 分离的 intrusive cleanup lane 延迟执行 Channel remove 和连接表
+  erase，普通队列满不影响该路径。
+- accepted socket 当前固定启用 `TCP_NODELAY`；配置覆盖尚未接入 AppConfig。
 
-### 8.3 后续回压和容量（planned）
+### 8.3 Phase 3 容量与 high-water
 
-- 每连接限制 header、body、输入缓冲、输出缓冲和待处理请求数。
-- 输出超过高水位时暂停读事件；降到低水位后恢复。
-- 每连接配置 `max_pending_write_bytes` 硬上限；慢客户端长期无法排空时按 idle/write deadline 或硬上限关闭。
+- 每连接只限制原始 input/output Buffer；header、body 和请求数属于未来 HTTP。
+- high-water 是一次跨阈值通知，不会自动暂停读事件；降到阈值以下后允许再次通知。
+- `max_output_buffer_bytes` 是独立硬上限。`send()` 在任何本次 payload 的系统发送
+  或 Buffer 追加前验证 `length <= max - current_readable` 并完成整包预留；超限
+  返回 `ResourceExhausted`、本次不发生部分接受，并 fail-closed。没有 timerfd，
+  故尚无 idle/write deadline。
 - `EPOLLOUT` 只在输出缓冲非空时启用，写空后立即停用；一次可写回调循环写到 `EAGAIN`。
-- 超过硬上限时返回可行的错误响应后关闭，或在无法安全响应时直接关闭。
+- input 超限停止累计并关闭；TCP 字节层不生成协议错误响应。
 - 达到最大连接数时完成 accept 后立即关闭新 fd，并记录限流事件；不能让监听 fd 在 ET 下停止 drain。
 
-### 8.4 EventLoop 唤醒
+### 8.4 TcpConnection 状态与关闭
+
+```mermaid
+stateDiagram-v2
+    [*] --> Connecting
+    Connecting --> Connected: connect_established
+    Connected --> Disconnecting: peer EOF / shutdown / force_close / error
+    Disconnecting --> Disconnected: deferred connect_destroyed
+    Connecting --> Disconnected: establishment cleanup
+```
+
+本地主动 `shutdown()` 停止新 send，先排空 output，再执行 write-half shutdown，
+并等待 peer EOF；Phase 3 没有超时，非协作 peer 可使 graceful shutdown 长期停留在
+Disconnecting。因此服务停止采用明确的 force-close 策略。peer EOF 路径先交付本轮
+已读数据；若 message callback 产生输出，则排空后关闭。重复关闭不重复调用 close
+callback。TCP 不保留消息边界；message callback 负责 retrieve。EOF 后只交付本轮新增
+字节一次，部分或完全未消费的数据不会触发重复回调，并在连接销毁时丢弃。
+
+### 8.5 内部清理、停止和回调边界
+
+`EventLoop::queue_in_loop()` 是有界的应用/跨线程短回调入口，满时必须继续返回
+`ResourceExhausted`。`DeferredCleanup` 是 owner-thread-only 的框架内部通道：节点
+内嵌于 Acceptor/TcpServer，不在调度时分配内存，一个节点最多 pending 一次，链表
+长度受已存在生命周期对象约束。EventLoop 在每个 active batch 后、普通 pending
+callback 前后执行该链。节点 pending 时析构对象会 `std::terminate`，以运行时契约
+阻止悬空 context；TcpServer 的用户可见延迟 lambda 只捕获 `weak_ptr`。
+
+`TcpServer::stop()` 仅 owner 线程可调用，停止 accept、force-close 当前连接、幂等且
+永久禁止 restart。非 active 调用同步完成，成功返回时连接表为空且 `stopped()==true`；
+active callback 内调用是异步接受语义，返回时可能仍为 Stopping，批次后的内部清理
+完成 Channel remove、Socket close、table erase 和断连通知后才变为 Stopped。started
+server 若未完成 stop 就析构是致命契约错误。stop 期间不再调用 message/high-water，
+但每个已建立连接仍可收到一次 Disconnected connection callback。
+
+| 回调 | 抛异常后的连接策略 | EventLoop/后续连接 | 是否阻止内部清理 |
+|---|---|---|---|
+| connection（Connected） | 关闭该连接 | 继续 | 否 |
+| connection（Disconnected） | 已处于销毁路径 | 继续 | 否 |
+| message | 关闭该连接 | 继续其他连接 | 否 |
+| high-water | 仅记录，连接继续 | 继续 | 否 |
+| Acceptor new-connection | 本次 accepted Socket 由 RAII 关闭 | accept 循环继续 | 否 |
+| close | 框架内部 hook；server 安装 `noexcept` weak 回调 | 非 server 误用异常会请求 loop stop | server 路径不会抛 |
+| write-complete | Phase 3 不存在 | 不适用 | 不适用 |
+
+所有记录操作通过 `safe_log` 隔离 Logger 异常。Acceptor 在 read callback 内 stop 时先
+进入 Stopping，停止继续 accept，再通过内嵌 cleanup 节点移除监听 Channel，最后关闭
+监听 Socket。
+
+### 8.6 EventLoop 唤醒
 
 `EventLoop::queue_in_loop()` 把短小回调放入有界队列，并写 `eventfd` 唤醒 epoll。状态检查、容量检查、入队、非阻塞写入和失败回滚由同一个 mutex 串行化：返回 failure 时本次回调不留在队列，返回 success 表示框架已经接受；显式 stop 仍可按下述状态语义取消或收尾。写入遇到 `EINTR` 重试，遇到 `EAGAIN` 视为已有待处理唤醒；其他错误回滚刚入队的回调。读取使用 `uint64_t` 并循环到 `EAGAIN`，短读、EOF 和其他错误会记录。回调先交换到局部队列，执行时不持有队列 mutex。未来工作线程不得直接调用 `epoll_ctl`、修改 Channel 或写 Socket。
 
@@ -320,7 +407,8 @@ Channel 事件分派语义：
 3. `EPOLLIN/EPOLLPRI/EPOLLRDHUP` 任一存在时调用 read callback；
 4. `EPOLLOUT` 调用 write callback。
 
-因此 `EPOLLRDHUP` 不直接关闭，`EPOLLHUP|EPOLLIN` 仍先交给未来连接层读取剩余数据。Channel 只进行通知，不读取或写出 fd；未来 ET 连接层必须循环 I/O 到 `EAGAIN`。
+因此 `EPOLLRDHUP` 不直接关闭，`EPOLLHUP|EPOLLIN` 仍先交给连接层读取剩余数据。
+Channel 只进行通知，不读取或写出 fd；Phase 3 ET 连接层负责循环 I/O 到 `EAGAIN`。
 
 Phase 2 状态机为：
 
@@ -473,6 +561,9 @@ flowchart LR
 首版可以让主线程直接运行 EventLoop；逻辑上仍区分 bootstrap 阶段和事件循环阶段。并发规则：
 
 - 连接、Channel、Buffer 和 HTTP 会话只在 EventLoop 线程访问。
+- Phase 3 只有 `EventLoop::queue_in_loop()` 与 `EventLoop::stop()` 是跨线程入口；
+  Acceptor start/stop、TcpServer start/stop、TcpConnection send/shutdown/force-close、
+  callback setter 和连接表操作均不保证线程安全，必须由 owner 执行。
 - `TaskRepository`、`ThreadPool::submit/stop` 和 Logger 写接口内部同步。
 - 插件初始化/关闭在工作线程启动前/停止后串行执行。
 - 插件 `execute` 可能被多个 worker 并发调用；不满足并发安全的未来插件必须通过专用执行策略或并发闸门限制。
@@ -503,7 +594,7 @@ stateDiagram-v2
 
 工作队列满表示服务容量不足，未来 HTTP 层固定映射为 `503 Service Unavailable`，不能误报为插件内部错误。只有未来实现用户级请求限流时，才使用 `429 Too Many Requests`。
 
-C++17 无法安全强杀执行任意插件代码的线程。Phase 6 的超时语义是：
+C++17 无法安全强杀执行任意插件代码的线程。Phase 7 的超时语义是：
 
 1. 截止时间到达后把仍为 Running 的任务原子地标记为 Timeout；
 2. 触发自定义 `CancellationToken`，要求插件协作退出；
@@ -547,7 +638,7 @@ Phase 1 已由 `load_app_config` 把 service/runtime/logging 的最小 JSON 解�
 
 ## 15. 日志模型
 
-Phase 1 已提供可测试的同步 `ConsoleLogger` 基础实现；Phase 7 再替换/扩展为一个有界队列和单后台写线程：
+Phase 1 已提供可测试的同步 `ConsoleLogger` 基础实现；Phase 8 再替换/扩展为一个有界队列和单后台写线程：
 
 - producer 创建包含时间戳、level、线程 ID、request/task ID、可选源文件/行号的 `LogRecord`，通过 `try_push` 非阻塞入队；
 - 后台线程用 condition variable 等待，按 batch 写控制台/文件并按间隔 flush，不使用 busy waiting；
@@ -620,3 +711,15 @@ Phase 1 的 `Error` 保留公开字段以维持轻量值语义，因此调用者
 - 真实视觉：增加模型生命周期、GPU 上下文池、输入对象存储和独立并发闸门。
 - 持久任务：以 `ITaskRepository` 抽象替换内存实现，但首版不引入数据库。
 - 可观测性：后续增加 metrics/tracing，不在当前阶段宣称已有。
+
+## 19. Phase 4 建议边界
+
+下一阶段建议只把 HTTP/1.1 字节协议适配到已经验证的 TCP 层：
+
+- `HttpRequest`、`HttpResponse`、增量 `HttpParser`、`HttpSession` 和最小 `HttpRouter`；
+- GET/POST、request line、headers、Content-Length、body、JSON、keep-alive；
+- request line/header/body 硬上限、分段输入、非法请求和 `GET /health`；
+- HTTP 回调仍在 EventLoop owner 线程执行，不运行耗时业务。
+
+Phase 4 暂不包含 ThreadPool、TaskRepository、TaskManager、PluginManager、timerfd、
+signalfd、异步日志、TLS、文件上传、AI 推理或 benchmark。

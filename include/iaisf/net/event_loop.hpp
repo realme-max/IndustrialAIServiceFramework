@@ -27,12 +27,43 @@ class EpollPoller;
  * forbidden while the loop is Running or Stopping.
  *
  * Channel removal is rejected while an active event batch is being dispatched.
- * A Channel callback must use queue_in_loop() to defer removal and destruction
- * until the complete active batch has finished.
+ * Application work uses queue_in_loop(). Framework-owned lifecycle objects use
+ * an embedded DeferredCleanup node so cleanup cannot be rejected by the
+ * application queue capacity and cannot allocate while being scheduled.
  */
 class EventLoop final {
 public:
     using Callback = std::function<void()>;
+
+    /**
+     * Intrusive, allocation-free node for framework lifecycle cleanup.
+     *
+     * The node must be embedded in an object that outlives its pending work.
+     * Destruction while pending is a fatal lifecycle violation. A node can be
+     * pending at most once, so repeated scheduling is idempotent and storage is
+     * bounded by the number of live owning objects rather than a dynamic queue.
+     */
+    class DeferredCleanup final {
+    public:
+        using Function = void (*)(void*) noexcept;
+
+        DeferredCleanup(void* context, Function function) noexcept;
+        DeferredCleanup(const DeferredCleanup&) = delete;
+        DeferredCleanup& operator=(const DeferredCleanup&) = delete;
+        DeferredCleanup(DeferredCleanup&&) = delete;
+        DeferredCleanup& operator=(DeferredCleanup&&) = delete;
+        ~DeferredCleanup() noexcept;
+
+        [[nodiscard]] bool pending() const noexcept;
+
+    private:
+        friend class EventLoop;
+
+        void* context_;
+        Function function_;
+        DeferredCleanup* next_{nullptr};
+        bool pending_{false};
+    };
 
     enum class State {
         Created,
@@ -64,6 +95,16 @@ public:
     [[nodiscard]] Result<void> remove_channel(Channel& channel);
     [[nodiscard]] Result<void> queue_in_loop(Callback callback);
 
+    /**
+     * Schedules owner-thread-only framework cleanup after the active batch.
+     *
+     * Unlike queue_in_loop(), this intrusive path does not allocate and is not
+     * subject to the ordinary pending callback capacity. It accepts work only
+     * while the loop is Running or Stopping.
+     */
+    [[nodiscard]] Result<void> defer_cleanup(DeferredCleanup& cleanup);
+    [[nodiscard]] bool dispatching_active_channels() const noexcept;
+
     [[nodiscard]] std::size_t pending_callback_count() const;
     [[nodiscard]] std::size_t pending_callback_capacity() const noexcept;
     [[nodiscard]] std::size_t logger_failure_count() const noexcept;
@@ -81,6 +122,7 @@ private:
     [[nodiscard]] Result<void> signal_wakeup();
     void drain_wakeup() noexcept;
     void execute_pending_callbacks() noexcept;
+    void execute_deferred_cleanups() noexcept;
     void handle_active_channels(const std::vector<Channel*>& active_channels) noexcept;
     void transition_to_stopped() noexcept;
     void safe_log(LogLevel level, const char* message) noexcept;
@@ -94,6 +136,8 @@ private:
 
     mutable std::mutex pending_mutex_;
     std::deque<Callback> pending_callbacks_;
+    DeferredCleanup* deferred_cleanup_head_{nullptr};
+    DeferredCleanup* deferred_cleanup_tail_{nullptr};
     std::atomic<State> state_{State::Created};
     std::atomic<std::size_t> logger_failure_count_{0U};
     bool dispatching_active_channels_{false};

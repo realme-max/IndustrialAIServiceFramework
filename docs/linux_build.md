@@ -2,7 +2,10 @@
 
 ## 1. 为什么必须使用 Linux
 
-IndustrialAIServiceFramework 的 Phase 2 网络核心直接使用 epoll、eventfd 和 POSIX Socket；timerfd 与 signalfd 仍是后续计划。Windows MinGW 或 MSVC 可以帮助发现一部分可移植 C++ 问题，但不能替代真实 Linux 构建、测试和运行验证。
+IndustrialAIServiceFramework 的 Phase 2 Reactor 和 Phase 3 TCP Transport 直接使用
+epoll、eventfd、accept4 和 POSIX Socket；timerfd 与 signalfd 仍是后续计划。
+Windows MinGW 或 MSVC 可以帮助发现一部分可移植 C++ 问题，但不能替代真实 Linux
+构建、测试和运行验证。
 
 推荐环境：
 
@@ -48,7 +51,9 @@ IAISF_USE_SYSTEM_DEPS=OFF
 IAISF_BUILD_LINUX_NETWORK=ON  # Linux 默认；其他平台默认 OFF
 ```
 
-`IAISF_BUILD_LINUX_NETWORK=ON` 创建 Linux-only `iaisf_net` / `iaisf::net` 和对应测试。该选项在非 Linux 平台显式开启会直接 configure 失败，不提供空实现或静默关闭。
+`IAISF_BUILD_LINUX_NETWORK=ON` 创建 Linux-only `iaisf_net` / `iaisf::net`、
+`iaisf_tcp` / `iaisf::tcp` 和对应测试。该选项在非 Linux 平台显式开启会直接
+configure 失败，不提供空实现或静默关闭。
 
 CMake FetchContent 使用固定 tag：
 
@@ -122,7 +127,8 @@ build/linux-release/iaisf_server \
   --config config/iaisf.example.json
 ```
 
-Phase 1 程序验证配置后立即退出，不启动 Socket，不进入常驻循环。
+当前 `iaisf_server` 仍只验证配置后立即退出，不创建 EventLoop/TcpServer，不进入
+常驻循环。TCP 能力当前由独立 library/component tests 使用。
 
 ## 7. 系统依赖模式
 
@@ -178,6 +184,8 @@ rm -rf -- build/linux-system-deps
 
 - `linux-debug`：记录环境，执行 Debug configure/build/CTest；
 - `linux-release`：执行 Release configure/build/CTest 和 CLI smoke；
+- Phase 3 revision 在两个 job 的普通 build 后显式构建 `iaisf_tcp` 和
+  `iaisf_tcp_tests`，使 target 参与情况在日志中可见；
 - 两个 job 都通过构建脚本显式设置 `IAISF_BUILD_LINUX_NETWORK=ON`，并设置 15 分钟 job timeout；
 - 两个 job 都使用固定版本 FetchContent，不启用系统依赖模式；
 - 不使用 `continue-on-error`，不发布制品或部署。
@@ -240,3 +248,40 @@ checkout 阶段的 `git init` 默认分支提示，不是编译 warning。
 GitHub Actions run，不代表本机 Linux 编译。
 
 Reactor 测试覆盖 HUP/RDHUP read-side 语义、active Channel 延迟移除、fd 复用、`queue_in_loop` 失败回滚、多线程容量竞争、EventLoop 状态矩阵、异常隔离和 eventfd drain。它们不访问外部网络或固定端口。
+
+## 12. Phase 3 待验证矩阵
+
+当前工作区新增 `iaisf_tcp` 和 `iaisf_tcp_tests`，源码定义 50 项 TCP 测试：
+
+```text
+Buffer 13
+Ipv4Endpoint 4
+Acceptor/Socket server operations 7
+TcpConnection 6
+TcpServer integration 20
+```
+
+Phase 3B 还为 EventLoop intrusive internal cleanup lane 新增 1 项 Reactor 测试，
+因此当前源码静态定义为基础 43 + Reactor 45 + TCP 50 = 138。内部 cleanup lane
+不使用普通有界 `queue_in_loop`，调度时不分配，并由 Acceptor/TcpServer 内嵌节点
+提供容量满载下的生命周期清理保证。该算术只用于检查 discovery 完整性，不是 PASS。
+
+测试只使用 loopback port 0 或 socketpair，无外部服务、固定 sleep 或 detached
+thread，单项 CTest timeout 为 20 秒。当前没有 Phase 3 commit/run URL，故下列
+结果都保持 unknown，而不是由源码定义数推算：
+
+| 项目 | 当前状态 |
+|---|---|
+| Ubuntu runner / GCC / CMake | 待新 run 记录 |
+| Debug configure/build | 未运行 |
+| Debug CTest 总数/通过/失败 | 未运行 |
+| Release configure/build | 未运行 |
+| Release CTest 总数/通过/失败 | 未运行 |
+| TCP 50 项实际执行 | 未确认 |
+| Reactor 当前 45 项实际执行 | 未确认；Phase 2 历史 run 只执行当时 44 项 |
+| Release smoke | 未运行 |
+| 项目源码/测试 warning | 未确认 |
+
+Phase 2 run `30516007475` 只证明 `iaisf_net` 基线，不包含当前 TCP revision。用户
+完成 commit/push 后，应使用同一 head SHA 的完整 Debug/Release jobs，确认两个 TCP
+target 构建、全部 TCP 测试执行、smoke 成功且无被隐藏的失败，再更新阶段状态。

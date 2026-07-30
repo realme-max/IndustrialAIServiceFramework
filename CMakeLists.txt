@@ -75,6 +75,7 @@ if(IAISF_BUILD_LINUX_NETWORK)
     src/net/epoll_poller.cpp
     src/net/event_loop.cpp
     src/net/socket.cpp
+    src/net/tcp/ipv4_endpoint.cpp
   )
   add_library(iaisf::net ALIAS iaisf_net)
 
@@ -95,6 +96,25 @@ if(IAISF_BUILD_LINUX_NETWORK)
       Threads::Threads
   )
   iaisf_enable_project_warnings(iaisf_net)
+
+  add_library(
+    iaisf_tcp
+    STATIC
+    src/net/tcp/acceptor.cpp
+    src/net/tcp/buffer.cpp
+    src/net/tcp/tcp_connection.cpp
+    src/net/tcp/tcp_server.cpp
+  )
+  add_library(iaisf::tcp ALIAS iaisf_tcp)
+  target_compile_features(iaisf_tcp PUBLIC cxx_std_17)
+  target_include_directories(
+    iaisf_tcp
+    PUBLIC
+      "$<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>"
+      "$<BUILD_INTERFACE:${IAISF_GENERATED_INCLUDE_DIR}>"
+  )
+  target_link_libraries(iaisf_tcp PUBLIC iaisf::net)
+  iaisf_enable_project_warnings(iaisf_tcp)
 endif()
 
 add_executable(iaisf_server src/main.cpp)

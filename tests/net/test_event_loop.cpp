@@ -93,6 +93,19 @@ public:
     }
 };
 
+struct DeferredCleanupProbe final {
+    DeferredCleanupProbe() noexcept
+        : cleanup(this, &DeferredCleanupProbe::run) {}
+
+    static void run(void* const context) noexcept {
+        auto& probe = *static_cast<DeferredCleanupProbe*>(context);
+        ++probe.execution_count;
+    }
+
+    int execution_count{0};
+    iaisf::net::EventLoop::DeferredCleanup cleanup;
+};
+
 class LoopThread final {
 public:
     explicit LoopThread(
@@ -777,6 +790,74 @@ TEST(EventLoopTest, ChannelRemovalIsDeferredUntilTheActiveBatchCompletes) {
     if (second_channel.is_registered()) {
         EXPECT_TRUE(second_channel.remove());
     }
+}
+
+TEST(EventLoopTest, InternalCleanupExecutesWhenOrdinaryQueueIsFull) {
+    RecordingLogger logger;
+    auto create_result = iaisf::net::EventLoop::create(logger, 16U, 1U);
+    ASSERT_TRUE(create_result);
+    auto loop = std::move(create_result).value();
+    iaisf::net::UniqueFd descriptor{
+        ::eventfd(0U, EFD_NONBLOCK | EFD_CLOEXEC)};
+    ASSERT_TRUE(descriptor.valid());
+    iaisf::net::Channel channel{*loop, descriptor.get()};
+    DeferredCleanupProbe probe;
+    bool ordinary_callback_ran = false;
+    bool first_defer_succeeded = false;
+    bool repeated_defer_succeeded = false;
+
+    channel.enable_reading();
+    channel.set_edge_triggered(true);
+    channel.set_read_callback([
+        &loop,
+        &channel,
+        &probe,
+        &ordinary_callback_ran,
+        &first_defer_succeeded,
+        &repeated_defer_succeeded] {
+        std::uint64_t value = 0U;
+        const ssize_t bytes_read =
+            ::read(channel.fd(), &value, sizeof(value));
+        EXPECT_EQ(bytes_read, static_cast<ssize_t>(sizeof(value)));
+
+        auto queued = loop->queue_in_loop([
+            &loop,
+            &probe,
+            &ordinary_callback_ran] {
+            ordinary_callback_ran = true;
+            EXPECT_EQ(probe.execution_count, 1);
+            loop->stop();
+        });
+        if (!queued) {
+            ADD_FAILURE() << queued.error().message;
+            loop->stop();
+            return;
+        }
+        EXPECT_EQ(loop->pending_callback_count(), 1U);
+        first_defer_succeeded =
+            static_cast<bool>(loop->defer_cleanup(probe.cleanup));
+        repeated_defer_succeeded =
+            static_cast<bool>(loop->defer_cleanup(probe.cleanup));
+    });
+    ASSERT_TRUE(channel.update());
+    constexpr std::uint64_t signal_value = 1U;
+    ASSERT_EQ(
+        ::write(
+            descriptor.get(),
+            &signal_value,
+            sizeof(signal_value)),
+        static_cast<ssize_t>(sizeof(signal_value)));
+
+    auto run_result = loop->run();
+    auto remove_result = channel.remove();
+
+    EXPECT_TRUE(remove_result);
+    ASSERT_TRUE(run_result);
+    EXPECT_TRUE(first_defer_succeeded);
+    EXPECT_TRUE(repeated_defer_succeeded);
+    EXPECT_TRUE(ordinary_callback_ran);
+    EXPECT_EQ(probe.execution_count, 1);
+    EXPECT_FALSE(probe.cleanup.pending());
 }
 
 TEST(EventLoopTest, NonOwnerThreadCannotUpdateChannel) {

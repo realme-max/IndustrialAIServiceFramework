@@ -19,8 +19,9 @@ class EventLoop;
  * The fd and EventLoop must outlive the Channel. Once registered, the Channel
  * address must remain stable and remove() must succeed before destruction.
  * A Channel returned in an active event batch must remain alive until the
- * entire batch has been dispatched. Callbacks that need removal or destruction
- * must defer that work with EventLoop::queue_in_loop().
+ * entire batch has been dispatched. Application callbacks use
+ * EventLoop::queue_in_loop(); framework lifecycle owners use the separate
+ * EventLoop deferred-cleanup path.
  * Callback mutation and event-mask mutation are owner-thread-only operations.
  */
 class Channel final {
