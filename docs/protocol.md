@@ -2,39 +2,117 @@
 
 ## 1. 范围与状态
 
-本文定义目标协议。Phase 1 只实现配置验证 CLI，没有 Socket、HTTP parser 或端点；本文件中的所有网络 API 仍为 planned。
+Phase 4 已实现 HTTP 协议库，状态为
+`PHASE_4_HTTP_PROTOCOL_IMPLEMENTED_LINUX_VALIDATION_BLOCKED`。可移植
+`iaisf_http_core` 已在 Windows Debug/Release 各通过 83/83 HTTP Core 测试；
+Linux-only `iaisf_http` 和 16 项 loopback 集成测试仍等待新提交的真实 Linux CI。
 
-首个可用协议是 HTTP/1.1 + UTF-8 JSON。原始 TCP JSON 仅保留扩展设计，不在 Phase 1—5 的首要验收范围。服务不提供 HTML、文件下载、任意路径读取、shell 或客户端代码执行。
+当前 CLI 不启动监听；`/health`、`/version` 是显式注册到 `HttpRouter` 后由
+`HttpServer` API 提供的能力。后文任务 JSON API 仍是 planned，不得当作当前端点。
+服务不提供 HTML、文件下载、任意路径读取、shell 或客户端代码执行。
 
 ## 2. HTTP 基线
 
-- 支持方法：GET、POST。
-- 支持版本：HTTP/1.1。
-- 请求体：`application/json`；无 body 的 GET 除外。
-- body framing：只支持 `Content-Length`。
-- keep-alive：HTTP/1.1 默认开启，`Connection: close` 后关闭。
-- 不支持：HTTPS、chunked、multipart、HTTP/2、WebSocket。
-- 所有响应都设置 `Content-Type: application/json; charset=utf-8` 和准确的 `Content-Length`。
-- 服务端生成 `X-Request-Id`；若将来允许接收客户端 request ID，必须先做长度和字符集校验。
+- 只接受 `HTTP/1.1` 和严格 `CRLF`。
+- 只接受以 `/` 开头的 origin-form target；method 保留原始大小写并按 RFC token
+  校验，路由比较区分大小写。
+- 请求/响应 framing 只使用 `Content-Length`；body 是 binary-safe 字节串，不假设
+  JSON 或 UTF-8。
+- HTTP/1.1 默认 keep-alive；`Connection` 按 comma-separated、大小写不敏感 token
+  解析，只有完整 token `close` 才在当前响应写尽后主动全关闭；`xclose` 和
+  `close-x` 不匹配，空 token 或非法 token 拒绝。
+- 支持有界、同步、顺序 pipelining，不并行也不乱序。
+- 不支持 HTTP/1.0、HTTP/2、absolute/authority/asterisk-form、Transfer-Encoding、
+  chunked、trailers、Upgrade、Expect、流式 body、percent decode、路径规范化、
+  动态参数、HTTPS、multipart 或 WebSocket。
+- `/health`、`/version` 使用 `application/json`；框架错误响应使用
+  `text/plain; charset=utf-8`。所有响应自动写准确 `Content-Length` 和明确
+  `Connection`。
 
-## 3. 建议默认限制
+### 2.1 Header 与请求走私防护
 
-这些是设计默认值，Phase 7 配置实现前不视为已生效：
+- header name 转为 ASCII lowercase，value 去除首尾 SP/HTAB；拒绝空名称、colon
+  前空白、非法 token、NUL/CR/LF/控制字符、obs-fold、bare CR/LF。
+- 所有重复的规范化 header name 均返回 400；不采用 first-wins、last-wins 或合并
+  语义，且不同 ASCII 大小写仍视为重复。
+- `Host` 必须恰好一个且非空。
+- `Content-Length` 最多一个，只接受十进制；`+1`、`-1`、`1.0`、`1,1` 拒绝。
+- Content-Length 与 Transfer-Encoding 同时出现返回 400；任何单独
+  Transfer-Encoding 返回 501；Expect 返回 417。
+- Content-Length 数字溢出或超过 body 上限返回 413，解析前不做无界预分配。
 
-| 项目 | 建议默认值 | 规则 |
+## 3. 已生效的 `HttpLimits` 默认值
+
+这些是库对象的默认硬限制；尚未接入 `AppConfig`：
+
+| 项目 | 默认值 | 规则 |
 |---|---:|---|
-| 请求行 | 4 KiB | 超限 400/414 后关闭 |
-| 单个 header 行 | 8 KiB | 超限 400/431 后关闭 |
-| header 总大小 | 32 KiB | 超限 431 后关闭 |
+| method | 32 bytes | token，超限 fail-closed |
+| target | 8 KiB | 超限 414 |
+| 请求行 | 16 KiB | 包含结尾 CRLF；为 method + target + version 留出空间 |
+| 单个 header 行 | 8 KiB | 包含结尾 CRLF；超限 400/431 后关闭 |
+| header 总大小 | 32 KiB | 包含每行 CRLF 和终止空行；超限 431 后关闭 |
 | header 数量 | 100 | 超限 431 |
 | body | 1 MiB | 超限 413 |
-| 每连接输入缓冲硬上限 | 2 MiB | 超限关闭 |
-| 每连接输出缓冲硬上限 | 2 MiB | 超限关闭 |
-| 每连接连续请求数 | 100 | 达到后响应 `Connection: close` |
-| 默认任务超时 | 30 s | 受最大值限制 |
-| 最大任务超时 | 5 min | 客户端不能绕过 |
+| response body | 1 MiB | 序列化前拒绝，返回 ResourceExhausted |
+| routes | 256 | 满时拒绝注册 |
+| 每轮 requests | 16 | 超出后通过 EventLoop 普通有界队列继续 |
 
-实际值必须由配置加载并在启动时校验。
+`HttpLimits::create` 接受有符号值，所有项必须大于 0，byte/count 有公开硬上限；
+request line、method/target 和 header line/total 做跨字段校验，不静默 clamp。
+`max_header_line_bytes`、`max_header_bytes` 与 `max_header_count` 同时约束请求和响应；
+请求 total 从第一个 header 字节计至终止空行，响应 total 还包含状态行和自动 framing。
+
+### 3.1 Parser 状态与错误映射
+
+```text
+RequestLine -> Headers -> Body -> Complete
+      \           \         \
+                       -> Error (terminal)
+Complete --take_request--> RequestLine
+```
+
+`parse` 返回 NeedMore、Complete 或 Error，并返回本次实际消费字节数；CRLF、请求行、
+header 和 body 均可跨输入。Session 每轮立即从 TCP Buffer retrieve 已消费字节，
+request 完成后的剩余字节留给下一条 pipeline。
+
+| 情况 | 状态 |
+|---|---:|
+| 语法、Host、任意重复 header、CL+TE | 400 |
+| body/CL 溢出或超限 | 413 |
+| target/request line 超限 | 414 |
+| Expect | 417 |
+| header line/total/count 超限 | 431 |
+| Transfer-Encoding、Upgrade | 501 |
+| 非 HTTP/1.1 | 505 |
+| 内部分配/状态失败 | 500（Session fail-closed） |
+
+Parser Error 是终止态；Session 丢弃后续字节，至多生成一个错误响应并关闭。
+当一个请求同时触发多项协议错误时，检查顺序固定为：header 语法/重复/Host 和
+CL+TE 歧义优先 400，随后单独 Transfer-Encoding/Upgrade 为 501、Expect 为 417，
+最后 Content-Length 溢出或 body 超限为 413；实现不依赖无序容器迭代顺序。
+
+### 3.2 Response、Router 与会话
+
+- `HttpResponse` 验证 header name/value，禁止 handler 设置 Content-Length、
+  Transfer-Encoding 或 Connection；序列化前同时检查 body、header 数量、每个
+  header 行和整个 head。计数与字节数包含自动生成的 Content-Length、Connection、
+  状态行、每行 CRLF 和终止空行，失败不分配或返回部分响应字符串。
+- `HttpRouter` 只做精确 method + path 匹配；query 不参与；freeze 后只读。
+  404 保持连接，405 含排序稳定的 Allow。handler Error、标准/未知异常都转换为
+  不泄露内部文本的 500 并关闭。
+- `HttpSession` 每连接一个，不拥有 TcpConnection；请求/响应按顺序同步执行。
+  每轮最多 `max_requests_per_dispatch`，同时至多一个普通 continuation；queue 满、
+  Session terminal 或连接不再 Connected 时都不会继续 dispatch。
+- `HttpServer` 拥有 frozen Router、TcpServer 和 connection-id→Session 表，不拥有
+  EventLoop/Logger；TcpServer 继续拥有 TcpConnection，callback 捕获 weak server。
+  断连后的 Session 表清理由 TcpServer 的内部 `DeferredCleanup` 触发，不依赖普通
+  pending queue 的剩余容量，也不在 active Channel 批次内直接销毁对象。
+- HTTP close 与传输层半关闭分离：`close_after_write()` 拒绝后续 send，排空现有
+  输出后主动完成全关闭并触发一次 close callback，不等待 peer EOF；`shutdown()`
+  仍表示写半关闭后等待 peer EOF 的传输层契约。
+- `/health` 只表示 HTTP/EventLoop 可响应，不代表任务、插件、数据库、GPU 或工业
+  设备 healthy。
 
 ## 4. 通用 JSON 约定
 
@@ -118,7 +196,7 @@
 
 ```http
 HTTP/1.1 200 OK
-Content-Type: application/json; charset=utf-8
+Content-Type: application/json
 
 {"status":"ok"}
 ```

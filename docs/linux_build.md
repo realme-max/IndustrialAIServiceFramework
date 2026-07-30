@@ -2,8 +2,10 @@
 
 ## 1. 为什么必须使用 Linux
 
-IndustrialAIServiceFramework 的 Phase 2 Reactor 和 Phase 3 TCP Transport 直接使用
-epoll、eventfd、accept4 和 POSIX Socket；timerfd 与 signalfd 仍是后续计划。
+IndustrialAIServiceFramework 的 Phase 2 Reactor、Phase 3 TCP Transport 和 Phase 4
+HTTP adapter 直接使用 epoll、eventfd、accept4 和 POSIX Socket；HTTP Core 本身可移植，
+但 HttpSession/HttpServer 与 loopback integration 仍必须在 Linux 验证。timerfd 与
+signalfd 仍是后续计划。
 Windows MinGW 或 MSVC 可以帮助发现一部分可移植 C++ 问题，但不能替代真实 Linux
 构建、测试和运行验证。
 
@@ -52,7 +54,9 @@ IAISF_BUILD_LINUX_NETWORK=ON  # Linux 默认；其他平台默认 OFF
 ```
 
 `IAISF_BUILD_LINUX_NETWORK=ON` 创建 Linux-only `iaisf_net` / `iaisf::net`、
-`iaisf_tcp` / `iaisf::tcp` 和对应测试。该选项在非 Linux 平台显式开启会直接
+`iaisf_tcp` / `iaisf::tcp`、`iaisf_http` / `iaisf::http` 和对应测试。
+`iaisf_http_core` / `iaisf::http_core` 不依赖该选项，在 Windows/Linux 都构建。
+该选项在非 Linux 平台显式开启会直接
 configure 失败，不提供空实现或静默关闭。
 
 CMake FetchContent 使用固定 tag：
@@ -184,8 +188,9 @@ rm -rf -- build/linux-system-deps
 
 - `linux-debug`：记录环境，执行 Debug configure/build/CTest；
 - `linux-release`：执行 Release configure/build/CTest 和 CLI smoke；
-- Phase 3 revision 在两个 job 的普通 build 后显式构建 `iaisf_tcp` 和
-  `iaisf_tcp_tests`，使 target 参与情况在日志中可见；
+- Phase 4 workflow 在两个 job 的普通 build 后显式构建 `iaisf_http_core`、
+  `iaisf_http_core_tests`、`iaisf_http` 和 `iaisf_http_tests`，使 portable core 和
+  Linux adapter 参与情况都在日志中可见；
 - 两个 job 都通过构建脚本显式设置 `IAISF_BUILD_LINUX_NETWORK=ON`，并设置 15 分钟 job timeout；
 - 两个 job 都使用固定版本 FetchContent，不启用系统依赖模式；
 - 不使用 `continue-on-error`，不发布制品或部署。
@@ -296,3 +301,40 @@ failed、cancelled、skipped、neutral、timeout 或 `continue-on-error`。日�
 checkout 阶段的 `git init` 默认分支提示包含单词 “warning”；项目源码和测试编译
 warning 均为 0。当前 Windows 宿主仍没有可运行的 Linux/WSL；上述结论来自 CI，
 不代表本机执行过 Linux build。
+
+## 13. Phase 4 Linux 验证入口
+
+Phase 4 保持相同命令和 `IAISF_BUILD_LINUX_NETWORK=ON`。成功 configure 后应存在：
+
+```text
+iaisf_http_core
+iaisf_http_core_tests
+iaisf_http
+iaisf_http_tests
+```
+
+测试定义：
+
+```text
+Foundation 43
+Reactor 45
+TCP 51
+HTTP Core 83
+HTTP integration 16
+Source-defined total 238
+```
+
+238 目前只是源码定义合计，不是 Linux PASS 数。Phase 3 的最终 CI 历史结果仍是
+TCP 50/50、总计 138/138；新增第 51 项 TCP 测试验证 HTTP 所需的
+`close_after_write()` 传输契约，尚未由 Linux 执行。正式 Phase 4 run 必须确认 Debug/Release
+configure/build、四个 HTTP target、完整 CTest、Release version/config smoke 和项目
+源码/测试 warning 0；还必须核对没有 failed/cancelled/skipped/neutral 或
+`continue-on-error`。CI 证据必须对应 Phase 4 提交的 head/checkout SHA。
+
+当前本机没有可运行 WSL/Linux，因此：
+
+- Windows Debug/Release 已验证 `iaisf_http_core` 和 83 项 core tests；
+- 本机没有编译 `iaisf_http`，没有运行 loopback integration；
+- Phase 3 run `30524686201` 不能作为 Phase 4 结果；
+- Phase 4 当前状态保持
+  `PHASE_4_HTTP_PROTOCOL_IMPLEMENTED_LINUX_VALIDATION_BLOCKED`。

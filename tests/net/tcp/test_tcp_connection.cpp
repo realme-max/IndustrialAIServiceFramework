@@ -31,6 +31,10 @@ struct TcpConnectionTestAccess {
             connection.output_buffer_.peek(),
             connection.output_buffer_.readable_bytes()};
     }
+
+    static int native_handle(const TcpConnection& connection) noexcept {
+        return connection.socket_.native_handle();
+    }
 };
 
 }  // namespace iaisf::net::tcp
@@ -431,6 +435,100 @@ TEST(TcpConnectionTest, GracefulShutdownFlushesWriteHalfThenWaitsForPeerEof) {
     EXPECT_EQ(close_count, 1);
     EXPECT_EQ(transition_count, 2);
     EXPECT_TRUE(pair.connection->peer_eof_received());
+    EXPECT_EQ(
+        pair.connection->state(),
+        TcpConnection::State::Disconnected);
+}
+
+TEST(TcpConnectionTest, CloseAfterWriteFlushesFullyRejectsSendAndClosesOnce) {
+    NullLogger logger;
+    auto loop = make_loop(logger);
+    ASSERT_NE(loop, nullptr);
+    auto pair = make_connection(
+        *loop,
+        logger,
+        4096U,
+        512U * 1024U,
+        16U * 1024U);
+    ASSERT_NE(pair.connection, nullptr);
+    ConnectionCleanupGuard connection_cleanup{pair.connection};
+    const int small_send_buffer = 4096;
+    ASSERT_EQ(
+        ::setsockopt(
+            iaisf::net::tcp::TcpConnectionTestAccess::native_handle(
+                *pair.connection),
+            SOL_SOCKET,
+            SO_SNDBUF,
+            &small_send_buffer,
+            static_cast<socklen_t>(sizeof(small_send_buffer))),
+        0);
+    const int peer_flags = ::fcntl(pair.peer.get(), F_GETFL);
+    ASSERT_NE(peer_flags, -1);
+    ASSERT_EQ(
+        ::fcntl(pair.peer.get(), F_SETFL, peer_flags & ~O_NONBLOCK),
+        0);
+    const timeval timeout{10, 0};
+    ASSERT_EQ(
+        ::setsockopt(
+            pair.peer.get(),
+            SOL_SOCKET,
+            SO_RCVTIMEO,
+            &timeout,
+            static_cast<socklen_t>(sizeof(timeout))),
+        0);
+
+    int close_count = 0;
+    int transition_count = 0;
+    ASSERT_TRUE(configure_callbacks(
+        *loop,
+        pair.connection,
+        close_count,
+        transition_count));
+    ASSERT_TRUE(pair.connection->connect_established());
+    const std::string payload(256U * 1024U, 'c');
+    ASSERT_TRUE(pair.connection->send(payload));
+    ASSERT_GT(pair.connection->output_readable_bytes(), 0U);
+
+    ASSERT_TRUE(pair.connection->close_after_write());
+    EXPECT_TRUE(pair.connection->close_after_write());
+    auto rejected = pair.connection->send("late");
+    ASSERT_FALSE(rejected);
+    EXPECT_EQ(rejected.error().code, iaisf::ErrorCode::InvalidState);
+
+    std::promise<std::string> peer_promise;
+    auto peer_result = peer_promise.get_future();
+    std::thread peer_thread([
+        &loop,
+        peer_descriptor = pair.peer.get(),
+        &payload,
+        &peer_promise] {
+        std::string error =
+            receive_exact_bytes(peer_descriptor, payload);
+        if (error.empty()) {
+            char byte = '\0';
+            const ssize_t received =
+                ::recv(peer_descriptor, &byte, sizeof(byte), 0);
+            if (received != 0) {
+                error = "close-after-write did not produce EOF";
+            }
+        }
+        peer_promise.set_value(error);
+        if (!error.empty()) {
+            loop->stop();
+        }
+    });
+
+    auto run_result = loop->run();
+    peer_thread.join();
+    if (pair.connection->state() != TcpConnection::State::Disconnected) {
+        EXPECT_TRUE(pair.connection->connect_destroyed());
+    }
+
+    ASSERT_TRUE(run_result);
+    EXPECT_TRUE(peer_result.get().empty());
+    EXPECT_EQ(pair.connection->output_readable_bytes(), 0U);
+    EXPECT_EQ(close_count, 1);
+    EXPECT_EQ(transition_count, 2);
     EXPECT_EQ(
         pair.connection->state(),
         TcpConnection::State::Disconnected);

@@ -65,6 +65,28 @@ target_include_directories(
 target_link_libraries(iaisf_core PRIVATE nlohmann_json::nlohmann_json)
 iaisf_enable_project_warnings(iaisf_core)
 
+add_library(
+  iaisf_http_core
+  STATIC
+  src/http/builtin_routes.cpp
+  src/http/http_limits.cpp
+  src/http/http_parser.cpp
+  src/http/http_request.cpp
+  src/http/http_response.cpp
+  src/http/http_router.cpp
+  src/http/http_status.cpp
+)
+add_library(iaisf::http_core ALIAS iaisf_http_core)
+target_compile_features(iaisf_http_core PUBLIC cxx_std_17)
+target_include_directories(
+  iaisf_http_core
+  PUBLIC
+    "$<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>"
+    "$<BUILD_INTERFACE:${IAISF_GENERATED_INCLUDE_DIR}>"
+)
+target_link_libraries(iaisf_http_core PUBLIC iaisf::core)
+iaisf_enable_project_warnings(iaisf_http_core)
+
 if(IAISF_BUILD_LINUX_NETWORK)
   find_package(Threads REQUIRED)
 
@@ -115,6 +137,28 @@ if(IAISF_BUILD_LINUX_NETWORK)
   )
   target_link_libraries(iaisf_tcp PUBLIC iaisf::net)
   iaisf_enable_project_warnings(iaisf_tcp)
+
+  add_library(
+    iaisf_http
+    STATIC
+    src/http/http_server.cpp
+    src/http/http_session.cpp
+  )
+  add_library(iaisf::http ALIAS iaisf_http)
+  target_compile_features(iaisf_http PUBLIC cxx_std_17)
+  target_include_directories(
+    iaisf_http
+    PUBLIC
+      "$<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>"
+      "$<BUILD_INTERFACE:${IAISF_GENERATED_INCLUDE_DIR}>"
+  )
+  target_link_libraries(
+    iaisf_http
+    PUBLIC
+      iaisf::http_core
+      iaisf::tcp
+  )
+  iaisf_enable_project_warnings(iaisf_http)
 endif()
 
 add_executable(iaisf_server src/main.cpp)

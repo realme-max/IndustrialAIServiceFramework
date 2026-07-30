@@ -390,6 +390,39 @@ Result<void> TcpConnection::shutdown() {
     return Result<void>::success();
 }
 
+Result<void> TcpConnection::close_after_write() {
+    if (!loop_.is_in_loop_thread()) {
+        return Result<void>::failure(make_error(
+            ErrorCode::InvalidState,
+            "TcpConnection::close_after_write must run in the EventLoop owner thread"));
+    }
+    if (state_ == State::Disconnected || close_notified_ ||
+        close_after_write_requested_) {
+        return Result<void>::success();
+    }
+    if (state_ != State::Connected && state_ != State::Disconnecting) {
+        return Result<void>::failure(make_error(
+            ErrorCode::InvalidState,
+            "TcpConnection cannot close after write in its current state"));
+    }
+
+    close_after_write_requested_ = true;
+    state_ = State::Disconnecting;
+    if (output_buffer_.empty()) {
+        begin_close();
+        return Result<void>::success();
+    }
+
+    channel_.disable_reading();
+    auto update_result = channel_.update();
+    if (!update_result) {
+        const Error error = update_result.error();
+        fail_connection(error);
+        return Result<void>::failure(error);
+    }
+    return Result<void>::success();
+}
+
 Result<void> TcpConnection::force_close() {
     if (!loop_.is_in_loop_thread()) {
         return Result<void>::failure(make_error(
@@ -552,6 +585,10 @@ void TcpConnection::handle_write() {
     rearm_high_water_if_below();
     channel_.disable_writing();
 
+    if (close_after_write_requested_) {
+        begin_close();
+        return;
+    }
     if (peer_eof_received_) {
         begin_close();
         return;

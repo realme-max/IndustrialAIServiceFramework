@@ -80,6 +80,15 @@ public:
     [[nodiscard]] Result<void> send(const void* data, std::size_t length);
     [[nodiscard]] Result<void> send(std::string_view bytes);
     [[nodiscard]] Result<void> shutdown();
+    /**
+     * Flushes already accepted output and then fully closes the connection.
+     *
+     * This owner-thread-only operation is idempotent. It immediately rejects
+     * later send() calls, disables further input, and does not wait for peer
+     * EOF. The existing shutdown() API retains its graceful half-close
+     * contract.
+     */
+    [[nodiscard]] Result<void> close_after_write();
     [[nodiscard]] Result<void> force_close();
 
     [[nodiscard]] std::uint64_t id() const noexcept;
@@ -132,6 +141,7 @@ private:
     State state_{State::Connecting};
     bool peer_eof_received_{false};
     bool shutdown_requested_{false};
+    bool close_after_write_requested_{false};
     bool write_shutdown_{false};
     bool close_notified_{false};
     bool high_water_above_{false};

@@ -3,7 +3,7 @@
 ## 1. 当前状态
 
 - 项目：IndustrialAIServiceFramework
-- 当前分支：`phase/3-tcp-transport`
+- 当前分支：`phase/4-http-protocol`
 - Phase 0 提交：`5fbcec0 docs: complete phase 0 architecture design`
 - Phase 1 最终实现提交：`63b30cffcbe3e621af33664721b3675a647bd1a1`
 - Phase 2 起始 HEAD / main / origin/main：`6065d91b277c07ed04e64b3f08034788965e6ac1`
@@ -11,20 +11,21 @@
 - warning 修复 / 最终验证提交：`4db8708a5121f8477d835addd0b16170a3e2054f`
 - Phase 2 文档封板 / Phase 3 基线：`e14b23131eb917df5758a10a305c2c87997f24cf`
 - Phase 3 TCP 实现提交：`0a45658d0e450dd9dfde052808a27ae92ad08881`
-- 当前阶段：Phase 3 TCP Transport Layer
-- 状态：`PHASE_3_TCP_TRANSPORT_COMPLETED`
+- Phase 3 文档封板 / Phase 4 基线：`7096191ca8f7a3fe9e9acfb31ceba0a2c2fc3483`
+- 当前阶段：Phase 4 HTTP/1.1 Protocol Layer
+- 状态：`PHASE_4_HTTP_PROTOCOL_IMPLEMENTED_LINUX_VALIDATION_BLOCKED`
 - 日期：2026-07-30
 - Phase 1 GitHub Actions run：[30508113122](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30508113122)
 - Phase 2 首次功能 GitHub Actions run：[30514521602](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30514521602)
 - Phase 2 最终零 warning GitHub Actions run：[30516007475](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30516007475)
 - Phase 3 最终 GitHub Actions run：[30524686201](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30524686201)
 - Phase 2 实现、warning 修复和文档封板：已合并 main
-- Phase 3 实现 commit/push：已由用户完成
-- 阻塞：Phase 3 无剩余封板阻塞；本机仍无 Linux/WSL，但真实 CI 已完成
+- Phase 4 commit/push：未执行
+- 阻塞：本机无 Linux/WSL；Phase 4 Linux adapter 和 integration 必须由新提交 CI 验证
 
-Phase 3 TCP 代码及容量、清理、生命周期语义审计已由 Ubuntu 24.04 Debug/Release
-零 warning CI 验证。两种配置均为 138/138：Foundation 43、Reactor 45、TCP 50；
-Windows 网络关闭回归仍为 Debug/Release 43/43。HTTP 尚未实现，Phase 4 尚未开始。
+Phase 4 portable HTTP Core 已在 Windows Debug/Release 各通过 83/83，加 Foundation
+43 后均为 126/126；Linux-only HttpSession/HttpServer 和 16 项 integration 已实现但
+未在 Linux 运行。Phase 3 的 138/138 CI 历史仍有效，但不能代替 Phase 4 验证。
 
 ## 2. Phase 1 文件
 
@@ -168,6 +169,61 @@ docs/linux_build.md
 没有创建 HTTP、ThreadPool、Task、Plugin、timerfd/signalfd、async logger、TLS、
 Docker、benchmark 或 AI 代码。
 
+## 4.1 Phase 4 文件
+
+### 新建
+
+```text
+include/iaisf/http/http_status.hpp
+include/iaisf/http/http_limits.hpp
+include/iaisf/http/http_request.hpp
+include/iaisf/http/http_response.hpp
+include/iaisf/http/http_parser.hpp
+include/iaisf/http/http_router.hpp
+include/iaisf/http/builtin_routes.hpp
+include/iaisf/http/http_session.hpp
+include/iaisf/http/http_server.hpp
+src/http/http_status.cpp
+src/http/http_limits.cpp
+src/http/http_request.cpp
+src/http/http_response.cpp
+src/http/http_parser.cpp
+src/http/http_router.cpp
+src/http/builtin_routes.cpp
+src/http/http_session.cpp
+src/http/http_server.cpp
+tests/http/test_http_limits.cpp
+tests/http/test_http_parser.cpp
+tests/http/test_http_request_response.cpp
+tests/http/test_http_router.cpp
+tests/http/test_http_server.cpp
+```
+
+### 修改
+
+```text
+CMakeLists.txt
+tests/CMakeLists.txt
+.github/workflows/linux-ci.yml
+include/iaisf/net/tcp/tcp_connection.hpp
+src/net/tcp/tcp_connection.cpp
+tests/net/tcp/test_tcp_connection.cpp
+README.md
+docs/architecture.md
+docs/development_plan.md
+docs/protocol.md
+docs/test_plan.md
+docs/stage_status.md
+docs/context_handoff.md
+docs/linux_build.md
+```
+
+为满足 HTTP close-after-response 契约，仅对 Phase 3 transport 增加了
+`TcpConnection::close_after_write()` 和对应测试；没有改变 `shutdown()` 半关闭语义、
+send 的 all-accepted-or-failure、ET I/O、Channel/Socket 所有权或 TcpServer 清理顺序。
+未创建 ThreadPool、Task、Plugin、timerfd/signalfd、异步日志、AI、serve CLI、
+Docker 或 benchmark。
+
 ## 5. CMake
 
 版本和标准：
@@ -211,6 +267,21 @@ iaisf_tcp_tests (Linux only)
   PRIVATE -> GTest::gtest
   PRIVATE -> GTest::gtest_main
   PRIVATE -> Threads::Threads
+
+iaisf_http_core (portable)
+  PUBLIC -> iaisf::core
+
+iaisf_http_core_tests (portable)
+  PRIVATE -> iaisf::http_core
+  PRIVATE -> GTest::gtest / GTest::gtest_main
+
+iaisf_http (Linux only)
+  PUBLIC -> iaisf::http_core
+  PUBLIC -> iaisf::tcp
+
+iaisf_http_tests (Linux only)
+  PRIVATE -> iaisf::http
+  PRIVATE -> GTest::gtest / GTest::gtest_main / Threads::Threads
 ```
 
 `iaisf_core` 和消费者只通过 target 级 include/link/features/options 配置。GCC/Clang 项目 targets 使用：
@@ -483,7 +554,7 @@ EventLoop::queue_in_loop
 EventLoop::stop
 ```
 
-Acceptor/TcpServer start/stop、TcpConnection send/shutdown/force_close、
+Acceptor/TcpServer start/stop、TcpConnection send/shutdown/close_after_write/force_close、
 callback setter、Buffer 操作、Channel update/remove 和连接表操作都只允许
 EventLoop owner 线程。未来 worker 不得直接操作这些对象。
 
@@ -491,6 +562,55 @@ EventLoop owner 线程。未来 worker 不得直接操作这些对象。
 accepted socket 当前固定启用 TCP_NODELAY；可选的受验证 `socket_send_buffer_bytes`
 默认不覆盖系统值，测试用它确定性制造 backpressure。`iaisf_server` 仍不创建
 EventLoop 或 TcpServer。
+
+## 12.1 Phase 4 HTTP 契约
+
+### Core 与 framing
+
+- `HttpLimits` 包含 method/target/request-line/header-line/header-total/header-count/
+  request-body/response-body/routes/requests-per-dispatch 十项不可变硬限制。有符号
+  factory 拒绝负/零/超硬上限和跨字段矛盾，不 clamp。
+- 只支持 HTTP/1.1、origin-form、strict CRLF 和 Content-Length。method 保留大小写；
+  target/path/raw query 不 decode/normalize；header name lowercase、value trim OWS，
+  body binary-safe。
+- request line/header line 限制包含 CRLF，header total 包含每行 CRLF 和终止空行；
+  所有重复的规范化 header name 返回 400。Host 必须恰好一个；CL+TE、非法 CL
+  返回 400；CL 数字溢出或 body 超限为 413；target/request-line 为 414；header
+  限制为 431；TE/Upgrade 为 501；Expect 为 417；非 1.1 为 505。组合错误检查
+  顺序固定，不依赖无序容器迭代。
+- `Connection` 使用 comma-separated、大小写不敏感的完整 token；相似子串不匹配，
+  空 token 或非法 token 拒绝。
+- Parser 状态是 RequestLine→Headers→Body→Complete 或 terminal Error；parse 返回
+  consumed count，take 后 reset。bad_alloc/length_error 转 Result，Session 映射 500。
+- Response 自动生成 Content-Length 和 Connection，拒绝 handler 设置 framing header
+  或 CRLF 注入；序列化 preflight 检查 body、header count/line/head total，包含
+  自动 framing、状态行、CRLF 与终止空行；错误响应固定 plain text + close，失败
+  不产生部分字符串。
+- Router exact method+path、query 不参与、freeze 后只读；404、405/sorted Allow；
+  handler Error、标准/未知异常变成 closed 500，内部文本不外泄。
+- Built-ins 只包含 GET `/health` 和 `/version`。health 只说明 HTTP/EventLoop 可响应，
+  不表示 Task/Plugin/GPU/数据库 healthy。
+
+### Session/Server 所有权和线程
+
+- HttpServer owns TcpServer、frozen Router、connection-id→Session table；不 owns
+  EventLoop/ILogger。EventLoop/Logger 必须活得更久。
+- TcpServer 保持 TcpConnection primary shared ownership；Session 只持 connection
+  weak pointer，不注册/拥有 Channel，不改变 Socket→Channel→table 销毁顺序。
+- server callbacks 捕获 weak server；Session continuation 捕获 weak session +
+  weak connection，不捕获悬空 `this`，同时至多一个；执行前要求 Session 非 terminal
+  且连接仍为 Connected。
+- 所有 HTTP dispatch/send/start/stop owner-thread-only。每轮最多
+  `max_requests_per_dispatch`，剩余 pipeline 通过普通有界 queue 继续；入队失败关闭。
+- `Connection: close`、parser/router/serialize/send/internal error 后不处理后续
+  pipeline；malformed 至多一个错误响应。HTTP close 使用 `close_after_write()` 写尽
+  后主动全关闭，不等待 peer EOF；`shutdown()` 保持独立半关闭语义。
+- close callback 后的连接表/Session 表移除沿用 TcpServer 内部 `DeferredCleanup`，
+  在 active Channel 批次后执行且不受普通 pending queue 容量影响。
+- HttpServer stop 镜像 TcpServer，幂等、禁止 restart；active batch 内可能延迟完成，
+  `stopped()` 同时要求 TCP stopped 和 Session 表为空；started server 未完成 stop
+  不能析构。
+- CLI 保持 Phase 1 行为，不创建 EventLoop/HttpServer，也没有 `--serve`。
 
 ## 13. 测试
 
@@ -529,9 +649,9 @@ Phase 3 当前源码 `TEST` 定义：
 Buffer: 13
 Ipv4Endpoint: 4
 Acceptor/Socket server operations: 7
-TcpConnection: 6
+TcpConnection: 7
 TcpServer integration: 20
-Total definitions: 50
+Total definitions: 51
 ```
 
 最终 Linux Debug/Release 均实际发现并执行 TCP 50/50；与 Foundation 43、Reactor 45
@@ -541,6 +661,25 @@ detached thread；CTest timeout 20 秒。覆盖 binary/fragment/large Echo、bur
 multi-client、容量、dynamic EPOLLOUT/high-water rearm、half-close、RST、异常隔离、
 close once、普通队列满清理、active stop、多连接清理、EOF 部分/不消费、析构契约、
 active batch 后延迟 remove、最后强引用释放和 stop cleanup。
+
+Phase 3 最终 Linux 历史结果仍为 TCP 50/50；上面的第 51 项是本轮新增的
+`close_after_write()` 传输契约测试，尚未取得 Linux PASS。
+
+Phase 4 HTTP 测试定义：
+
+```text
+HttpLimits: 8
+HttpParser: 40
+HttpRequest/Response/Status: 20
+HttpRouter/Builtins: 15
+Portable HTTP Core total: 83
+Linux HttpSession/HttpServer integration: 16
+```
+
+Windows Debug/Release 均实际为 Foundation 43/43 + HTTP Core 83/83 = 126/126；
+Release version/config smoke exit 0，项目 warning 0。既知 vcpkg applocal
+`pwsh.exe` 诊断非项目 warning。Linux HTTP 尚未执行，源码定义总数 238 不能写成
+PASS。
 
 ## 14. 环境和实际结果
 
@@ -698,7 +837,7 @@ run URL: https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs
 event / branch: push / phase/3-tcp-transport
 head SHA: 0a45658d0e450dd9dfde052808a27ae92ad08881
 checkout SHA: 0a45658d0e450dd9dfde052808a27ae92ad08881 (both jobs)
-local HEAD / upstream: 0a45658d0e450dd9dfde052808a27ae92ad08881
+local HEAD / upstream（Phase 3 验证当时）: 0a45658d0e450dd9dfde052808a27ae92ad08881
 runner / OS: ubuntu-24.04 / Ubuntu 24.04.4 LTS
 kernel: 6.17.0-1020-azure x86_64
 GCC / CMake: 13.3.0 / 3.31.6
@@ -758,7 +897,7 @@ aggregate sha256:
 83AE7E469DEA30C860DEFD4D26CB313B7B3C87EFCD9387414741E152EE46CF27
 ```
 
-任务结束复核结果完全一致：62 个文件、59,240,225 字节，聚合 SHA-256 仍为
+Phase 4 开始和交付前复核结果完全一致：62 个文件、59,240,225 字节，聚合 SHA-256 仍为
 `83AE7E469DEA30C860DEFD4D26CB313B7B3C87EFCD9387414741E152EE46CF27`。
 参考目录被 `.gitignore` 排除。
 
@@ -777,7 +916,6 @@ aggregate sha256:
 
 ## 18. 未实现
 
-- HTTP parser/request/response/session/router
 - ThreadPool 和运行时队列
 - TaskManager/Repository/Executor
 - PluginManager/Registry/Echo/MockVision
@@ -791,7 +929,7 @@ aggregate sha256:
 
 ## 19. 当前阻塞和遗留
 
-1. Phase 1、Phase 2、Phase 3 均无剩余验收阻塞。
+1. Phase 1、Phase 2、Phase 3 均无剩余验收阻塞；Phase 4 等待新提交 Linux CI。
 2. 默认 FetchContent 的首次 Linux 配置需要 GitHub 网络和 CA。
 3. 系统依赖模式尚未在 Linux 系统包环境验证。
 4. 本机没有可运行 Linux/WSL，不能在本机复现 CI。
@@ -800,30 +938,23 @@ aggregate sha256:
 7. graceful shutdown 没有 timerfd deadline，非协作 peer 可能长期 Disconnecting；
    server stop 因此使用 force-close。
 
-## 20. Phase 4 入口
+## 20. Phase 5 入口
 
-Phase 4 尚未开始。建议只包含：
+Phase 5 未开始且必须等待 Phase 4 Linux CI 封板。建议只包含：
 
 ```text
-HttpRequest
-HttpResponse
-incremental HttpParser
-HttpSession
-minimal HttpRouter
-request line / headers / Content-Length / body / keep-alive
-request-line/header/body limits
-GET /health
-GET /version
-malformed request fail-closed tests
-parser unit tests and loopback HTTP integration
+bounded blocking queue
+fixed ThreadPool
+Task / TaskStatus
+in-memory TaskRepository
+legal state transitions
+TaskManager
+test-only executor without PluginManager
 ```
 
-Phase 4 暂不包含：
+Phase 5 暂不包含：
 
 ```text
-ThreadPool
-TaskRepository
-TaskManager
 PluginManager
 timerfd/signalfd
 async logging
@@ -833,12 +964,12 @@ benchmark
 
 ## 21. Git 约束
 
-- 当前分支必须保持 `phase/3-tcp-transport`。
+- 当前分支必须保持 `phase/4-http-protocol`。
 - 不 amend 或重写已有提交。
 - 本轮不 commit、push、创建 PR 或 merge。
 - build、FetchContent、compile_commands 和日志不能进入 Git。
-- 本轮文档封板不 commit/push；建议 commit：
+- 本轮不 commit/push；建议 commit：
 
 ```text
-docs: complete phase 3 validation record
+feat: implement HTTP protocol layer
 ```

@@ -25,6 +25,34 @@ include(GoogleTest)
 gtest_add_tests(TARGET iaisf_tests TEST_LIST IAISF_UNIT_TESTS)
 set_tests_properties(${IAISF_UNIT_TESTS} PROPERTIES LABELS unit)
 
+add_executable(
+  iaisf_http_core_tests
+  http/test_http_limits.cpp
+  http/test_http_parser.cpp
+  http/test_http_request_response.cpp
+  http/test_http_router.cpp
+)
+target_compile_features(iaisf_http_core_tests PRIVATE cxx_std_17)
+target_link_libraries(
+  iaisf_http_core_tests
+  PRIVATE
+    iaisf::http_core
+    GTest::gtest
+    GTest::gtest_main
+)
+iaisf_enable_project_warnings(iaisf_http_core_tests)
+
+gtest_add_tests(
+  TARGET iaisf_http_core_tests
+  TEST_LIST IAISF_HTTP_CORE_TESTS
+)
+set_tests_properties(
+  ${IAISF_HTTP_CORE_TESTS}
+  PROPERTIES
+    LABELS "unit;http"
+    TIMEOUT 10
+)
+
 if(TARGET iaisf_net)
   add_executable(
     iaisf_net_tests
@@ -79,6 +107,31 @@ if(TARGET iaisf_tcp)
     ${IAISF_TCP_TESTS}
     PROPERTIES
       LABELS "unit;integration;linux;tcp"
+      TIMEOUT 20
+  )
+endif()
+
+if(TARGET iaisf_http)
+  add_executable(
+    iaisf_http_tests
+    http/test_http_server.cpp
+  )
+  target_compile_features(iaisf_http_tests PRIVATE cxx_std_17)
+  target_link_libraries(
+    iaisf_http_tests
+    PRIVATE
+      iaisf::http
+      GTest::gtest
+      GTest::gtest_main
+      Threads::Threads
+  )
+  iaisf_enable_project_warnings(iaisf_http_tests)
+
+  gtest_add_tests(TARGET iaisf_http_tests TEST_LIST IAISF_HTTP_TESTS)
+  set_tests_properties(
+    ${IAISF_HTTP_TESTS}
+    PROPERTIES
+      LABELS "integration;linux;http"
       TIMEOUT 20
   )
 endif()

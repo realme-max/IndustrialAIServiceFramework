@@ -2,7 +2,7 @@
 
 面向工业 AI 应用的 C++ 高性能任务服务框架。
 
-> 当前状态：`PHASE_3_TCP_TRANSPORT_COMPLETED`。Phase 3 实现提交 `0a45658d0e450dd9dfde052808a27ae92ad08881` 已由 [GitHub Actions Linux CI run 30524686201](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30524686201) 在 Ubuntu 24.04.4 LTS、GCC 13.3.0、CMake 3.31.6 上完成 Debug/Release 验证：两种配置均为 138/138 CTest 通过，其中 Foundation 43、Reactor 45、TCP 50；`iaisf_tcp` 与 `iaisf_tcp_tests` 均实际构建，Release 版本与示例配置 smoke 成功，项目源码和测试 warning 均为 0。Windows Visual Studio 2022 Debug/Release 网络关闭回归均为 43/43。HTTP 尚未实现，Phase 4 尚未开始。
+> 当前状态：`PHASE_4_HTTP_PROTOCOL_IMPLEMENTED_LINUX_VALIDATION_BLOCKED`。Phase 4 已实现可移植 HTTP/1.1 Core 和 Linux TCP adapter；Windows Visual Studio 2022 Debug/Release 均实际构建 `iaisf_http_core`、执行 Foundation 43 + HTTP Core 83，共 126/126 CTest 通过，项目 warning 为 0。Linux-only `HttpSession/HttpServer` 与 16 项集成测试尚未由新提交的真实 Linux CI 验证，因此不能标记 Phase 4 completed。
 
 ## 项目定位
 
@@ -10,7 +10,7 @@
 
 框架层只负责网络、协议、路由、任务调度、插件管理、状态、日志、配置和错误处理。焊缝、点云、机器人等领域语义只能进入插件层。
 
-当前 `iaisf_server` 仍只验证 CLI 和配置后退出；Phase 3 的 TCP 传输能力通过独立库和测试使用，尚未接入常驻服务组合根。
+当前 `iaisf_server` 仍只验证 CLI 和配置后退出；Phase 4 已提供可组合的 HTTP Server API，但尚未接入常驻服务组合根，也没有新增不受控的 `--serve`。
 
 ## Phase 1 已实现
 
@@ -73,9 +73,26 @@ Phase 2B 固定了以下并发语义：
 
 Phase 3 的线程边界不是“TCP 层整体线程安全”：只有 `EventLoop::queue_in_loop()` 和 `stop()` 可跨线程；Acceptor、TcpServer、TcpConnection、Buffer 和 Channel 的普通操作都属于 EventLoop owner 线程。
 
+## Phase 4 已实现，等待 Linux CI
+
+- Windows/Linux 可移植 `iaisf_http_core` / `iaisf::http_core`：`HttpStatus`、`HttpLimits`、`HttpRequest`、`HttpResponse`、增量 `HttpParser`、冻结式 `HttpRouter` 和内置路由
+- Linux-only `iaisf_http` / `iaisf::http`：每连接 `HttpSession` 和组合 `TcpServer` 的 `HttpServer`
+- HTTP/1.1 only、严格 CRLF、origin-form target、Content-Length only、二进制 body、默认 keep-alive 和 `Connection: close`
+- 有限顺序 pipelining；每轮最多处理 `max_requests_per_dispatch`，通过普通有界 `queue_in_loop` 继续，入队失败即关闭该连接
+- 请求行与 header line 上限包含结尾 CRLF；header total/count、request body、response head/body、route count 全部有硬上限
+- 所有重复 header name（ASCII 大小写不敏感）均 fail-closed；Host 必须恰好一个；CL+TE、歧义长度和 obs-fold 拒绝；Transfer-Encoding/chunked 返回 501，Expect 返回 417
+- `Connection` 只按 comma-separated 的完整、大小写不敏感 token 识别 `close`，相似子串不匹配，空 token 或非法 token 拒绝
+- `HttpResponse` 自动生成 Content-Length/Connection，拒绝 framing header 覆盖和 CRLF 注入；响应 header count、单行和 head total 预检包含自动 framing 行，失败不返回部分响应
+- 精确 method+path 路由、稳定 404/405 + Allow、handler Error/异常隔离为关闭连接的 500
+- `Connection: close` 使用写尽后全关闭，不等待客户端先发 EOF；`shutdown()` 保留为独立的半关闭契约
+- 每个 Session 同时至多一个 continuation；弱引用和连接状态检查避免停服/断连后再次 dispatch；Session 移除沿用不受普通 pending queue 容量影响的 `DeferredCleanup`
+- 显式注册 `GET /health`（只表示 HTTP/EventLoop 可响应）与 `GET /version`
+- 83 项可移植 HTTP Core 测试已在 Windows Debug/Release 实际通过；16 项 Linux loopback/port-0 集成测试已定义，等待真实 CI
+
+不支持 HTTP/1.0、HTTP/2、absolute/authority/asterisk-form、chunked、trailers、Upgrade、Expect、percent-decoding、路径规范化、动态路由、流式 body、TLS 或 WebSocket。
+
 ## 尚未实现
 
-- HTTP request/response/parser/router
 - 线程池和有界工作队列
 - Task、TaskManager、TaskRepository 和任务 API
 - PluginManager、EchoPlugin、MockVisionPlugin 或动态 `.so`
@@ -96,8 +113,11 @@ Phase 2 (completed)
 Phase 3 (completed)
   IPv4 endpoint / bounded Buffer / Acceptor / TcpConnection / TcpServer
 
+Phase 4 (implemented; Linux validation blocked)
+  HTTP/1.1 core / Router / Session / HttpServer / built-in health and version
+
 Later phases (planned)
-  HTTP -> task system -> static plugins -> timers -> async logging
+  task system -> static plugins -> timers -> async logging
 
 Phase 9—10 (planned)
   measured engineering baseline -> production vision-plugin boundary
@@ -122,7 +142,7 @@ IAISF_BUILD_LINUX_NETWORK=ON  # Linux 默认；非 Linux 默认 OFF
 
 启用 `IAISF_USE_SYSTEM_DEPS=ON` 时使用 `find_package`，缺少兼容依赖会明确失败，不会静默切换模式。关闭 `IAISF_BUILD_TESTS` 后不获取 GoogleTest。
 
-`IAISF_BUILD_LINUX_NETWORK=ON` 只允许在 Linux 使用。非 Linux 平台显式开启会在 CMake configure 阶段报错；Windows 默认关闭并继续只构建 `iaisf_core`、`iaisf_server` 和 Phase 1 测试。
+`IAISF_BUILD_LINUX_NETWORK=ON` 只允许在 Linux 使用。非 Linux 平台显式开启会在 CMake configure 阶段报错；Windows 默认关闭，仍会构建可移植的 `iaisf_http_core` 和 `iaisf_http_core_tests`，但不会解析 `HttpSession/HttpServer`、Reactor 或 TCP Linux 源码。
 
 ## Linux 构建
 
@@ -156,6 +176,7 @@ Smoke：
 脚本会显式传入 `-DIAISF_BUILD_LINUX_NETWORK=ON`。首次功能 [Linux CI run 30514521602](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30514521602) 对应 Reactor 实现提交 `f76993e09767a2d6b6e1cbd2bcb22cfa1df6f74f`，功能和测试通过，但 Release 测试构建存在 2 条 `-Wunused-result` warning。提交 `4db8708a5121f8477d835addd0b16170a3e2054f` 修复这两处返回值检查；最终 [Linux CI run 30516007475](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30516007475) 在 Ubuntu 24.04.4 LTS、GCC 13.3.0、CMake 3.31.6 上完成 Debug/Release configure、build 和 87/87 CTest，两个配置均实际执行 44/44 Reactor 测试，Release 两项 CLI smoke 成功，项目源码和测试 warning 均为 0。两个 job 和所有步骤均成功，没有 failed、cancelled、skipped、neutral 或 `continue-on-error`。完整状态见 [stage_status.md](docs/stage_status.md)，构建说明见 [linux_build.md](docs/linux_build.md)。
 
 Phase 3 最终 [Linux CI run 30524686201](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30524686201) 在两个 job 中实际构建 `iaisf_tcp` 和 `iaisf_tcp_tests`，随后执行完整 CTest；Debug/Release 均为 138/138，通过数按实际日志核对为 Foundation 43、Reactor 45、TCP 50。
+Phase 4 workflow 已增加对 `iaisf_http_core`、`iaisf_http_core_tests`、`iaisf_http`、`iaisf_http_tests` 的显式构建；当前尚无对应新提交的真实 run URL/结果，不能沿用 Phase 3 run 作为 HTTP 验证。
 
 ## 命令行
 
@@ -272,7 +293,7 @@ ctest --test-dir build/linux-release --output-on-failure
 - CTest CLI version 和 example-config smoke
 - Linux `UniqueFd`、Socket、Channel、EpollPoller 和 EventLoop
 
-真实结果见 [stage_status.md](docs/stage_status.md)。Windows/MSVC Debug/Release 网络关闭回归均为 43/43。Phase 3 Linux CI 的 Debug/Release 均实际执行 138 项并全部通过：Foundation 43/43、Reactor 45/45、TCP 50/50；项目源码和测试 warning 均为 0，Release `--version` 与示例配置 smoke 均成功。
+真实结果见 [stage_status.md](docs/stage_status.md)。Phase 4 Windows/MSVC Debug/Release 均为 126/126：Foundation 43/43、HTTP Core 83/83；Release `--version` 与示例配置 smoke 均成功，项目 warning 为 0。当前 Linux 源码定义矩阵为 Foundation 43 + Reactor 45 + TCP 51 + HTTP Core 83 + HTTP integration 16 = 238 项，但这只是源码定义合计，必须等 Phase 4 CI 的 CTest 实际输出后才能写成通过。Phase 3 的历史封板结果仍是 TCP 50/50、合计 138/138；新增的 1 项 TCP close-after-write 回归属于本轮未验证源码，不能回写为历史 CI 结果。
 
 ## 项目结构
 
@@ -291,6 +312,7 @@ IndustrialAIServiceFramework/
 │   ├── app/
 │   ├── config/
 │   ├── core/
+│   ├── http/
 │   ├── logging/
 │   ├── net/
 │   │   └── tcp/
@@ -299,17 +321,19 @@ IndustrialAIServiceFramework/
 │   ├── app/
 │   ├── config/
 │   ├── core/
+│   ├── http/
 │   ├── logging/
 │   ├── net/
 │   │   └── tcp/
 │   └── main.cpp
 ├── tests/
+│   ├── http/
 │   └── net/
 ├── scripts/
 └── docs/
 ```
 
-`net` 包含 Phase 2 Reactor 原语和 Phase 3 `tcp/` 字节传输层。仍没有 HTTP、任务或插件空壳类。
+`net` 包含 Phase 2 Reactor 原语和 Phase 3 `tcp/` 字节传输层；`http` 包含 Phase 4 协议核心与 Linux adapter。仍没有任务、插件、定时器或异步日志空壳类。
 
 ## 与 TinyWebServer 的差异
 
