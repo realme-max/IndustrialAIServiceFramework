@@ -1,0 +1,18 @@
+#pragma once
+
+#include <string_view>
+
+#define IAISF_VERSION_MAJOR @PROJECT_VERSION_MAJOR@
+#define IAISF_VERSION_MINOR @PROJECT_VERSION_MINOR@
+#define IAISF_VERSION_PATCH @PROJECT_VERSION_PATCH@
+#define IAISF_VERSION_STRING "@PROJECT_VERSION@"
+
+namespace iaisf {
+
+inline constexpr int kVersionMajor = IAISF_VERSION_MAJOR;
+inline constexpr int kVersionMinor = IAISF_VERSION_MINOR;
+inline constexpr int kVersionPatch = IAISF_VERSION_PATCH;
+inline constexpr std::string_view kVersionString{IAISF_VERSION_STRING};
+
+}  // namespace iaisf
+

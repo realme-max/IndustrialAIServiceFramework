@@ -3,12 +3,27 @@
 ## 1. 文档状态
 
 - 项目：IndustrialAIServiceFramework
-- 阶段：Phase 0
-- 日期：2026-07-29
-- 状态：架构基线已完成，实现均为 planned
+- 阶段：Phase 1 基础工程
+- 日期：2026-07-30
+- 状态：基础工程与 Phase 1B 审计已实现；Linux CI 尚未运行；网络及任务架构仍为 planned
 - 目标平台：Linux x86_64，C++17
 
-本文件描述目标边界和实现约束，不代表对应 C++ 类已经存在。
+本文同时记录已实现的 Phase 1 基础设施和后续目标边界。除明确列入“Phase 1 已实现”的类外，网络、HTTP、任务、插件和异步运行时类仍不存在。
+
+### 1.1 Phase 1 已实现边界
+
+已实现：
+
+- `ErrorCode`、`Error`、`Result<T>`、`Result<void>`
+- `AppConfig` 的 JSON 加载、默认值和严格校验
+- `LogLevel`、`ILogger`、同步 `ConsoleLogger`
+- 最小 `Application` 和 CLI
+- CMake targets、版本生成和自动化测试
+
+未实现：
+
+- 本文后续描述的 Socket、Channel、Poller、EventLoop、HTTP、ThreadPool、Task、Plugin 和 Timer 类
+- 后台日志线程、异步队列、文件日志或日志轮转
 
 ## 2. 调查结果与设计来源
 
@@ -256,6 +271,8 @@ classDiagram
 
 - 每连接限制 header、body、输入缓冲、输出缓冲和待处理请求数。
 - 输出超过高水位时暂停读事件；降到低水位后恢复。
+- 每连接配置 `max_pending_write_bytes` 硬上限；慢客户端长期无法排空时按 idle/write deadline 或硬上限关闭。
+- `EPOLLOUT` 只在输出缓冲非空时启用，写空后立即停用；一次可写回调循环写到 `EAGAIN`。
 - 超过硬上限时返回可行的错误响应后关闭，或在无法安全响应时直接关闭。
 - 达到最大连接数时完成 accept 后立即关闭新 fd，并记录限流事件；不能让监听 fd 在 ET 下停止 drain。
 
@@ -263,7 +280,9 @@ classDiagram
 
 `EventLoop::post()` 把短小回调放入有界/受控队列，并写 `eventfd` 唤醒 epoll。工作线程不得直接调用 `epoll_ctl`、修改 Channel 或写 Socket。
 
-进程在启动时屏蔽 SIGINT/SIGTERM，并计划通过 `signalfd` 把停止通知纳入 EventLoop；SIGPIPE 独立忽略。这样信号路径只请求停止，不执行非异步信号安全的清理逻辑。
+进程在启动时屏蔽 SIGINT/SIGTERM，并计划通过 `signalfd` 把停止通知纳入 EventLoop；SIGPIPE 独立忽略。顺序必须是：主线程先屏蔽目标信号，再创建 `signalfd`，最后才创建 worker 和日志线程，避免目标信号被其他线程异步接收。信号路径只请求停止，不执行非异步信号安全的清理逻辑。
+
+worker 完成任务后不得操作 Socket、Channel 或 epoll，也不得持有能直接操作连接的裸指针。需要通知网络侧时，worker 先写入跨线程完成队列，再写 `eventfd`；EventLoop 醒来后读取完成项，并由 EventLoop 线程更新连接状态或生成网络响应。
 
 ## 9. HTTP 解析与会话
 
@@ -321,7 +340,7 @@ sequenceDiagram
         Q->>R: Queued -> Running
         Q->>P: execute PluginRequest
         P-->>Q: PluginResult or exception
-        Q->>R: Running -> Success/Failed
+        Q->>R: Running -> Succeeded/Failed
     else queue full or shutting down
         M->>R: remove unaccepted task
         M-->>H: capacity error
@@ -384,19 +403,21 @@ stateDiagram-v2
     [*] --> Queued
     Queued --> Running
     Queued --> Cancelled
-    Running --> Success
+    Running --> Succeeded
     Running --> Failed
     Running --> Cancelled
     Running --> Timeout
-    Success --> [*]
+    Succeeded --> [*]
     Failed --> [*]
     Cancelled --> [*]
     Timeout --> [*]
 ```
 
-所有转换在 `TaskRepository` 的一个临界区中校验，失败返回 `InvalidTaskTransition`，不覆盖已有终态。完成与超时竞争时，先获得状态转换权的一方生效。
+`TaskRepository` 是任务状态转换的唯一裁决者。`Running -> Succeeded`、`Running -> Failed` 和 `Running -> Timeout` 的竞争必须通过一个受控原子状态转换裁决：第一个成功进入终态的事件获胜，其余晚到结果不能覆盖终态；Timeout 后返回的插件结果只能记录并丢弃。
 
 任务若未能进入有界队列，则不被 API 接受并从仓储移除；不会为了排队失败而扩展 `Queued -> Failed`。worker 取到任务后先转换为 Running，后续内部或插件错误才转换为 Failed。
+
+工作队列满表示服务容量不足，未来 HTTP 层固定映射为 `503 Service Unavailable`，不能误报为插件内部错误。只有未来实现用户级请求限流时，才使用 `429 Too Many Requests`。
 
 C++17 无法安全强杀执行任意插件代码的线程。Phase 6 的超时语义是：
 
@@ -406,6 +427,8 @@ C++17 无法安全强杀执行任意插件代码的线程。Phase 6 的超时语
 4. worker 线程只能在插件返回后复用。
 
 因此，卡死的非协作插件仍会占用 worker。这是已知边界，真实 GPU/机器人插件必须设计可取消调用或进程隔离。
+
+执行超时从任务进入 Running 开始。排队等待上限是独立概念；有界队列只限制容量，不能天然保证排队时延。未来可单独增加 queue-wait timeout，但不属于 Phase 1。
 
 ## 13. 定时器
 
@@ -425,7 +448,7 @@ C++17 无法安全强杀执行任意插件代码的线程。Phase 6 的超时语
 
 ## 14. 配置模型
 
-`ConfigLoader` 解析 JSON 到不可变强类型结构。默认值只用于非关键缺失字段；类型错误、范围错误、关键资源错误必须使启动失败并返回非零退出码。
+Phase 1 已由 `load_app_config` 把 service/runtime/logging 的最小 JSON 解析为强类型 `AppConfig`，并实现严格未知字段、类型和范围校验。后续 `ConfigLoader` 目标会在此基础上扩展以下运行时配置；类型错误、范围错误、关键资源错误必须使启动失败并返回非零退出码。
 
 建议配置组：
 
@@ -440,7 +463,7 @@ C++17 无法安全强杀执行任意插件代码的线程。Phase 6 的超时语
 
 ## 15. 日志模型
 
-Phase 1 只提供同步控制台占位，Phase 7 替换为一个有界队列和单后台写线程：
+Phase 1 已提供可测试的同步 `ConsoleLogger` 基础实现；Phase 7 再替换/扩展为一个有界队列和单后台写线程：
 
 - producer 创建包含时间戳、level、线程 ID、request/task ID、可选源文件/行号的 `LogRecord`，通过 `try_push` 非阻塞入队；
 - 后台线程用 condition variable 等待，按 batch 写控制台/文件并按间隔 flush，不使用 busy waiting；
@@ -465,6 +488,8 @@ Phase 1 只提供同步控制台占位，Phase 7 替换为一个有界队列和�
 - `request_id` / `task_id`：关联字段。
 
 跨模块预期失败返回 `Result<T>`（C++17 自主实现的轻量 value-or-error 类型）或明确状态，不用异常控制普通流程。构造失败可抛异常，但必须在 `Application` 启动边界处理。
+
+Phase 1 的 `Error` 保留公开字段以维持轻量值语义，因此调用者可以在构造后修改或清空 `message`，非空不能被描述为类型级永久不变量。生产路径统一使用 `make_error`；构造器、工厂和 `Result::failure` 边界会将空消息归一化为 `unspecified error`。
 
 ### 16.2 异常边界
 
@@ -510,4 +535,4 @@ Phase 1 只提供同步控制台占位，Phase 7 替换为一个有界队列和�
 - 动态插件：未来使用版本化 C ABI 工厂而非直接假设 C++ ABI 稳定。
 - 真实视觉：增加模型生命周期、GPU 上下文池、输入对象存储和独立并发闸门。
 - 持久任务：以 `ITaskRepository` 抽象替换内存实现，但首版不引入数据库。
-- 可观测性：后续增加 metrics/tracing，不在 Phase 0 宣称已有。
+- 可观测性：后续增加 metrics/tracing，不在当前阶段宣称已有。

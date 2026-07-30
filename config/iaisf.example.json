@@ -1,0 +1,13 @@
+{
+  "service": {
+    "name": "IndustrialAIServiceFramework"
+  },
+  "runtime": {
+    "worker_threads": 4,
+    "task_queue_capacity": 1024
+  },
+  "logging": {
+    "level": "info"
+  }
+}
+

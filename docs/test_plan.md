@@ -2,7 +2,7 @@
 
 ## 1. 状态与原则
 
-Phase 0 只完成测试设计，尚无 C++ 目标或测试可运行，因此没有“测试通过”声明。
+Phase 1 已实现基础单元测试和 CLI smoke，并在 Phase 1B 加强 Error 边界、Result 引用类别、配置数值类型和 UTF-8 字节限制覆盖。Linux CI workflow 已创建但尚未 push 或运行，因此没有“Linux PASS”声明。
 
 测试原则：
 
@@ -58,21 +58,46 @@ CTest labels：`unit`、`integration`、`linux`、`sanitizer`、`slow`。
 | 测试 | 目标 |
 |---|---|
 | `VersionTest` | 版本常量格式和值一致 |
-| `ErrorTest` | 稳定错误码和 message 构造 |
-| `ConfigDefaultsTest` | 占位默认配置是有效值，不冒充 JSON 解析 |
-| `ServerVersionSmoke` | 可执行程序启动/版本输出/退出码 |
+| `ErrorTest` / `ResultTest` | 稳定错误码、空消息边界、value/error 引用类别、void、move-only 和 API 误用 |
+| `AppConfigTest` | 默认值、真实示例、类型/范围、负数、float/string/null/bool、UTF-8 bytes、未知字段和错误分类 |
+| `LogLevelTest` / `ConsoleLoggerTest` | 级别解析、阈值、格式、换行和字段清洗 |
+| `ApplicationTest` | help/version/config/无参数/非法参数/错误不抛出 |
+| `iaisf_server_version` | CTest 固定 CLI 版本输出 |
+| `iaisf_server_example_config` | CTest 使用源码树真实示例配置的 CLI smoke |
 | Out-of-source check | 源码目录无生成物 |
 
-计划命令：
+正式 Linux 命令：
 
 ```bash
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DBUILD_TESTING=ON
-cmake --build build --parallel
-ctest --test-dir build --output-on-failure
-./scripts/smoke_test.sh
+cmake -S . -B build/linux-debug \
+  -DCMAKE_BUILD_TYPE=Debug \
+  -DIAISF_BUILD_TESTS=ON \
+  -DIAISF_USE_SYSTEM_DEPS=OFF
+cmake --build build/linux-debug --parallel
+ctest --test-dir build/linux-debug --output-on-failure
+
+cmake -S . -B build/linux-release \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DIAISF_BUILD_TESTS=ON \
+  -DIAISF_USE_SYSTEM_DEPS=OFF
+cmake --build build/linux-release --parallel
+ctest --test-dir build/linux-release --output-on-failure
+./scripts/smoke_linux.sh
 ```
 
-这些命令只有在 Phase 1 实际运行后才能写入“通过”记录。
+当前结果：
+
+| 环境 | Configure | Build | CTest | Smoke |
+|---|---|---|---|---|
+| Linux Debug | not run | not run | not run | 不适用 |
+| Linux Release | not run | not run | not run | not run |
+| Windows VS2022 Debug | pass（补充） | pass（补充） | 43/43 pass（补充） | CTest 内 2 项 pass |
+| Windows VS2022 Release | pass（补充） | pass（补充） | 43/43 pass（补充） | version/config 手工执行退出码 0 |
+| GitHub Actions Ubuntu 24.04 | workflow created | not run | not run | not run |
+
+Windows 结果不满足 Linux 阶段验收门槛。
+
+Phase 1B 的临时配置 fixture 使用原子创建的唯一系统临时目录，不仅依赖进程内序号；因此多个 CTest 进程并行执行时不会共享配置路径，析构时通过 RAII 清理整个测试目录。
 
 ## 5. Network/Reactor 测试
 
@@ -147,13 +172,13 @@ Linux 集成测试前后读取 `/proc/<pid>/fd` 数量；重复连接/断开后�
 允许：
 
 - Queued → Running/Cancelled
-- Running → Success/Failed/Cancelled/Timeout
+- Running → Succeeded/Failed/Cancelled/Timeout
 
 拒绝：
 
-- Success → Running
+- Succeeded → Running
 - Failed → Queued
-- Timeout → Success
+- Timeout → Succeeded
 - 任意终态 → 其他状态
 - 重复完成（除非明确作为幂等 no-op，首版建议返回 false）
 - Queued → Failed（排队失败不创建任务；执行错误必须先进入 Running）
@@ -168,6 +193,7 @@ Linux 集成测试前后读取 `/proc/<pid>/fd` 数量；重复连接/断开后�
 - repository 满拒绝新任务。
 - 终态清理后查询 404。
 - 插件晚到结果不覆盖 Timeout。
+- Succeeded、Failed 与 Timeout 同时到达时，第一个被 TaskRepository 接受的终态获胜。
 
 ## 9. Plugin 测试
 
@@ -220,7 +246,7 @@ TimerQueue 通过可注入单调时钟或纯堆核心测试，避免真实等待
 - 日志目录不可创建/文件不可写。
 - 配置错误输出不泄露秘密。
 
-测试使用临时目录，不能修改真实 `config/server.json`。
+测试使用临时目录，不能修改真实 `config/iaisf.example.json`。
 
 ## 12. Logger 测试
 
@@ -254,6 +280,8 @@ TimerQueue 通过可注入单调时钟或纯堆核心测试，避免真实等待
 13. 多客户端并发提交和查询。
 14. SIGTERM 后停止 accept、按策略 drain、刷新日志并以 0 退出。
 
+队列满不能映射为插件错误；429 只用于未来单独的用户级限流。worker 完成路径测试必须确认它只写完成队列并通过 eventfd 唤醒 EventLoop，不直接操作 Socket、Channel 或 epoll。
+
 测试 harness 要求：
 
 - 动态获取端口，避免固定 8080 冲突。
@@ -281,7 +309,7 @@ TimerQueue 通过可注入单调时钟或纯堆核心测试，避免真实等待
 cmake -S . -B build-asan \
   -DCMAKE_BUILD_TYPE=Debug \
   -DIAISF_ENABLE_ASAN=ON \
-  -DBUILD_TESTING=ON
+  -DIAISF_BUILD_TESTS=ON
 cmake --build build-asan --parallel
 ctest --test-dir build-asan --output-on-failure
 ```
@@ -330,7 +358,7 @@ Interpretation and limitations:
 - 不在 Debug/ASan 结果上包装生产性能。
 - 不删除失败请求后只展示成功数字。
 
-## 17. Phase 0 调查验证
+## 17. Phase 0 历史调查验证
 
 Phase 0 的非运行验证项：
 

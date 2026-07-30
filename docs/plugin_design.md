@@ -162,7 +162,7 @@ sequenceDiagram
     TE->>PL: execute(request)
     alt success before deadline
         PL-->>TE: output
-        TE->>TR: Running -> Success
+        TE->>TR: Running -> Succeeded
     else explicit plugin failure
         PL-->>TE: Error
         TE->>TR: Running -> Failed

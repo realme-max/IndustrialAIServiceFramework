@@ -23,22 +23,21 @@
 
 基线：
 
-- CMake 最低版本建议 3.20，C++17，禁止编译器扩展。
+- CMake 最低版本 3.22，C++17，禁止编译器扩展。
 - GCC 建议 10+ 或 Clang 建议 12+；最终最低版本在 Phase 1 Linux 编译后确定。
-- 生产核心依赖保持轻量：pthread/Threads、nlohmann/json。
-- 测试依赖 GoogleTest，只在 `BUILD_TESTING=ON` 时启用。
-- 依赖解析优先 `find_package`；是否使用固定版本的 `FetchContent` 作为 fallback 在 Phase 1 根据离线构建要求确认。
+- Phase 1 生产核心依赖仅为 nlohmann/json `v3.11.3`；pthread/Threads 在真正需要线程时再引入。
+- 测试依赖 GoogleTest `v1.15.2`，只在 `IAISF_BUILD_TESTS=ON` 时启用。
+- 默认使用固定 tag 的 FetchContent；`IAISF_USE_SYSTEM_DEPS=ON` 时严格通过 `find_package` 查找，不静默 fallback。
 - CMake targets 按模块拆分，使用 target 级 include、warning 和 link 设置；不使用全局 `include_directories`。
 
 计划的构建开关：
 
 | 选项 | 默认 | 说明 |
 |---|---:|---|
-| `BUILD_TESTING` | ON（开发） | 构建 GoogleTest/CTest |
-| `IAISF_ENABLE_ASAN` | OFF | AddressSanitizer |
-| `IAISF_ENABLE_UBSAN` | OFF | UndefinedBehaviorSanitizer |
-| `IAISF_WARNINGS_AS_ERRORS` | OFF | CI 可开启 |
-| `IAISF_BUILD_EXAMPLES` | ON | 示例客户端 |
+| `IAISF_BUILD_TESTS` | ON | 构建 GoogleTest/CTest；作为子项目可显式关闭 |
+| `IAISF_USE_SYSTEM_DEPS` | OFF | OFF 使用固定 FetchContent，ON 使用系统包 |
+
+Sanitizer、examples 和 warnings-as-errors 开关尚未实现，按后续阶段需要增加。
 
 ## 3. Phase 0：调查与架构设计
 
@@ -67,52 +66,34 @@ docs: complete phase 0 architecture design
 
 ## 4. Phase 1：项目骨架与构建系统
 
-目标：得到一个最小、可构建、可测试、能输出版本信息的 Linux C++17 工程，不提前实现网络或异步模块。
+状态：**implemented and audited；Linux CI validation blocked（2026-07-30）**
 
-### 4.1 实施顺序
+已实现：
 
-1. 在可用 Linux 环境记录 OS、编译器、CMake 和 CPU 信息。
-2. 明确许可证并创建 `LICENSE`。
-3. 建立顶层 CMake 和模块 target：
-   - `iaisf_core` 最小基础库；
-   - `iaisf_server` 可执行程序；
-   - `iaisf_tests` 或独立测试 targets。
-4. 添加 `namespace iaisf`、版本常量、`ErrorCode`/`Error`/轻量 `Result<T>` 基础类型。
-5. 添加强类型 `ServerConfig` 占位和默认配置对象；JSON 完整解析留到 Phase 7。
-6. 添加同步 `ILogger/ConsoleLogger` 占位；异步日志留到 Phase 7。
-7. `Application` 仅负责打印版本、加载最小启动参数和正常退出。
-8. 添加 `config/server.json` 示例，但只包含已识别字段并标明尚未启用的字段。
-9. 添加一个最小 GoogleTest 和 CTest 发现。
-10. 添加 `scripts/build.sh`、`scripts/run_server.sh` 和 `scripts/smoke_test.sh`，启用 `set -euo pipefail`。
-11. 使用 Debug 与 Release 各配置一次，执行测试和 smoke。
-12. 更新全部阶段文档，记录真实命令和输出摘要。
+- CMake 3.22+、C++17、target 级 warning 和生成版本头。
+- `iaisf_core`、`iaisf_server`、`iaisf_tests`。
+- `ErrorCode/Error`、`Result<T>`、`Result<void>`。
+- nlohmann/json 严格 `AppConfig`，含默认值、范围和未知字段校验。
+- `LogLevel`、`ILogger`、同步 `ConsoleLogger`。
+- `Application` 的 `--help`、`--version`、`--config <path>`、无参数和非法参数行为。
+- GoogleTest/CTest、真实示例配置测试和两个 CLI smoke tests。
+- Linux Debug/Release build/test/smoke 脚本和 Linux 构建文档。
+- Apache License 2.0。
+- Phase 1B 完整代码审计和针对 Error、Result、AppConfig、CMake 的修正。
+- `.github/workflows/linux-ci.yml`：Ubuntu 24.04 GCC Debug/Release、CTest 和 Release smoke。
 
-### 4.2 Phase 1 文件边界
+验证：
 
-允许：
+- 当前没有可运行 Linux/WSL/Docker；GitHub Actions workflow 尚未 push 或实际运行，因此 Linux Debug、Release、CTest 和 smoke 未取得成功证据，不能标记 completed。
+- Windows Visual Studio 2022 x64 作为补充检查：Debug/Release configure、build 和 43 个 CTest 均成功；CLI version/config smoke 退出码均为 0。
+- Windows 结果不替代 Linux 验收。
+- 最终项目自身 MSVC 编译无 C++ warning；MSBuild 环境仍打印非致命的 `pwsh.exe` 缺失诊断。
+- 未实现任何 Socket、epoll、HTTP、线程池、任务、插件或异步日志能力。
 
-- CMake、基础 header/source、测试、配置样例和脚本。
-- 版本输出、同步控制台日志、基础错误类型。
-
-禁止：
-
-- Socket、epoll、HTTP parser、工作线程池、TaskManager 和插件执行。
-- 把占位对象描述为完整模块。
-- 为通过 Windows 编译而抽象掉 Linux epoll 主线。
-
-### 4.3 验收门槛
-
-- Linux 下 CMake configure/build 成功。
-- `ctest --test-dir build --output-on-failure` 成功。
-- `iaisf_server --version` 或最小启动输出项目名、语义版本和 C++ 标准信息。
-- smoke 脚本非交互、可重复、返回码可靠。
-- 构建产物只在 build 目录。
-- README 的命令已真实执行，结果写入 stage status。
-
-建议 commit message：
+Phase 1B 建议 commit message：
 
 ```text
-build: add phase 1 C++17 project skeleton
+ci: validate phase 1 foundation on Linux
 ```
 
 ## 5. Phase 2：Socket、epoll 与 EventLoop
@@ -256,7 +237,7 @@ feat(timer): complete phase 6 connection and task timeouts
 
 交付：
 
-- JSON 配置加载、默认值、严格类型/范围校验
+- 扩展 Phase 1 AppConfig，加入 server/http/task/plugin/logging 运行时配置及跨字段校验
 - 有界日志队列、后台线程、批量写、flush、关闭
 - 控制台/文件 sink、级别、基础按大小轮转
 - request_id/task_id 上下文
@@ -333,9 +314,8 @@ docs(vision): define phase 9 production vision plugin boundary
 
 | 风险 | 影响 | 当前缓解 |
 |---|---|---|
-| 当前无 Linux/WSL 环境 | 无法本机编译 epoll | Phase 1 前准备 Linux/WSL2/CI |
-| 依赖获取策略未确认 | 离线构建可能失败 | Phase 1 决定系统包、vendoring 或固定 FetchContent |
-| 许可证未确认 | 无法安全创建 LICENSE | Phase 1 前由用户选择 |
+| 当前无 Linux/WSL 环境，CI 尚未运行 | Phase 1 Linux 验收阻塞 | 已创建 Ubuntu 24.04 workflow；由用户提交并 push 后取得真实 run 证据 |
+| 默认 FetchContent 依赖网络 | 首次离线配置失败 | 固定 tag；提供系统依赖模式 |
 | 插件不协作取消 | 超时后仍占 worker | CancellationToken、晚到结果丢弃；未来进程隔离 |
 | 单 Reactor 遇到慢序列化/大响应 | 网络线程延迟 | 严格大小限制；测量后再拆分 |
 | 内存任务仓储不持久 | 重启丢任务 | 首版明确限制；未来通过仓储接口替换 |
