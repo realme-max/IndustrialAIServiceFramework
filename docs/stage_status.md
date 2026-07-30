@@ -3,15 +3,15 @@
 ## 当前结论
 
 ```text
-PHASE_5_TASK_RUNTIME_IMPLEMENTED_LINUX_VALIDATION_BLOCKED
+PHASE_5_TASK_RUNTIME_COMPLETED
 ```
 
 - 当前阶段：Phase 5 Bounded Thread Pool and Task Runtime
-- 实现状态：跨平台 Task Runtime 已实现，尚未 commit/push
+- 实现状态：跨平台 Task Runtime 已实现、提交并完成最终 Linux 验证
 - Windows 验证：Visual Studio 2022 x64 Debug/Release 均为 212/212（Foundation 43 + HTTP Core 84 + Task Runtime 85）
-- Linux CI 验证：尚未运行包含 Phase 5 提交的真实 CI；Phase 4 run `30539245789` 不能替代
+- Linux CI 验证：Debug/Release 均为 324/324（Task Runtime 85/85），项目源码和测试 warning 为 0
 - 日期：2026-07-30（Asia/Shanghai）
-- 下一阶段：Phase 6 插件系统；必须等待 Phase 5 Linux 封板后开始
+- 下一阶段：Phase 6 插件系统；尚未开始
 
 Phase 5 已实现固定有界线程池、Task 值类型与限制、线程安全 Repository、Executor 和
 Manager；`iaisf_server` 仍不启动监听，也没有 Task HTTP API。插件、自动超时、
@@ -33,11 +33,12 @@ Manager；`iaisf_server` 仍不启动监听，也没有 Task HTTP API。插件�
 | Phase 3 文档封板 / Phase 4 基线 / main / origin/main | `7096191ca8f7a3fe9e9acfb31ceba0a2c2fc3483` |
 | Phase 4 HTTP 实现提交 | `9b87fdb8804ee37a8cf3b87a7b9193a3130b85d3` |
 | Phase 4 测试修复 / 最终验证提交 | `0818ebf4f71366cc3cd2fe4e36e95fe667b687a5` |
-| Phase 4 文档封板 / Phase 5 基线 / main / origin/main / 当前 HEAD | `fe5b58446a14ebedf13978b0339f3ad0171f0ffa` |
-| Phase 5 upstream | 尚未配置 |
+| Phase 4 文档封板 / Phase 5 基线 / main / origin/main | `fe5b58446a14ebedf13978b0339f3ad0171f0ffa` |
+| Phase 5 实现 / 最终验证提交 / 当前 HEAD / upstream | `79d3d4e89feb71595dc67d820f9a5398dcc814d4` |
+| Phase 5 最终 Linux CI | [run 30547126540](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30547126540) |
 | origin | `https://github.com/realme-max/IndustrialAIServiceFramework.git` |
 | Phase 3 开始时工作区 | clean |
-| Phase 5 commit / push / PR | 均未执行；当前为源码、测试、构建/CI 与文档 diff |
+| Phase 5C 本轮 Git 操作 | 仅产生八份文档 diff；未 commit/push |
 
 本阶段没有 amend、reset、stash、rebase、merge、commit、push 或修改 origin。
 
@@ -50,7 +51,7 @@ Manager；`iaisf_server` 仍不启动监听，也没有 Task HTTP API。插件�
 | 2 | Socket、epoll 与 EventLoop | completed | Debug/Release 均 87/87；44 个 Reactor 测试均实际执行 |
 | 3 | TCP Transport Layer | completed | Debug/Release 138/138；Foundation 43、Reactor 45、TCP 50 |
 | 4 | HTTP 协议与健康路由 | completed | Windows 127/127；Linux Debug/Release 239/239 |
-| 5 | 线程池与任务系统 | implemented / Linux blocked | Phase 5B 审计完成；Windows Debug/Release 212/212；Linux CI 待新提交 |
+| 5 | 线程池与任务系统 | completed | Windows Debug/Release 212/212；Linux Debug/Release 324/324，Task Runtime 85/85 |
 | 6 | 插件系统 | planned | 未开始 |
 | 7 | 定时器与任务超时 | planned | 未开始 |
 | 8 | 异步日志与配置扩展 | planned | 未开始 |
@@ -645,11 +646,33 @@ Release example-config smoke：
 项目 MSVC 源码和测试编译 warning 为 0。现有 Visual Studio/vcpkg applocal 阶段仍
 打印非致命 `pwsh.exe` 诊断，但构建 exit 0、CTest 全通过；它不是编译器 warning。
 
-### Linux 当前结论
+### Linux 最终结论
 
-本机没有 `bash`、WSL 或 Linux，`bash -n scripts/build_linux.sh` 无法执行，也没有
-本地 Linux configure/build/CTest。Phase 5 尚未 commit/push，因此不存在同一提交的
-GitHub Actions 证据。workflow 按当前定义预计发现 324 项，但该数量不是 PASS 结论。
+| 项目 | 结果 |
+|---|---|
+| workflow / event / attempt | `Linux CI` / `push` / 1 |
+| run | [30547126540](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30547126540) |
+| conclusion / branch | `success` / `phase/5-task-runtime` |
+| head / Debug checkout / Release checkout | `79d3d4e89feb71595dc67d820f9a5398dcc814d4` |
+| runner / OS | `ubuntu-24.04` / Ubuntu 24.04.4 LTS |
+| kernel | `6.17.0-1020-azure` |
+| compiler / CMake | GCC 13.3.0 / CMake 3.31.6 |
+| Linux Debug | configure/build success；324/324 CTest，0 failed |
+| Linux Release | configure/build success；324/324 CTest，0 failed |
+| 分项 | Foundation 43、Reactor 45、TCP 51、HTTP Core 84、HTTP Integration 16、Task Runtime 85 |
+| task targets | Debug/Release 均实际构建 `iaisf_task`、`iaisf_task_tests` |
+| warning | 项目源码 0；项目测试 0 |
+
+Release smoke：
+
+```text
+IndustrialAIServiceFramework 0.1.0
+2026-07-30T13:31:28.474Z [INFO] [Application] configuration validated for service IndustrialAIServiceFramework
+```
+
+两个 job 和全部可见步骤均为 success；没有 failed、cancelled、skipped、neutral、
+timeout 或 `continue-on-error`。当前宿主仍没有本地 Linux/WSL；上述结论来自可追溯
+CI，不宣称本机执行了 Linux build。
 
 ## 参考工程保护
 
@@ -659,7 +682,7 @@ GitHub Actions 证据。workflow 按当前定义预计发现 324 项，但该数
 |---:|---:|---|
 | 62 | 59,240,225 | `83AE7E469DEA30C860DEFD4D26CB313B7B3C87EFCD9387414741E152EE46CF27` |
 
-Phase 5 开始和交付前均复核为 62 个文件、59,240,225 字节和相同聚合 SHA-256。
+Phase 5 开始、交付前和 Phase 5C 封板前均复核为 62 个文件、59,240,225 字节和相同聚合 SHA-256。
 参考工程未被构建、格式化或添加到 Git。
 
 ## 未实现
@@ -680,7 +703,7 @@ Phase 5 开始和交付前均复核为 62 个文件、59,240,225 字节和相同
 - Phase 1 没有剩余验收阻塞。
 - Phase 2 没有剩余验收阻塞。
 - Phase 3 没有剩余封板阻塞；本机仍无 Linux/WSL，当前 Linux 结论来自可追溯的 GitHub Actions run。
-- Phase 4 已完成最终 Linux 封板；Phase 5 的真实 Linux CI 尚不存在，当前状态必须 blocked。
+- Phase 4 和 Phase 5 均已完成最终 Linux 封板。
 - 默认 FetchContent 首次 Linux 配置需要 GitHub 网络和有效 CA 证书。
 - 系统依赖模式已设计但未在已安装 Linux 包环境验证。
 - Windows/NTFS 工作区不能可靠表达新 shell 脚本的 POSIX executable bit；workflow 会在运行时执行 `chmod +x scripts/*.sh`，人工 Linux 使用前仍应确认权限。
@@ -688,17 +711,18 @@ Phase 5 开始和交付前均复核为 62 个文件、59,240,225 字节和相同
 
 ## Phase 6 建议入口
 
-Phase 6 尚未开始。只有 Phase 5 提交并由同 SHA 的 Linux Debug/Release CI 封板后，
-才建议实现静态 IPlugin/PluginManager、PluginRequest/Result、EchoPlugin 和明确
-`mock: true` 的 MockVisionPlugin，并把它们适配到既有 TaskHandler 边界。
+Phase 6 尚未开始。建议只实现 `IAlgorithmPlugin` 或等价静态接口、PluginMetadata、
+PluginManager 静态注册、提交前快速校验、EchoPlugin、明确 `mock: true` 的
+MockVisionPlugin、插件异常隔离、既有 TaskHandler 适配及单元测试。
 
-Phase 6 暂不包含动态 `.so`、timerfd/signalfd、异步日志、真实 TensorRT/PCL/GPU、
-机器人、Agent、数据库或 benchmark，也不允许插件操作网络对象。
+Phase 6 暂不包含动态 `.so`、HTTP Task API、timerfd 自动超时、异步日志、真实
+TensorRT/PCL/GPU、真实点云、机器人、Agent、数据库或 benchmark，也不允许插件
+操作网络对象。
 
 ## 建议 commit
 
 本轮未执行 commit。建议：
 
 ```text
-feat: implement bounded task runtime
+docs: complete phase 5 validation record
 ```

@@ -15,9 +15,9 @@
 - Phase 4 HTTP 实现提交：`9b87fdb8804ee37a8cf3b87a7b9193a3130b85d3`
 - Phase 4 测试修复 / 最终验证提交：`0818ebf4f71366cc3cd2fe4e36e95fe667b687a5`
 - Phase 4 文档封板 / Phase 5 基线 / main / origin/main：`fe5b58446a14ebedf13978b0339f3ad0171f0ffa`
-- Phase 5 实现提交：尚未创建
+- Phase 5 实现 / 最终验证提交：`79d3d4e89feb71595dc67d820f9a5398dcc814d4`
 - 当前阶段：Phase 5 Bounded Thread Pool and Task Runtime
-- 状态：`PHASE_5_TASK_RUNTIME_IMPLEMENTED_LINUX_VALIDATION_BLOCKED`
+- 状态：`PHASE_5_TASK_RUNTIME_COMPLETED`
 - 日期：2026-07-30
 - Phase 1 GitHub Actions run：[30508113122](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30508113122)
 - Phase 2 首次功能 GitHub Actions run：[30514521602](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30514521602)
@@ -25,16 +25,18 @@
 - Phase 3 最终 GitHub Actions run：[30524686201](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30524686201)
 - Phase 4 首次失败 GitHub Actions run：[30537924856](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30537924856)
 - Phase 4 最终 GitHub Actions run：[30539245789](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30539245789)
+- Phase 5 最终 GitHub Actions run：[30547126540](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30547126540)
 - Phase 2 实现、warning 修复和文档封板：已合并 main
 - Phase 4 实现、修复与文档：已合并 main
-- Phase 5 commit/push/PR：均未执行；当前分支无 upstream
-- 当前 HEAD：`fe5b58446a14ebedf13978b0339f3ad0171f0ffa` 加未提交 Phase 5 diff
-- 阻塞：同一 Phase 5 提交的 Linux Debug/Release CI 尚未运行
+- Phase 5 实现提交已 commit/push；当前分支跟踪 `origin/phase/5-task-runtime`
+- 当前 HEAD / upstream：`79d3d4e89feb71595dc67d820f9a5398dcc814d4`
+- Phase 5C 本轮只更新八份文档，不 commit/push
 
 Phase 5B Windows Debug/Release 均为 212/212：Foundation 43、HTTP Core 84、
 Task Runtime 85。Release version/config smoke exit 0，项目编译 warning 为 0。
-Phase 4 最终 Linux 239/239 历史仍有效，但不包含 task targets，不能用于 Phase 5
-封板。当前宿主没有 bash/WSL/Linux。
+最终 Linux CI Debug/Release 均为 324/324：Foundation 43、Reactor 45、TCP 51、
+HTTP Core 84、HTTP Integration 16、Task Runtime 85；task targets 实际构建，
+Release smoke 成功，项目源码和测试 warning 为 0。当前宿主没有 bash/WSL/Linux。
 
 ## 2. Phase 1 文件
 
@@ -1026,6 +1028,41 @@ IndustrialAIServiceFramework 0.1.0
 
 `bash -n` 无法在当前宿主执行，因为命令不存在；没有声称本机 Linux 构建通过。
 
+## 14.2 Phase 5 Linux 最终验证
+
+```text
+workflow: Linux CI
+run: 30547126540
+URL: https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30547126540
+attempt / event / conclusion: 1 / push / success
+branch: phase/5-task-runtime
+head / Debug checkout / Release checkout:
+79d3d4e89feb71595dc67d820f9a5398dcc814d4
+runner: ubuntu-24.04
+OS: Ubuntu 24.04.4 LTS
+kernel: 6.17.0-1020-azure
+compiler: GCC 13.3.0
+CMake: 3.31.6
+Debug: configure/build success; 324/324 CTest; 0 failed
+Release: configure/build success; 324/324 CTest; 0 failed
+modules: Foundation 43; Reactor 45; TCP 51; HTTP Core 84;
+         HTTP Integration 16; Task Runtime 85
+task targets: iaisf_task and iaisf_task_tests built in Debug and Release
+project source warnings: 0
+project test warnings: 0
+```
+
+Release smoke：
+
+```text
+IndustrialAIServiceFramework 0.1.0
+2026-07-30T13:31:28.474Z [INFO] [Application] configuration validated for service IndustrialAIServiceFramework
+```
+
+两个 job 和全部可见步骤均为 success；没有 failed、cancelled、skipped、neutral、
+timeout 或 `continue-on-error`。run head、两个 checkout、本地 HEAD 与 upstream
+完全一致。
+
 ## 15. Linux 命令
 
 ```bash
@@ -1055,8 +1092,8 @@ aggregate sha256:
 83AE7E469DEA30C860DEFD4D26CB313B7B3C87EFCD9387414741E152EE46CF27
 ```
 
-Phase 4 开始、实现交付和 Phase 4C 封板前复核结果完全一致；Phase 5 开始和交付前
-再次复核为 62 个文件、59,240,225 字节，聚合 SHA-256 仍为
+Phase 4 开始、实现交付和 Phase 4C 封板前复核结果完全一致；Phase 5 开始、交付前
+和 Phase 5C 封板前再次复核为 62 个文件、59,240,225 字节，聚合 SHA-256 仍为
 `83AE7E469DEA30C860DEFD4D26CB313B7B3C87EFCD9387414741E152EE46CF27`。
 参考目录被 `.gitignore` 排除。
 
@@ -1114,7 +1151,7 @@ Task Runtime API 已实现，但禁止把现有 AppConfig 字段解释为 CLI �
 
 ## 19. 当前阻塞和遗留
 
-1. Phase 1—4 无剩余验收阻塞；Phase 5 等待同一实现提交的 Linux Debug/Release CI。
+1. Phase 1—5 无剩余验收阻塞；Phase 6 尚未开始。
 2. 默认 FetchContent 的首次 Linux 配置需要 GitHub 网络和 CA。
 3. 系统依赖模式尚未在 Linux 系统包环境验证。
 4. 本机没有 bash/WSL/Linux，不能执行 `bash -n` 或本地 Linux build/CTest。
@@ -1130,21 +1167,25 @@ Task Runtime API 已实现，但禁止把现有 AppConfig 字段解释为 CLI �
 Phase 6 尚未开始。Phase 5 Linux 封板后建议只包含：
 
 ```text
-PluginRequest / PluginResult
-IPlugin / PluginManager
+IAlgorithmPlugin or equivalent static interface
+PluginMetadata / PluginManager
 explicit static registration
+fast validation before task submission
 EchoPlugin
 MockVisionPlugin with mandatory mock: true
+plugin exception isolation
 TaskHandler adapter
+plugin and Task Runtime unit tests
 ```
 
 Phase 6 暂不包含：
 
 ```text
 dynamic .so
-timerfd/signalfd
+HTTP Task API
+timerfd automatic timeout
 async logging
-real TensorRT/PCL/GPU/robot
+real TensorRT/PCL/point-cloud/GPU/robot
 database
 benchmark
 ```
@@ -1158,5 +1199,5 @@ benchmark
 - 本轮不 commit/push；建议 commit：
 
 ```text
-feat: implement bounded task runtime
+docs: complete phase 5 validation record
 ```

@@ -3,11 +3,14 @@
 ## 1. 范围与状态
 
 Phase 4 HTTP 协议库状态保持 `PHASE_4_HTTP_PROTOCOL_COMPLETED`。Phase 5 总体状态为
-`PHASE_5_TASK_RUNTIME_IMPLEMENTED_LINUX_VALIDATION_BLOCKED`。可移植
+`PHASE_5_TASK_RUNTIME_COMPLETED`。可移植
 `iaisf_http_core` 已在 Windows Debug/Release 各通过 84/84 HTTP Core 测试；
 最终 [Linux CI run 30539245789](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30539245789)
 的 Debug/Release 均为 239/239，其中 HTTP Core 84/84、Linux-only
-HttpSession/HttpServer integration 16/16。
+HttpSession/HttpServer integration 16/16。Phase 5 最终
+[Linux CI run 30547126540](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30547126540)
+的 Debug/Release 均为 324/324，其中 Task Runtime 85/85；该结果不改变当前 HTTP
+端点集合。
 
 当前 CLI 不启动监听；`/health`、`/version` 是显式注册到 `HttpRouter` 后由
 `HttpServer` API 提供的能力。Phase 5 Task Runtime 不依赖 HTTP，后文任务 JSON API
@@ -468,6 +471,8 @@ Phase 5 只定义进程内 C++ API：
   不得依赖 EventLoop owner thread 或操作网络对象。
 - `TaskManager::shutdown` 先关闭 admission，再等待所有 in-flight submit 完整提交
   或回滚，最后 drain/join；它不会自动删除终态记录。
+- Phase 5 实现提交为 `79d3d4e89feb71595dc67d820f9a5398dcc814d4`；最终 Linux
+  Debug/Release 均实际执行 Task Runtime 85/85，项目源码和测试 warning 为 0。
 
 第 6、7 节中的任务与插件 JSON 均继续属于 planned schema。只有后续阶段显式实现并
 测试 Router/TaskManager 适配后，才能把这些文档结构描述为可访问 API。

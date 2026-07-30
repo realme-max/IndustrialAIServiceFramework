@@ -2,7 +2,7 @@
 
 ## 1. 状态与原则
 
-Phase 1 已实现基础单元测试和 CLI smoke，并在 Phase 1B 加强 Error 边界、Result 引用类别、配置数值类型和 UTF-8 字节限制覆盖。Phase 2 Reactor 最终 [GitHub Actions Linux CI run 30516007475](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30516007475) 已完成 Debug、Release、87/87 CTest 和 Release smoke 零 warning 验证。Phase 3 最终 [Linux CI run 30524686201](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30524686201) 已完成 Debug/Release 138/138 CTest，其中 Foundation 43、Reactor 45、TCP 50。Phase 4 状态为 `PHASE_4_HTTP_PROTOCOL_COMPLETED`：最终 [Linux CI run 30539245789](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30539245789) Debug/Release 239/239。Phase 5B 状态为 `PHASE_5_TASK_RUNTIME_IMPLEMENTED_LINUX_VALIDATION_BLOCKED`：Windows Debug/Release 212/212，其中 Task Runtime 85/85；尚无对应 Linux CI，不能把预计数量写成 PASS。
+Phase 1 已实现基础单元测试和 CLI smoke，并在 Phase 1B 加强 Error 边界、Result 引用类别、配置数值类型和 UTF-8 字节限制覆盖。Phase 2 Reactor 最终 [GitHub Actions Linux CI run 30516007475](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30516007475) 已完成 Debug、Release、87/87 CTest 和 Release smoke 零 warning 验证。Phase 3 最终 [Linux CI run 30524686201](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30524686201) 已完成 Debug/Release 138/138 CTest，其中 Foundation 43、Reactor 45、TCP 50。Phase 4 状态为 `PHASE_4_HTTP_PROTOCOL_COMPLETED`：最终 [Linux CI run 30539245789](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30539245789) Debug/Release 239/239。Phase 5 状态为 `PHASE_5_TASK_RUNTIME_COMPLETED`：Windows Debug/Release 212/212；最终 [Linux CI run 30547126540](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30547126540) Debug/Release 324/324，其中 Task Runtime 85/85。
 
 测试原则：
 
@@ -483,9 +483,30 @@ IndustrialAIServiceFramework 0.1.0
 MSVC 项目源码与测试编译 warning 为 0。构建环境仍出现既有、非致命的
 `pwsh.exe` applocal 诊断；它不是编译器 warning，且 target 和 CTest 均成功。
 
-Phase 5 Linux workflow 已显式请求 `iaisf_task` 和 `iaisf_task_tests`。若测试定义不再
-变化，Linux 预计发现 Foundation 43、Reactor 45、TCP 51、HTTP Core 84、
-HTTP Integration 16、Task Runtime 85，共 324 项；这是待 CI 验证的预期，不是结果。
+### 9.5 Phase 5 Linux 最终矩阵
+
+最终证据为 [Linux CI run 30547126540](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30547126540)，
+workflow `Linux CI`，push event，attempt 1，head/Debug checkout/Release checkout
+均为 `79d3d4e89feb71595dc67d820f9a5398dcc814d4`。runner 为 `ubuntu-24.04`，
+环境为 Ubuntu 24.04.4 LTS、kernel `6.17.0-1020-azure`、GCC 13.3.0、
+CMake 3.31.6。
+
+| 配置 | Foundation | Reactor | TCP | HTTP Core | HTTP Integration | Task Runtime | 总计 | 失败 |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| Linux Debug | 43 | 45 | 51 | 84 | 16 | 85 | 324 | 0 |
+| Linux Release | 43 | 45 | 51 | 84 | 16 | 85 | 324 | 0 |
+
+两个配置均成功 configure/build，并实际构建 `iaisf_task` 与 `iaisf_task_tests`。
+CTest 日志实际列出 324 个测试并报告 100% passed；`task` label 为 85 tests。
+Release smoke 实际输出：
+
+```text
+IndustrialAIServiceFramework 0.1.0
+2026-07-30T13:31:28.474Z [INFO] [Application] configuration validated for service IndustrialAIServiceFramework
+```
+
+两个 job 和全部可见步骤均为 success；没有 failed、cancelled、skipped、neutral、
+timeout 或 `continue-on-error`。Debug/Release 项目源码和测试编译 warning 均为 0。
 
 ## 10. Plugin 测试
 
@@ -502,7 +523,7 @@ HTTP Integration 16、Task Runtime 85，共 324 项；这是待 CI 验证的预�
   - 缺路径、绝对路径、`..`、NUL、非法 hint 被拒绝；
   - 不要求文件真实存在；
   - 延迟配置边界；
-  - cancellation 能在模拟延迟中尽快返回。
+  - Phase 6 不引入 cancellation 或自动 timeout。
 - execute 显式失败/抛异常被 TaskExecutor 转成 Failed，worker 存活。
 
 核心测试不链接 PCL、TensorRT、CUDA 或机器人 SDK。
@@ -659,4 +680,4 @@ Phase 0 的非运行验证项：
 - 调查时参考聚合 SHA-256：
   `83AE7E469DEA30C860DEFD4D26CB313B7B3C87EFCD9387414741E152EE46CF27`。
 - 当前宿主无可用 Linux/epoll 构建环境，因此没有伪造编译结果。
-- Phase 4C 封板前复算仍为 62 个文件、59,240,225 bytes 和相同聚合 SHA-256。
+- Phase 5C 封板前复算仍为 62 个文件、59,240,225 bytes 和相同聚合 SHA-256。

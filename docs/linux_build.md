@@ -4,8 +4,8 @@
 
 IndustrialAIServiceFramework 的 Phase 2 Reactor、Phase 3 TCP Transport 和 Phase 4
 HTTP adapter 直接使用 epoll、eventfd、accept4 和 POSIX Socket；HTTP Core 与
-Phase 5 Task Runtime 本身可移植。Phase 5 已在 Windows 验证，尚无包含 task targets
-的真实 Linux CI。timerfd 与 signalfd 仍是后续计划。
+Phase 5 Task Runtime 本身可移植。Phase 5 已在 Windows 验证，并由包含 task targets
+的真实 Linux Debug/Release CI 完成封板。timerfd 与 signalfd 仍是后续计划。
 Windows MinGW 或 MSVC 可以帮助发现一部分可移植 C++ 问题，但不能替代真实 Linux
 构建、测试和运行验证。
 
@@ -376,7 +376,7 @@ IndustrialAIServiceFramework 0.1.0
 SHA 与本地 HEAD/upstream 完全一致的 push run。Phase 4 状态为
 `PHASE_4_HTTP_PROTOCOL_COMPLETED`。
 
-## 14. Phase 5 Linux 验证入口
+## 14. Phase 5 Linux 最终验证
 
 Phase 5 新增跨平台 targets：
 
@@ -399,26 +399,46 @@ cmake --build build/linux-release --target iaisf_task iaisf_task_tests --paralle
 上面的拆分仅用于说明 task 入口。完整 CTest 和 Release CLI smoke 未删除，没有
 `continue-on-error`、artifact upload 或部署。
 
-Windows 已验证的 Task Runtime 定义数为 85。如果 Linux discovery 与当前定义一致，
-预期矩阵为：
+最终 push [Linux CI run 30547126540](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30547126540)
+对提交 `79d3d4e89feb71595dc67d820f9a5398dcc814d4` 完成真实验证：
 
 ```text
+workflow / event / attempt: Linux CI / push / 1
+conclusion: success
+branch: phase/5-task-runtime
+head / Debug checkout / Release checkout:
+79d3d4e89feb71595dc67d820f9a5398dcc814d4
+runner: ubuntu-24.04
+OS: Ubuntu 24.04.4 LTS
+kernel: 6.17.0-1020-azure
+compiler: GCC 13.3.0
+CMake: 3.31.6
+
 Foundation          43
 Reactor             45
 TCP                 51
 HTTP Core           84
 HTTP Integration    16
 Task Runtime        85
-expected total     324
+total              324
 ```
 
-这是待验证的预期，不是 Linux PASS。当前宿主没有 `bash`、WSL 或 Linux；
-`bash -n scripts/build_linux.sh` 因命令不存在而无法运行，也没有本地 Linux
-configure/build/CTest。Phase 5 提交、run URL、run ID、Ubuntu/GCC/CMake 版本、
-Debug/Release CTest 数量和 warning 结论都必须在 commit/push 后由真实 CI 记录。
+Debug 与 Release configure/build 均成功，CTest 均为 324/324、0 failed；日志实际
+列出 Task Runtime 85/85。两个配置均实际构建 `iaisf_task` 和
+`iaisf_task_tests`。Release smoke 输出：
+
+```text
+IndustrialAIServiceFramework 0.1.0
+2026-07-30T13:31:28.474Z [INFO] [Application] configuration validated for service IndustrialAIServiceFramework
+```
+
+两个 job 和全部可见步骤均为 success；没有 failed、cancelled、skipped、neutral、
+timeout 或 `continue-on-error`。Debug/Release 项目源码和测试编译 warning 均为 0。
+当前宿主仍没有 `bash`、WSL 或 Linux；该结论来自可追溯的 GitHub Actions run，
+不宣称本机执行了 Linux configure/build/CTest。
 
 当前状态：
 
 ```text
-PHASE_5_TASK_RUNTIME_IMPLEMENTED_LINUX_VALIDATION_BLOCKED
+PHASE_5_TASK_RUNTIME_COMPLETED
 ```

@@ -270,7 +270,7 @@ signalfd、异步日志、TLS、文件上传、AI 推理或 benchmark。
 
 ## 8. Phase 5：线程池与任务系统
 
-状态：**implemented，Linux validation blocked**。
+状态：**completed**。
 
 目标：实现无需插件也可测试、与网络层解耦的跨平台异步任务生命周期。
 
@@ -298,7 +298,10 @@ signalfd、异步日志、TLS、文件上传、AI 推理或 benchmark。
 - 协作 handler 的 success/Error/异常/非法或超限 result 都有终态出口；TimedOut
   被 erase 后的 late NotFound 只计数并丢弃。
 - 状态竞争测试使用 promise/future 等有界同步，不依赖固定 sleep。
-- Phase 5 Linux CI 尚未运行，状态保持 blocked；不能沿用 Phase 4 的 239/239 作为 Phase 5 证据。
+- 实现提交 `79d3d4e89feb71595dc67d820f9a5398dcc814d4` 已由最终
+  [Linux CI run 30547126540](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30547126540)
+  验证；Debug/Release 均为 324/324，Task Runtime 85/85，`iaisf_task` 与
+  `iaisf_task_tests` 均实际构建，Release smoke 成功，项目源码和测试 warning 为 0。
 
 明确未包含：
 
@@ -317,23 +320,24 @@ feat: implement bounded task runtime
 
 状态：**planned，未开始**。
 
-目标：通过静态注册插件完成工业任务服务化闭环。
+目标：通过静态注册插件把业务执行边界适配到现有 Task Runtime；本阶段不接入 HTTP。
 
 交付：
 
-- `PluginRequest`、`PluginResult`、`IPlugin`、`PluginManager`
-- 显式静态注册、快速无 I/O 的 `validate_request`、重复名/未知名/初始化失败处理
+- `IAlgorithmPlugin` 或等价静态接口、`PluginMetadata`、`PluginManager`
+- 显式静态注册、提交前快速无 I/O 校验、重复名/未知名/初始化失败处理
 - `EchoPlugin`
 - `MockVisionPlugin`，所有结果带 `mock: true`
-- `POST /api/v1/plugins/{plugin_name}/execute`
-- 插件异常隔离和配置传递
+- 插件异常隔离、配置传递和既有 `TaskHandler` 适配
+- 插件与 Task Runtime 单元测试
 
 验收：
 
-- HTTP 指定插件可异步提交并查询结果。
-- 未知插件、错误 task_type 和插件异常返回稳定错误。
+- 可通过进程内 API 选择插件并适配为 TaskHandler。
+- 未知插件、错误 operation 和插件异常返回稳定错误。
 - MockVision 不读取点云、不依赖 GPU/PCL/TensorRT。
 - 核心 target 不链接具体插件依赖。
+- 不实现 HTTP Task API、动态 `.so`、timerfd 自动超时、数据库或异步日志。
 
 建议 commit message：
 
