@@ -24,7 +24,7 @@
 基线：
 
 - CMake 最低版本 3.22，C++17，禁止编译器扩展。
-- GCC 建议 10+ 或 Clang 建议 12+；最终最低版本在 Phase 1 Linux 编译后确定。
+- GCC 建议 10+ 或 Clang 建议 12+；Phase 1 已在 GCC 13.3.0 上验证，更低版本兼容性仍需单独测试。
 - Phase 1 生产核心依赖仅为 nlohmann/json `v3.11.3`；pthread/Threads 在真正需要线程时再引入。
 - 测试依赖 GoogleTest `v1.15.2`，只在 `IAISF_BUILD_TESTS=ON` 时启用。
 - 默认使用固定 tag 的 FetchContent；`IAISF_USE_SYSTEM_DEPS=ON` 时严格通过 `find_package` 查找，不静默 fallback。
@@ -66,7 +66,7 @@ docs: complete phase 0 architecture design
 
 ## 4. Phase 1：项目骨架与构建系统
 
-状态：**implemented and audited；Linux CI validation blocked（2026-07-30）**
+状态：**completed（2026-07-30）**
 
 已实现：
 
@@ -84,49 +84,53 @@ docs: complete phase 0 architecture design
 
 验证：
 
-- 当前没有可运行 Linux/WSL/Docker；GitHub Actions workflow 尚未 push 或实际运行，因此 Linux Debug、Release、CTest 和 smoke 未取得成功证据，不能标记 completed。
+- Phase 1 最终实现提交为 `63b30cffcbe3e621af33664721b3675a647bd1a1`。
+- [GitHub Actions run 30508113122](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30508113122) 在 `phase/1-foundation` 上以 `ubuntu-24.04` runner 完成，workflow conclusion 为 `success`。
+- Linux Debug configure/build 成功，CTest 43/43 通过、0 failed。
+- Linux Release configure/build 成功，CTest 43/43 通过、0 failed；`--version` 和示例配置 smoke 成功。
+- CI 环境记录 Ubuntu 24.04.4 LTS、GCC 13.3.0、CMake 3.31.6；项目编译日志未出现 warning。
 - Windows Visual Studio 2022 x64 作为补充检查：Debug/Release configure、build 和 43 个 CTest 均成功；CLI version/config smoke 退出码均为 0。
-- Windows 结果不替代 Linux 验收。
 - 最终项目自身 MSVC 编译无 C++ warning；MSBuild 环境仍打印非致命的 `pwsh.exe` 缺失诊断。
 - 未实现任何 Socket、epoll、HTTP、线程池、任务、插件或异步日志能力。
 
-Phase 1B 建议 commit message：
+Phase 1C 建议 commit message：
 
 ```text
-ci: validate phase 1 foundation on Linux
+docs: complete phase 1 validation record
 ```
 
 ## 5. Phase 2：Socket、epoll 与 EventLoop
 
-目标：实现 Linux ET 单 Reactor TCP echo 闭环。
+状态：**planned，未开始**
+
+目标：建立 Linux fd RAII、Socket 基础操作与单 Reactor 事件循环的最小基础设施。
 
 交付：
 
-- `UniqueFd`、`SocketOps`、`InetAddress`、`Buffer`
-- `Channel`、`Poller`、`EpollPoller`、`EventLoop`
-- `Acceptor`、`TcpServer`、`TcpConnection`
-- `eventfd` 跨线程唤醒、幂等关闭、连接上限
-- 非阻塞 accept/read/write、部分写、半关闭、SIGPIPE 防御
-- TCP echo 示例和自动集成测试
+- `UniqueFd`
+- Linux Socket 基础封装
+- `Channel`
+- `EpollPoller`
+- `EventLoop`
+- `eventfd` 跨线程唤醒
+- 对应单元测试
 
 实施重点：
 
-- 先实现值对象/RAII，再实现 Poller/Channel，最后连接生命周期。
-- ET accept/read/write 均循环到 `EAGAIN`。
-- 连接容器拥有对象；Channel 不拥有 fd；删除顺序可测试。
-- 通过小 socket buffer 强制触发部分写。
+- 先固定 fd 所有权、移动语义和幂等关闭，再实现 Channel 与 epoll 注册生命周期。
+- `Channel` 不拥有 fd；`EventLoop` 是 Channel/Poller 操作的线程归属边界。
+- `eventfd` 只承担跨线程唤醒，不在本阶段引入任务调度。
 
 验收：
 
-- 多客户端 echo 成功，连接关闭后 fd 数稳定。
-- Socket 移动、epoll add/mod/del、EventLoop wakeup 有单测。
-- ASan 下集成测试无明显内存/生命周期错误。
-- 不实现 HTTP 和任务业务。
+- `UniqueFd` 和 Socket 基础封装的所有权、移动与关闭行为有单测。
+- epoll add/mod/del 和 EventLoop wakeup 有单测。
+- 不实现 HTTP、完整 `TcpConnection` 协议处理、ThreadPool、TaskRepository、PluginManager、timerfd 任务超时、signalfd 优雅停止、异步日志或 AI 插件。
 
 建议 commit message：
 
 ```text
-feat(network): complete phase 2 single-reactor TCP core
+feat(network): add phase 2 event-loop foundations
 ```
 
 ## 6. Phase 3：HTTP 协议与路由
@@ -314,7 +318,7 @@ docs(vision): define phase 9 production vision plugin boundary
 
 | 风险 | 影响 | 当前缓解 |
 |---|---|---|
-| 当前无 Linux/WSL 环境，CI 尚未运行 | Phase 1 Linux 验收阻塞 | 已创建 Ubuntu 24.04 workflow；由用户提交并 push 后取得真实 run 证据 |
+| 本机无 Linux/WSL 环境 | 无法本机复现 Linux CI | Ubuntu 24.04 GitHub Actions 已完成 Phase 1 验收；保留完整 run 证据 |
 | 默认 FetchContent 依赖网络 | 首次离线配置失败 | 固定 tag；提供系统依赖模式 |
 | 插件不协作取消 | 超时后仍占 worker | CancellationToken、晚到结果丢弃；未来进程隔离 |
 | 单 Reactor 遇到慢序列化/大响应 | 网络线程延迟 | 严格大小限制；测量后再拆分 |

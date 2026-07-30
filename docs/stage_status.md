@@ -3,17 +3,18 @@
 ## 当前结论
 
 ```text
-PHASE_1_FOUNDATION_IMPLEMENTED_LINUX_VALIDATION_BLOCKED
+PHASE_1_FOUNDATION_COMPLETED
 ```
 
-- 当前阶段：Phase 1B 封板审计
-- 实现状态：基础工程、公共类型、配置、同步日志、CLI、测试、脚本和 Linux CI workflow 已实现
-- Linux 验证：blocked，workflow 尚未 push、运行或取得成功证据
-- 补充验证：Windows Visual Studio 2022 x64 Debug/Release 回归结果记录在下文
+- 当前阶段：Phase 1C 验证记录与封板
+- 实现状态：Phase 1 完成
+- Windows 验证：Visual Studio 2022 x64 Debug/Release 补充回归完成
+- Linux CI 验证：Ubuntu 24.04 GCC Debug/Release、CTest 和 Release smoke 完成
+- 验证 run：[GitHub Actions 30508113122](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30508113122)
 - 日期：2026-07-30（Asia/Shanghai）
 - 下一阶段：Phase 2，未开始
 
-只有真实 Linux Debug、Release、CTest 和 smoke 全部通过后，才能把标记改为 `PHASE_1_FOUNDATION_COMPLETED`。
+Phase 1 完成仅覆盖基础工程和公共基础设施；网络、HTTP、线程池、任务、插件、定时器与异步日志仍未实现。
 
 ## Git 状态
 
@@ -21,20 +22,21 @@ PHASE_1_FOUNDATION_IMPLEMENTED_LINUX_VALIDATION_BLOCKED
 |---|---|
 | 当前分支 | `phase/1-foundation` |
 | Phase 0 提交 | `5fbcec0 docs: complete phase 0 architecture design` |
+| Phase 1 最终实现提交 | `63b30cffcbe3e621af33664721b3675a647bd1a1` |
+| 远程分支提交 | `origin/phase/1-foundation` = `63b30cffcbe3e621af33664721b3675a647bd1a1` |
 | origin | `https://github.com/realme-max/IndustrialAIServiceFramework.git` |
 | 开始时工作区 | clean |
-| commit | 未执行 |
-| push | 未执行 |
-| PR | 未创建 |
+| Phase 1C commit | 未执行 |
+| Phase 1C push | 未执行 |
 
-Phase 0 提交没有 amend、reset、rebase 或重写。
+本阶段没有 amend、reset、rebase、merge、commit、push 或修改 origin。
 
 ## Phase 总览
 
 | Phase | 名称 | 状态 | 验证结论 |
 |---:|---|---|---|
 | 0 | 只读调查与架构设计 | completed | 已提交为 `5fbcec0` |
-| 1 | C++17 基础工程与公共基础设施 | implemented and audited / Linux blocked | Linux CI workflow created；run pending |
+| 1 | C++17 基础工程与公共基础设施 | completed | Windows 补充回归完成；Linux CI run `30508113122` success |
 | 2 | Socket、epoll 与 EventLoop | planned | 未开始 |
 | 3 | HTTP 协议与路由 | planned | 未开始 |
 | 4 | 线程池与任务系统 | planned | 未开始 |
@@ -171,9 +173,19 @@ logging.level
 
 - `wsl.exe --status`：exit 50。
 - `wsl.exe --list --verbose`：exit 1，只返回安装/用法信息。
-- 无可运行发行版，无法取得 uname、os-release、Linux compiler 或 Linux CMake。
+- 本机无可运行发行版，无法在本机复现 Linux 构建。
 - Docker、Podman 均未发现。
 - 未自动安装 WSL、发行版、Docker 或系统包。
+
+### GitHub Actions Linux
+
+| 项目 | 实际记录 |
+|---|---|
+| runner label | `ubuntu-24.04`（Debug、Release） |
+| OS | Ubuntu 24.04.4 LTS（Debug `Record environment`） |
+| kernel | 6.17.0-1020-azure x86_64（Debug `uname -a`） |
+| GCC | 13.3.0（Debug、Release configure） |
+| CMake | 3.31.6（Debug `Record environment`） |
 
 ## 真实执行结果
 
@@ -181,29 +193,29 @@ logging.level
 
 | 项目 | 结果 |
 |---|---|
-| configure | not run |
-| build | not run |
-| CTest | not run |
-| 测试总数/通过/失败 | unknown / unknown / unknown |
-| warning | unknown |
+| configure | pass |
+| build | pass |
+| CTest | pass |
+| 测试总数/通过/失败 | 43 / 43 / 0 |
+| 项目编译 warning | 0 |
 
 ### Linux Release
 
 | 项目 | 结果 |
 |---|---|
-| configure | not run |
-| build | not run |
-| CTest | not run |
-| 测试总数/通过/失败 | unknown / unknown / unknown |
-| warning | unknown |
+| configure | pass |
+| build | pass |
+| CTest | pass |
+| 测试总数/通过/失败 | 43 / 43 / 0 |
+| 项目编译 warning | 0 |
 
 ### Linux smoke
 
 | 项目 | 结果 |
 |---|---|
-| `--version` | not run |
-| example config | not run |
-| 实际退出码 | not available |
+| `--version` | pass；输出 `IndustrialAIServiceFramework 0.1.0` |
+| example config | pass；INFO 日志包含 `configuration validated for service IndustrialAIServiceFramework` |
+| workflow step | `Smoke Release` conclusion = `success` |
 
 ### Windows/MSVC 补充结果
 
@@ -218,13 +230,18 @@ Windows 首次配置使用默认 FetchContent 模式并访问 GitHub，固定版
 
 ### GitHub Actions Linux CI
 
-- workflow：`.github/workflows/linux-ci.yml`
-- runner：固定 `ubuntu-24.04`
-- jobs：`linux-debug`、`linux-release`
-- Debug：环境记录、configure、build、CTest
-- Release：configure、build、CTest、`--version` 和示例配置 smoke
+- workflow：`Linux CI`（`.github/workflows/linux-ci.yml`）
+- run ID：`30508113122`
+- run URL：[https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30508113122](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30508113122)
+- event / attempt：`push` / `1`
+- commit：`63b30cffcbe3e621af33664721b3675a647bd1a1`
+- branch：`phase/1-foundation`
+- runner：两个 job 均为 GitHub-hosted `ubuntu-24.04`
+- `Linux Debug`：job 与环境记录、configure/build、CTest 步骤均为 `success`
+- `Linux Release`：job 与 configure/build、CTest、smoke 步骤均为 `success`
+- workflow status / conclusion：`completed` / `success`
 - 权限：`contents: read`
-- 状态：workflow 已创建，但未 commit、push 或运行；没有 Linux PASS 证据
+- 日志检查：未出现项目编译 warning；Release job 未单独重复打印 CMake 版本
 
 手工 Windows Release smoke：
 
@@ -260,14 +277,16 @@ ctest --test-dir build/windows-vs2022 -C Release --output-on-failure
 .\build\windows-vs2022\Release\iaisf_server.exe --version
 .\build\windows-vs2022\Release\iaisf_server.exe `
   --config .\config\iaisf.example.json
+```
 
-D:\Git\Git\bin\bash.exe -n `
-  scripts/build_linux.sh `
-  scripts/test_linux.sh `
+```bash
+bash -n \
+  scripts/build_linux.sh \
+  scripts/test_linux.sh \
   scripts/smoke_linux.sh
 ```
 
-正式 Linux 命令尚未执行。
+正式 Linux 脚本已由上述 GitHub Actions run 执行；本机仍没有可运行的 Linux/WSL 环境。
 
 ## 参考工程保护
 
@@ -295,7 +314,8 @@ D:\Git\Git\bin\bash.exe -n `
 
 ## 当前阻塞与风险
 
-- 唯一阶段阻塞：GitHub Actions 尚未实际运行，缺少 Ubuntu 24.04 Debug/Release/CTest/smoke 成功证据。
+- Phase 1 没有剩余验收阻塞。
+- 本机仍无 Linux/WSL，Linux 结果依赖可追溯的 GitHub Actions 证据而非本机复现。
 - 默认 FetchContent 首次 Linux 配置需要 GitHub 网络和有效 CA 证书。
 - 系统依赖模式已设计但未在已安装 Linux 包环境验证。
 - Windows/NTFS 工作区不能可靠表达新 shell 脚本的 POSIX executable bit；workflow 会在运行时执行 `chmod +x scripts/*.sh`，人工 Linux 使用前仍应确认权限。
@@ -303,7 +323,7 @@ D:\Git\Git\bin\bash.exe -n `
 
 ## Phase 2 建议
 
-GitHub Actions Linux 验收真实通过并补齐证据后，再开始：
+Phase 2 尚未开始，建议仅包含：
 
 1. `UniqueFd`
 2. Socket 基础封装
@@ -313,12 +333,12 @@ GitHub Actions Linux 验收真实通过并补齐证据后，再开始：
 6. eventfd 跨线程唤醒
 7. 对应基础单元测试
 
-不要在 Phase 2 同时塞入 HTTP、任务和插件。
+Phase 2 暂不包含 HTTP、完整 `TcpConnection` 协议处理、ThreadPool、TaskRepository、PluginManager、timerfd 任务超时、signalfd 优雅停止、异步日志或 AI 插件。
 
 ## 建议 commit
 
 未执行 commit。建议：
 
 ```text
-ci: validate phase 1 foundation on Linux
+docs: complete phase 1 validation record
 ```
