@@ -2,7 +2,7 @@
 
 面向工业 AI 应用的 C++ 高性能任务服务框架。
 
-> 当前状态：Phase 1 基础工程与 Phase 1B 代码审计已经实现，并在 Windows/MSVC 上完成补充构建与测试。Linux GitHub Actions workflow 已创建，但尚未 push、运行或取得成功证据，因此 **Linux Debug、Release、CTest 和 smoke 尚未验证**。状态标记为 `PHASE_1_FOUNDATION_IMPLEMENTED_LINUX_VALIDATION_BLOCKED`。
+> 当前状态：Phase 1 基础工程、Phase 1B 代码审计和跨平台验证已经完成，状态标记为 `PHASE_1_FOUNDATION_COMPLETED`。Windows Visual Studio 2022 Debug/Release 已完成补充验证；Ubuntu 24.04 GCC Debug/Release、CTest 和 Release smoke 已由 [GitHub Actions run 30508113122](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30508113122) 在提交 `63b30cffcbe3e621af33664721b3675a647bd1a1` 上真实验证。
 
 ## 项目定位
 
@@ -26,7 +26,7 @@ Phase 1 只建立可测试的公共基础设施，不启动网络服务，也不
 - Ubuntu 24.04 GCC Debug/Release GitHub Actions workflow
 - Apache License 2.0
 
-Phase 1B 审计修正了 Error 非空消息的文档边界，移除了未实现的 CMake 安装接口，并加强了 Result 引用类别、配置类型和 UTF-8 字节上限测试。Windows/MSVC 补充验证共注册 43 个 CTest，2026-07-30 的 Debug 和 Release 回归均为 43/43 通过；该结果不替代 Linux 验收。
+Phase 1B 审计修正了 Error 非空消息的文档边界，移除了未实现的 CMake 安装接口，并加强了 Result 引用类别、配置类型和 UTF-8 字节上限测试。2026-07-30 的 Windows/MSVC Debug、Release 补充回归和 Ubuntu 24.04 GCC Debug、Release CI 回归均为 43/43 CTest 通过；Linux `--version` 与示例配置 smoke 也已通过。
 
 ## 尚未实现
 
@@ -43,7 +43,7 @@ Phase 1B 审计修正了 Error 非空消息的文档边界，移除了未实现�
 ## 架构 Roadmap
 
 ```text
-Phase 1 (implemented, Linux validation blocked)
+Phase 1 (completed)
   C++17 / CMake / Error / Result / AppConfig / ConsoleLogger / CLI / tests
 
 Phase 2 (planned)
@@ -103,7 +103,7 @@ Smoke：
 ./scripts/smoke_linux.sh
 ```
 
-当前环境没有真实执行这些 Linux 脚本。[Linux CI workflow](.github/workflows/linux-ci.yml) 会在分支被用户提交并 push 后运行相同脚本；workflow 文件存在不代表 CI 已通过。完整说明见 [linux_build.md](docs/linux_build.md)。
+[Linux CI workflow](.github/workflows/linux-ci.yml) 已在 GitHub 托管的 `ubuntu-24.04` runner 上真实执行这些脚本。run `30508113122` 记录 Ubuntu 24.04.4 LTS、GCC 13.3.0 和 CMake 3.31.6；Debug、Release configure/build 成功，两个配置均为 43/43 CTest 通过，Release smoke 输出版本 `IndustrialAIServiceFramework 0.1.0` 并成功校验示例配置。完整证据见 [stage_status.md](docs/stage_status.md)，构建说明见 [linux_build.md](docs/linux_build.md)。
 
 ## 命令行
 
@@ -218,7 +218,7 @@ ctest --test-dir build/linux-release --output-on-failure
 - Application 的 help/version/config/非法参数
 - CTest CLI version 和 example-config smoke
 
-真实结果见 [stage_status.md](docs/stage_status.md)。当前仅有 Windows/MSVC 补充结果，Linux 结果明确为未执行。
+真实结果见 [stage_status.md](docs/stage_status.md)。Windows/MSVC Debug/Release 已完成补充回归；Ubuntu 24.04 GCC Debug/Release 已通过 GitHub Actions 验证。
 
 ## 项目结构
 

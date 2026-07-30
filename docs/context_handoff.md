@@ -5,13 +5,15 @@
 - 项目：IndustrialAIServiceFramework
 - 当前分支：`phase/1-foundation`
 - Phase 0 提交：`5fbcec0 docs: complete phase 0 architecture design`
-- 当前阶段：Phase 1B 封板审计
-- 状态：`PHASE_1_FOUNDATION_IMPLEMENTED_LINUX_VALIDATION_BLOCKED`
+- Phase 1 最终实现提交：`63b30cffcbe3e621af33664721b3675a647bd1a1`
+- 当前阶段：Phase 1C 验证记录与封板
+- 状态：`PHASE_1_FOUNDATION_COMPLETED`
 - 日期：2026-07-30
-- commit/push/PR：均未执行
-- 阻塞：Linux CI workflow 尚未 push、运行或取得成功证据
+- GitHub Actions run：[30508113122](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30508113122)
+- Phase 1C commit/push/PR：均未执行
+- 阻塞：Phase 1 无剩余验收阻塞
 
-Phase 1 基础代码和测试已经实现并完成 Phase 1B 审计；Windows/MSVC 只作为补充验证。不得把 workflow 文件存在或 Windows 结果改写成 Linux PASS。
+Phase 1 基础代码和测试已经实现并完成 Phase 1B 审计。Windows/MSVC 作为补充验证；Phase 1 完成结论来自与最终实现提交完全一致的 Ubuntu 24.04 GitHub Actions 成功运行。
 
 ## 2. Phase 1 文件
 
@@ -301,28 +303,47 @@ Release --version: exit 0
 Release --config example: exit 0
 ```
 
-最终项目自身 MSVC warning 为 0。Visual Studio 的本机 vcpkg applocal 集成会尝试调用缺失的 `pwsh.exe` 并打印非致命诊断，构建仍为 exit 0；项目本身没有启用系统依赖模式。该结果不能用于 `PHASE_1_FOUNDATION_COMPLETED`。
+最终项目自身 MSVC warning 为 0。Visual Studio 的本机 vcpkg applocal 集成会尝试调用缺失的 `pwsh.exe` 并打印非致命诊断，构建仍为 exit 0；项目本身没有启用系统依赖模式。Windows 结果只作为补充，Linux CI 成功运行是 Phase 1 完成的目标环境证据。
 
 Windows 首次配置使用默认 FetchContent 模式并访问 GitHub；固定依赖获取成功，第三方源码和产物只写入被忽略的 `build/windows-vs2022/_deps`。系统依赖模式未启用。
 
 Linux：
 
 ```text
-Debug configure/build/CTest: not run
-Release configure/build/CTest: not run
-Linux smoke: not run
+runner: GitHub-hosted ubuntu-24.04
+OS: Ubuntu 24.04.4 LTS
+GCC: 13.3.0
+CMake: 3.31.6
+Debug configure/build: pass
+Debug CTest: 43/43 pass, 0 failed
+Release configure/build: pass
+Release CTest: 43/43 pass, 0 failed
+Release smoke: pass
+project compiler warnings in CI log: 0
 ```
 
 GitHub Actions：
 
 ```text
-workflow: .github/workflows/linux-ci.yml
-runner: ubuntu-24.04
+workflow: Linux CI (.github/workflows/linux-ci.yml)
+run ID: 30508113122
+run URL: https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30508113122
+event / attempt: push / 1
+commit: 63b30cffcbe3e621af33664721b3675a647bd1a1
+branch: phase/1-foundation
+runner: ubuntu-24.04 (both jobs)
 jobs: linux-debug, linux-release
-run status: not pushed / not run
+run status / conclusion: completed / success
 ```
 
-本地已通过三个脚本的 `bash -n` 和 workflow YAML 语法解析。本机没有 shellcheck/actionlint，未自动安装；这些静态检查不能替代真实 GitHub Actions run。
+smoke 实际输出：
+
+```text
+IndustrialAIServiceFramework 0.1.0
+2026-07-30T02:19:47.674Z [INFO] [Application] configuration validated for service IndustrialAIServiceFramework
+```
+
+Ubuntu/CMake 版本来自 Debug job 的 `Record environment`；Debug 与 Release configure 均识别 GNU 13.3.0，Release job 未单独重复打印 CMake 版本。两个 job 和所有必需步骤均为 `success`，workflow 最终 conclusion 为 `success`。
 
 ## 11. Linux 命令
 
@@ -359,7 +380,7 @@ aggregate sha256:
 
 ## 13. 补充架构规则
 
-Phase 1 只更新文档，未创建对应类：
+Phase 1C 只更新文档，未创建对应类：
 
 - TaskRepository 是 Succeeded/Failed/Timeout 竞争的唯一裁决者，首个终态获胜；
 - Timeout 后晚到插件结果只记录并丢弃；
@@ -386,18 +407,19 @@ Phase 1 只更新文档，未创建对应类：
 
 ## 15. 当前阻塞和遗留
 
-1. 需要用户提交并 push 后，由 GitHub Actions 在 Ubuntu 24.04 真实执行 Debug、Release、CTest、smoke。
+1. Phase 1 无剩余验收阻塞；Phase 2 尚未开始。
 2. 默认 FetchContent 的首次 Linux 配置需要 GitHub 网络和 CA。
 3. 系统依赖模式尚未在 Linux 系统包环境验证。
-4. Windows/NTFS 不可靠保存新 shell 脚本的 executable bit；workflow 已显式 `chmod +x scripts/*.sh`，人工 Linux 使用前仍需确认。
-5. 本机 Visual Studio vcpkg applocal 集成的非致命 `pwsh.exe` 诊断与代码无关，但保留记录。
+4. 本机没有可运行 Linux/WSL，不能在本机复现 CI。
+5. Windows/NTFS 不可靠保存新 shell 脚本的 executable bit；workflow 已显式 `chmod +x scripts/*.sh`，人工 Linux 使用前仍需确认。
+6. 本机 Visual Studio vcpkg applocal 集成的非致命 `pwsh.exe` 诊断与代码无关，但保留记录。
 
 ## 16. Phase 2 入口
 
 进入条件：
 
 1. 用户允许开始 Phase 2；
-2. Phase 1 GitHub Actions Linux 验收补齐；
+2. Phase 1 GitHub Actions Linux 验收已完成；
 3. 先复查 Git 和参考工程；
 4. 不覆盖当前未提交内容。
 
@@ -413,16 +435,18 @@ eventfd wakeup
 unit tests
 ```
 
-不要提前加入 HTTP、任务、插件、timerfd 或异步日志。
+Phase 2 允许范围仅为 `UniqueFd`、Linux Socket 基础封装、`Channel`、`EpollPoller`、`EventLoop`、`eventfd` 唤醒和对应单元测试。
+
+不要提前加入 HTTP、完整 `TcpConnection` 协议处理、ThreadPool、TaskRepository、PluginManager、timerfd 任务超时、signalfd 优雅停止、异步日志或 AI 插件。
 
 ## 17. Git 约束
 
 - 当前分支必须保持 `phase/1-foundation`。
-- 不 amend Phase 0。
-- 不 commit、push、PR 或 merge。
+- 不 amend 或重写已有提交。
+- Phase 1C 不 commit、push、创建 PR 或 merge。
 - build、FetchContent、compile_commands 和日志不能进入 Git。
 - 最终建议 commit：
 
 ```text
-ci: validate phase 1 foundation on Linux
+docs: complete phase 1 validation record
 ```

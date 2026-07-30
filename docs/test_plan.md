@@ -2,7 +2,7 @@
 
 ## 1. 状态与原则
 
-Phase 1 已实现基础单元测试和 CLI smoke，并在 Phase 1B 加强 Error 边界、Result 引用类别、配置数值类型和 UTF-8 字节限制覆盖。Linux CI workflow 已创建但尚未 push 或运行，因此没有“Linux PASS”声明。
+Phase 1 已实现基础单元测试和 CLI smoke，并在 Phase 1B 加强 Error 边界、Result 引用类别、配置数值类型和 UTF-8 字节限制覆盖。提交 `63b30cffcbe3e621af33664721b3675a647bd1a1` 已在 Ubuntu 24.04 GitHub Actions 上完成 Debug、Release、CTest 和 Release smoke 验证。
 
 测试原则：
 
@@ -85,46 +85,65 @@ ctest --test-dir build/linux-release --output-on-failure
 ./scripts/smoke_linux.sh
 ```
 
-当前结果：
+GitHub Actions 证据：
 
-| 环境 | Configure | Build | CTest | Smoke |
-|---|---|---|---|---|
-| Linux Debug | not run | not run | not run | 不适用 |
-| Linux Release | not run | not run | not run | not run |
-| Windows VS2022 Debug | pass（补充） | pass（补充） | 43/43 pass（补充） | CTest 内 2 项 pass |
-| Windows VS2022 Release | pass（补充） | pass（补充） | 43/43 pass（补充） | version/config 手工执行退出码 0 |
-| GitHub Actions Ubuntu 24.04 | workflow created | not run | not run | not run |
+| 项目 | 实际记录 |
+|---|---|
+| workflow | `Linux CI` |
+| run | [30508113122](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30508113122) |
+| event / attempt | `push` / `1` |
+| commit | `63b30cffcbe3e621af33664721b3675a647bd1a1` |
+| branch | `phase/1-foundation` |
+| final status / conclusion | `completed` / `success` |
+| runner | 两个 job 均为 GitHub-hosted `ubuntu-24.04` |
+| OS | Debug 环境记录为 Ubuntu 24.04.4 LTS |
+| compiler | Debug 与 Release configure 均识别 GNU 13.3.0 |
+| CMake | Debug 环境记录为 3.31.6；Release job 未单独重复打印版本 |
 
-Windows 结果不满足 Linux 阶段验收门槛。
+真实测试矩阵：
+
+| 环境/job | Configure | Build | CTest 总数/通过/失败 | Smoke | 项目编译 warning |
+|---|---|---|---|---|---:|
+| GitHub Actions Linux Debug | pass | pass | 43 / 43 / 0 | 不适用 | 0 |
+| GitHub Actions Linux Release | pass | pass | 43 / 43 / 0 | pass | 0 |
+| Windows VS2022 Debug（补充） | pass | pass | 43 / 43 / 0 | CTest 内 2 项 pass | 0 |
+| Windows VS2022 Release（补充） | pass | pass | 43 / 43 / 0 | version/config 手工执行 exit 0 | 0 |
+
+Release smoke 原始输出摘要：
+
+```text
+IndustrialAIServiceFramework 0.1.0
+2026-07-30T02:19:47.674Z [INFO] [Application] configuration validated for service IndustrialAIServiceFramework
+```
+
+`Smoke Release` 步骤、两个 build 步骤和两个 CTest 步骤均为 `success`；完整 workflow conclusion 为 `success`，没有用 cancelled、skipped、neutral 或单步重跑代替完整成功运行。Linux 编译日志没有匹配到项目 warning。
 
 Phase 1B 的临时配置 fixture 使用原子创建的唯一系统临时目录，不仅依赖进程内序号；因此多个 CTest 进程并行执行时不会共享配置路径，析构时通过 RAII 清理整个测试目录。
 
-## 5. Network/Reactor 测试
+## 5. Phase 2 Network/Reactor 基础测试
+
+状态：planned，未开始。Phase 2 只验证 fd RAII、Linux Socket 基础封装和事件循环原语。
 
 ### 5.1 Unit/component
 
 - `UniqueFd` 默认无效、析构关闭、release/reset、移动构造、移动赋值；禁止拷贝。
 - fd 为 0 时仍能正确管理，避免以 `> 0` 判断有效性。
+- Linux Socket 基础封装验证创建、非阻塞设置、错误返回和所有权转移。
 - EpollPoller add/mod/del 正常；重复注册、无效 fd 和删除后事件有明确错误。
 - Channel 关注事件变更只在 owner loop。
-- EventLoop `post()` 从其他线程唤醒，不丢回调，不 busy wait。
-- Buffer 跨边界 append/consume 和高水位。
-- Acceptor 在 ET 下连续 accept 到 `EAGAIN`。
+- EventLoop 通过 `eventfd` 从其他线程唤醒，不丢回调，不 busy wait。
 
-### 5.2 I/O 边界
+### 5.2 Phase 2 暂不执行
 
-- 单次发送完整消息。
-- 每字节/随机分段发送。
-- 多消息一次到达。
-- 人工缩小 socket send buffer，验证部分写和 `EPOLLOUT` 重新关注。
-- 客户端 `shutdown(SHUT_WR)`，服务读取剩余数据并写完响应。
-- 客户端 reset、HUP、ERR。
-- 连接上限和 accept drain。
-- 服务关闭时所有连接回调/Channel/fd 的销毁顺序。
+- HTTP parser/request/response/router。
+- 完整 `TcpConnection` 协议处理、Acceptor/TcpServer 和 TCP echo 集成。
+- ThreadPool、TaskRepository 和 PluginManager。
+- timerfd 任务超时、signalfd 优雅停止。
+- 异步日志或 AI 插件。
 
 ### 5.3 fd 泄漏
 
-Linux 集成测试前后读取 `/proc/<pid>/fd` 数量；重复连接/断开后应回到稳定区间。ASan leak detection 作为补充。
+Phase 2 单元测试重复创建和释放受管 fd，并检查所有权转移后只关闭一次。真实服务进程的 `/proc/<pid>/fd` 稳定性检查延后到连接层集成阶段。
 
 ## 6. HTTP Parser 测试
 
