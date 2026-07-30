@@ -5,7 +5,7 @@
 - 项目：IndustrialAIServiceFramework
 - 阶段：Phase 5 Bounded Thread Pool and Task Runtime
 - 日期：2026-07-30
-- 状态：`PHASE_5_TASK_RUNTIME_IMPLEMENTED_LINUX_VALIDATION_BLOCKED`；跨平台 Task Runtime 已完成 Windows 分层验证，尚无对应 Linux CI
+- 状态：`PHASE_5_TASK_RUNTIME_COMPLETED`；跨平台 Task Runtime 已完成 Windows 分层回归和 Linux Debug/Release 最终验证
 - 目标平台：Linux x86_64，C++17
 
 本文同时记录已实现的 Phase 1 基础设施、Phase 2 Reactor、Phase 3 TCP、Phase 4 HTTP 与 Phase 5 Task Runtime，以及后续目标边界。只有明确列入已实现边界的类才是当前能力。
@@ -142,8 +142,12 @@ Phase 5 新增跨平台 `iaisf_task` / `iaisf::task`，PUBLIC 依赖 `iaisf::cor
   执行 handler，多个 shutdown caller 由 Pool 状态机收敛。
 
 Windows Debug/Release 均实际执行 Foundation 43、HTTP Core 84、Task Runtime 85，
-合计 212/212。Linux workflow 已显式构建两个 task target，但新提交及其真实 Linux
-CI 尚不存在，因此当前不使用 Phase 4 Linux 结果替代 Phase 5 验证。
+合计 212/212。Phase 5 实现提交 `79d3d4e89feb71595dc67d820f9a5398dcc814d4`
+已由最终 [Linux CI run 30547126540](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30547126540)
+验证；Ubuntu 24.04.4 LTS、GCC 13.3.0、CMake 3.31.6 的 Debug/Release configure、
+build 均成功，CTest 均为 324/324，其中 Task Runtime 85/85。两个配置均实际构建
+`iaisf_task` 与 `iaisf_task_tests`，Release version/config smoke 成功，项目源码
+和测试编译 warning 为 0。
 
 ## 2. 调查结果与设计来源
 
@@ -841,10 +845,12 @@ Phase 1 的 `Error` 保留公开字段以维持轻量值语义，因此调用者
 
 ## 19. Phase 6 建议边界
 
-Phase 5 代码已实现但等待真实 Linux CI。Phase 6 尚未开始；建议只在 Phase 5 封板后
-实现最小静态插件契约、PluginRequest/PluginResult、IPlugin、PluginManager、
-EchoPlugin、显式名称冲突/未知插件处理与 MockVisionPlugin（结果强制 `mock: true`）。
+Phase 5 已完成封板。Phase 6 尚未开始；建议只实现 `IAlgorithmPlugin` 或等价静态
+插件契约、`PluginMetadata`、`PluginManager` 静态注册、提交前快速校验、
+EchoPlugin、MockVisionPlugin（结果强制 `mock: true`）、插件异常隔离、既有
+`TaskHandler` 适配及对应单元测试。
 
-Phase 6 不应实现动态 `.so`、timerfd/signalfd、异步日志、真实 TensorRT/PCL/GPU、
-机器人、Agent、多 Reactor、数据库或 benchmark。插件适配 `TaskHandler`，不重写
-TaskRepository，也不能直接操作 TcpConnection、HttpSession、Channel、Socket 或 epoll。
+Phase 6 不应实现动态 `.so`、HTTP Task API、timerfd 自动超时、异步日志、真实
+TensorRT/PCL/GPU、真实点云、机器人、Agent、多 Reactor、数据库或 benchmark。
+插件不重写 TaskRepository，也不能直接操作 TcpConnection、HttpSession、Channel、
+Socket 或 epoll。

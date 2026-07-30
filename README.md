@@ -2,7 +2,7 @@
 
 面向工业 AI 应用的 C++ 高性能任务服务框架。
 
-> 当前状态：`PHASE_5_TASK_RUNTIME_IMPLEMENTED_LINUX_VALIDATION_BLOCKED`。跨平台有界线程池与任务运行时已完成 Phase 5B 并发、终态和生命周期专项审计；Windows Visual Studio 2022 Debug/Release 均为 212/212，其中 Task Runtime 85/85。Phase 5 提交尚未产生，对应 Linux CI 尚未运行，因此不能标记为完成。
+> 当前状态：`PHASE_5_TASK_RUNTIME_COMPLETED`。跨平台有界线程池与任务运行时已完成 Phase 5B 并发、终态和生命周期专项审计；Windows Visual Studio 2022 Debug/Release 均为 212/212。最终 Linux CI 的 Debug/Release 均为 324/324，其中 Task Runtime 85/85，项目源码和测试编译 warning 为 0。
 
 ## 项目定位
 
@@ -92,7 +92,7 @@ Phase 3 的线程边界不是“TCP 层整体线程安全”：只有 `EventLoop
 
 不支持 HTTP/1.0、HTTP/2、absolute/authority/asterisk-form、chunked、trailers、Upgrade、Expect、percent-decoding、路径规范化、动态路由、流式 body、TLS 或 WebSocket。
 
-## Phase 5 已实现，等待 Linux 验证
+## Phase 5 已完成
 
 - 跨平台 `iaisf_task` / `iaisf::task` 与 `iaisf_task_tests`，依赖 `iaisf::core`、`Threads::Threads` 和 nlohmann/json
 - `BoundedThreadPool`：固定 worker、有界 FIFO、非阻塞 `try_submit`、队列满 `ResourceExhausted`、drain-then-join shutdown
@@ -111,7 +111,7 @@ Phase 3 的线程边界不是“TCP 层整体线程安全”：只有 `EventLoop
 - 同一 `TaskHandler` 可被多个 worker 真正并发调用，调用者必须保证线程安全；非协作 handler 会延迟 shutdown
 - Repository 满时拒绝新任务，不自动驱逐终态、不做 TTL 或持久化；容量只通过显式 `erase_terminal` 释放
 
-Phase 5 尚未把 TaskManager 暴露为 HTTP API，也未实现自动 timeout 扫描。当前 Windows Debug/Release 均实际执行 Foundation 43、HTTP Core 84、Task Runtime 85，合计 212/212；Linux workflow 已显式加入 task targets，但只有新提交的真实 CI 成功后才能完成封板。
+Phase 5 尚未把 TaskManager 暴露为 HTTP API，也未实现自动 timeout 扫描。Windows Debug/Release 均实际执行 Foundation 43、HTTP Core 84、Task Runtime 85，合计 212/212。最终 [Linux CI run 30547126540](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30547126540) 对实现提交 `79d3d4e89feb71595dc67d820f9a5398dcc814d4` 完成真实验证：Debug/Release 均为 Foundation 43、Reactor 45、TCP 51、HTTP Core 84、HTTP Integration 16、Task Runtime 85，合计 324/324；两个配置均实际构建 `iaisf_task` 和 `iaisf_task_tests`，项目源码和测试编译 warning 为 0。
 
 ## 尚未实现
 
@@ -137,7 +137,7 @@ Phase 3 (completed)
 Phase 4 (completed)
   HTTP/1.1 core / Router / Session / HttpServer / built-in health and version
 
-Phase 5 (implemented, Linux validation blocked)
+Phase 5 (completed)
   bounded fixed thread pool / Task values and limits / Repository / Executor / Manager
 
 Later phases (planned)
@@ -201,6 +201,8 @@ Smoke：
 
 Phase 3 最终 [Linux CI run 30524686201](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30524686201) 在两个 job 中实际构建 `iaisf_tcp` 和 `iaisf_tcp_tests`，随后执行完整 CTest；Debug/Release 均为 138/138，通过数按实际日志核对为 Foundation 43、Reactor 45、TCP 50。
 Phase 4 实现提交为 `9b87fdb8804ee37a8cf3b87a7b9193a3130b85d3`。首次 [Linux CI run 30537924856](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30537924856) 的 Debug/Release 各有 237/238 通过；唯一失败源于集成测试把响应 Header 单行上限设为 32 字节，小于框架固定错误响应 `Content-Type` 行的 41 字节，导致预检后 fail-closed。修复提交 `0818ebf4f71366cc3cd2fe4e36e95fe667b687a5` 将 fixture 调整到精确 41 字节并增加 portable 边界回归。最终 push [Linux CI run 30539245789](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30539245789) 实际构建四个 HTTP target，Debug/Release 均为 Foundation 43、Reactor 45、TCP 51、HTTP Core 84、HTTP Integration 16，合计 239/239；Release version/config smoke 成功，项目 warning 为 0。
+
+Phase 5 最终 push [Linux CI run 30547126540](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30547126540)（attempt 1）在 Ubuntu 24.04.4 LTS、kernel `6.17.0-1020-azure`、GCC 13.3.0、CMake 3.31.6 上验证提交 `79d3d4e89feb71595dc67d820f9a5398dcc814d4`。Debug/Release configure、build 和 324/324 CTest 均成功；Task Runtime 85/85，Release `--version` 与示例配置 smoke 成功，项目源码和测试编译 warning 均为 0。两个 job 和所有步骤均为 success，没有 failed、cancelled、skipped、neutral、timeout 或 `continue-on-error`。
 
 ## 命令行
 
@@ -317,7 +319,7 @@ ctest --test-dir build/linux-release --output-on-failure
 - CTest CLI version 和 example-config smoke
 - Linux `UniqueFd`、Socket、Channel、EpollPoller 和 EventLoop
 
-真实结果见 [stage_status.md](docs/stage_status.md)。Phase 5B Windows/MSVC Debug/Release 均为 212/212：Foundation 43/43、HTTP Core 84/84、Task Runtime 85/85；Release `--version` 与示例配置 smoke 成功，项目源码和测试编译 warning 为 0。Phase 4 Linux Debug/Release 的已封板历史仍为 Foundation 43、Reactor 45、TCP 51、HTTP Core 84、HTTP Integration 16，合计 239/239；尚无包含 Task Runtime 的 Phase 5 Linux 结果。
+真实结果见 [stage_status.md](docs/stage_status.md)。Windows/MSVC Debug/Release 均为 212/212：Foundation 43/43、HTTP Core 84/84、Task Runtime 85/85；Release `--version` 与示例配置 smoke 成功，项目源码和测试编译 warning 为 0。Phase 5 Linux Debug/Release 均为 Foundation 43、Reactor 45、TCP 51、HTTP Core 84、HTTP Integration 16、Task Runtime 85，合计 324/324；Release 两项 smoke 成功，项目源码和测试 warning 为 0。
 
 ## 项目结构
 
