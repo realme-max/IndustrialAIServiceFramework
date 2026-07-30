@@ -2,7 +2,7 @@
 
 面向工业 AI 应用的 C++ 高性能任务服务框架。
 
-> 当前状态：Phase 2 Linux Reactor Core 已实现，Windows Visual Studio 2022 Debug/Release 基础层回归均为 43/43；新增 Linux Reactor 测试尚未在真实 Linux CI 中运行。当前状态标记为 `PHASE_2_REACTOR_CORE_IMPLEMENTED_LINUX_VALIDATION_BLOCKED`，不能写成 Phase 2 completed。
+> 当前状态：`PHASE_2_REACTOR_CORE_COMPLETED`。Reactor 实现提交 `f76993e09767a2d6b6e1cbd2bcb22cfa1df6f74f` 和 warning 修复提交 `4db8708a5121f8477d835addd0b16170a3e2054f` 已完成；最终 [GitHub Actions Linux CI run 30516007475](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30516007475) 在 `ubuntu-24.04` 上完成 Debug/Release 构建，两套 CTest 均为 87/87，其中 Reactor 测试 44/44，项目源码和测试编译 warning 均为 0。Windows Visual Studio 2022 Debug/Release Phase 1 回归均为 43/43。TCP 连接层和 HTTP 尚未实现。
 
 ## 项目定位
 
@@ -70,10 +70,13 @@ Phase 2B 固定了以下并发语义：
 Phase 1 (completed)
   C++17 / CMake / Error / Result / AppConfig / ConsoleLogger / CLI / tests
 
-Phase 2 (implemented, Linux validation blocked)
+Phase 2 (completed)
   UniqueFd / Socket / Channel / EpollPoller / EventLoop / eventfd
 
-Phase 3—7 (planned)
+Phase 3 (planned)
+  Acceptor / TcpConnection / TcpServer / buffers / ET I/O lifecycle
+
+Later phases (planned)
   HTTP -> task system -> static plugins -> timers -> async logging
 
 Phase 8—9 (planned)
@@ -130,7 +133,7 @@ Smoke：
 ./scripts/smoke_linux.sh
 ```
 
-脚本会显式传入 `-DIAISF_BUILD_LINUX_NETWORK=ON`。Phase 1 的 [Linux CI run 30508113122](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30508113122) 已成功；Phase 2 当前改动尚未 commit/push，因此没有对应的真实 Linux run。完整状态见 [stage_status.md](docs/stage_status.md)，构建说明见 [linux_build.md](docs/linux_build.md)。
+脚本会显式传入 `-DIAISF_BUILD_LINUX_NETWORK=ON`。首次功能 [Linux CI run 30514521602](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30514521602) 对应 Reactor 实现提交 `f76993e09767a2d6b6e1cbd2bcb22cfa1df6f74f`，功能和测试通过，但 Release 测试构建存在 2 条 `-Wunused-result` warning。提交 `4db8708a5121f8477d835addd0b16170a3e2054f` 修复这两处返回值检查；最终 [Linux CI run 30516007475](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30516007475) 在 Ubuntu 24.04.4 LTS、GCC 13.3.0、CMake 3.31.6 上完成 Debug/Release configure、build 和 87/87 CTest，两个配置均实际执行 44/44 Reactor 测试，Release 两项 CLI smoke 成功，项目源码和测试 warning 均为 0。两个 job 和所有步骤均成功，没有 failed、cancelled、skipped、neutral 或 `continue-on-error`。完整状态见 [stage_status.md](docs/stage_status.md)，构建说明见 [linux_build.md](docs/linux_build.md)。
 
 ## 命令行
 
@@ -247,7 +250,7 @@ ctest --test-dir build/linux-release --output-on-failure
 - CTest CLI version 和 example-config smoke
 - Linux `UniqueFd`、Socket、Channel、EpollPoller 和 EventLoop
 
-真实结果见 [stage_status.md](docs/stage_status.md)。本轮 Windows/MSVC Debug/Release 均为 43/43；Phase 2 当前有 44 个 Linux-only 测试定义，若全部被发现则 Linux CTest 预计接近 87 项，但尚未在目标平台运行，不能把定义数或预计数写成 PASS。
+真实结果见 [stage_status.md](docs/stage_status.md)。Windows/MSVC Debug/Release Phase 1 回归均为 43/43；Phase 2 最终 Linux CI 的 Debug/Release 均实际执行 87 项并全部通过，其中 Reactor 测试 44/44，项目源码和测试 warning 均为 0。当前仍没有 Buffer、Acceptor、TcpConnection、TcpServer 或 HTTP 实现。
 
 ## 项目结构
 

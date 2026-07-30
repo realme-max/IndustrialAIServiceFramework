@@ -5,7 +5,7 @@
 - 项目：IndustrialAIServiceFramework
 - 阶段：Phase 2 Linux Reactor Core
 - 日期：2026-07-30
-- 状态：Reactor 核心已实现；Phase 2 Linux CI 尚未运行；TCP 连接、HTTP 和任务架构仍为 planned
+- 状态：`PHASE_2_REACTOR_CORE_COMPLETED`；TCP 连接、HTTP 和任务架构仍为 planned
 - 目标平台：Linux x86_64，C++17
 
 本文同时记录已实现的 Phase 1 基础设施、Phase 2 Reactor 核心和后续目标边界。只有明确列入已实现边界的类才是当前能力。
@@ -40,6 +40,24 @@ Linux-only `iaisf_net` 当前实现：
 - Channel 回调和待执行回调的异常被记录并隔离。一个 Channel 抛出后停止其本次剩余回调，但后续 active Channel 继续。Logger 不归 EventLoop 所有，必须活得更久。
 
 Phase 2 直接由 EventLoop 持有 `EpollPoller`，没有为了未来替换性创建空壳 `Poller` 基类。
+
+### 1.3 Phase 2 验证与下一阶段边界
+
+Reactor 实现提交 `f76993e09767a2d6b6e1cbd2bcb22cfa1df6f74f` 的首次功能
+[GitHub Actions Linux CI run 30514521602](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30514521602)
+已通过，但 Release 测试构建记录 2 条 `-Wunused-result` warning。warning 修复提交
+`4db8708a5121f8477d835addd0b16170a3e2054f` 的最终
+[Linux CI run 30516007475](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30516007475)
+在 Ubuntu 24.04.4 LTS、GCC 13.3.0、CMake 3.31.6 上验证。Debug 和 Release
+均完成 configure/build，并各有 87/87 CTest 通过；44 个 Reactor 测试在两个配置中
+都实际执行。Release smoke 的版本和示例配置检查成功，项目源码和测试 warning 均为
+0；没有 failed、cancelled、skipped、neutral 或 `continue-on-error`。
+
+Phase 3 只建议实现连接层：`Buffer`、`Acceptor`、`TcpConnection`、`TcpServer`，
+ET accept/read/write 到 `EAGAIN`、动态启停 `EPOLLOUT`、输出缓冲高水位、
+连接建立/半关闭/关闭生命周期和原始字节 Echo 集成测试。Phase 3 不包含 HTTP parser、
+HttpRouter、ThreadPool、TaskRepository、TaskManager、PluginManager、timerfd、
+signalfd、异步日志、AI 推理或 benchmark。
 
 ## 2. 调查结果与设计来源
 

@@ -182,7 +182,18 @@ rm -rf -- build/linux-system-deps
 - 两个 job 都使用固定版本 FetchContent，不启用系统依赖模式；
 - 不使用 `continue-on-error`，不发布制品或部署。
 
-Phase 1 的历史成功证据是 [GitHub Actions run 30508113122](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30508113122)，它对应 Phase 1 提交，不覆盖当前 Phase 2 改动。workflow 只有在用户提交并 push 当前分支后才能运行；当前尚无 Phase 2 run，不得把 workflow 文件或测试定义本身视为 Linux PASS。
+首次功能 [GitHub Actions run 30514521602](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30514521602)
+对应 Reactor 实现提交 `f76993e09767a2d6b6e1cbd2bcb22cfa1df6f74f`。Debug/Release
+构建、CTest 和 smoke 通过，但 Release 测试构建存在 2 条 `-Wunused-result`
+warning，因此该 run 只作为功能通过历史记录。
+
+Phase 2 的最终零 warning 证据是
+[GitHub Actions run 30516007475](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30516007475)，
+对应 warning 修复提交 `4db8708a5121f8477d835addd0b16170a3e2054f`、分支
+`phase/2-reactor-core`、push event、attempt 1。head SHA 和两个 job 的 checkout SHA
+均为该提交。workflow status/conclusion 为 `completed/success`，两个 job 和全部步骤
+均为 `success`，没有 failed、cancelled、skipped、neutral 或
+`continue-on-error`。
 
 ## 11. 环境记录
 
@@ -196,8 +207,36 @@ c++ --version
 git --version
 ```
 
-只有当前 Phase 2 commit 的 Debug/Release configure、build、CTest 和 Release smoke 在真实 Linux 中全部成功后，才能把 Phase 2 标记为 completed。MinGW、MSVC、旧提交的 run 或仅执行 CMake configure 都不满足该门槛。
+Phase 2 已在 GitHub-hosted `ubuntu-24.04` runner 上完成验证：
 
-Phase 2B 审计后当前包含 44 个 Linux-only `TEST` 源代码定义：UniqueFd 8、Socket 5、Channel 7、EpollPoller 7、EventLoop 17。连同 Phase 1 的 43 项，若全部被 CMake 发现，Linux CTest 预计接近 87 项。实际 discovery 数量、总数和通过数必须以目标 Linux 构建输出为准；尚未执行时不得预填为成功。
+| 项目 | Debug | Release |
+|---|---|---|
+| Ubuntu | 24.04.4 LTS | runner label 为 `ubuntu-24.04` |
+| GCC | 13.3.0 | configure 识别 GNU 13.3.0 |
+| CMake | 3.31.6 | 同一 workflow 工具环境 |
+| configure/build | pass / pass | pass / pass |
+| CTest | 87/87，0 failed | 87/87，0 failed |
+| Reactor 测试 | 44/44 | 44/44 |
+| 项目源码 warning | 0 | 0 |
+| 项目测试 warning | 0 | 0 |
+| 独立 smoke | 不适用 | version/config 均 pass |
+
+Phase 2B 的 44 个 Linux-only Reactor 测试分布为：UniqueFd 8、Socket 5、
+Channel 7、EpollPoller 7、EventLoop 17。构建日志确认 `iaisf_net` 和
+`iaisf_net_tests` 在 Debug/Release 中均实际构建，不是仅由源码数量推算。
+
+Release smoke 实际输出：
+
+```text
+IndustrialAIServiceFramework 0.1.0
+2026-07-30T05:14:04.588Z [INFO] [Application] configuration validated for service IndustrialAIServiceFramework
+```
+
+最终 Debug/Release 编译日志中，项目源码 warning 为 0、项目测试 warning 为 0；
+首次功能 run 的两处 `-Wunused-result` 已消失。日志中含 “warning” 的文本仅来自
+checkout 阶段的 `git init` 默认分支提示，不是编译 warning。
+
+当前 Windows 宿主仍没有可运行的 Linux/WSL 环境；以上 Linux 结果全部来自可追溯的
+GitHub Actions run，不代表本机 Linux 编译。
 
 Reactor 测试覆盖 HUP/RDHUP read-side 语义、active Channel 延迟移除、fd 复用、`queue_in_loop` 失败回滚、多线程容量竞争、EventLoop 状态矩阵、异常隔离和 eventfd drain。它们不访问外部网络或固定端口。

@@ -102,9 +102,13 @@ docs: complete phase 1 validation record
 
 ## 5. Phase 2：Socket、epoll 与 EventLoop
 
-状态：**implemented，Linux validation blocked（2026-07-30）**
+状态：**completed（2026-07-30）**
 
-已实现 Linux fd RAII、Socket 基础操作与单 Reactor 事件循环的最小基础设施；当前机器没有可运行的 Linux/WSL，真实 Linux Debug/Release 编译和测试尚未执行，因此不能标记为 completed。
+已实现 Linux fd RAII、Socket 基础操作与单 Reactor 事件循环的最小基础设施。
+Reactor 实现提交为 `f76993e09767a2d6b6e1cbd2bcb22cfa1df6f74f`，warning 修复及
+最终验证提交为 `4db8708a5121f8477d835addd0b16170a3e2054f`；后者已由
+[GitHub Actions run 30516007475](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30516007475)
+完成真实 Linux Debug/Release 零 warning 验证。
 
 已交付：
 
@@ -135,41 +139,58 @@ docs: complete phase 1 validation record
 - Windows VS2022 Debug/Release Phase 1 回归均为 43/43 CTest 通过；Release 两项 CLI smoke 均成功。
 - 非 Linux 显式 `IAISF_BUILD_LINUX_NETWORK=ON` 的 CMake 负向检查按预期失败并给出明确诊断。
 - shell 语法、workflow YAML 解析、禁止实现项扫描和 `git diff --check` 已通过。
-- 44 个 Linux-only 测试覆盖 UniqueFd 8、Socket 5、Channel 7、EpollPoller 7、EventLoop 17；若全部被 CMake 发现，连同 Phase 1 的 43 项预计接近 87 项。这些只是源代码定义和预计值，尚不能写成 Linux CTest PASS。
-- Phase 2 的 Ubuntu 24.04 GCC Debug/Release configure、build、CTest 尚待提交后由 GitHub Actions 真实验证。
+- 首次功能 run `30514521602` 对应 Reactor 实现提交，Debug/Release 功能和测试通过，但 Release 测试构建有 2 条 `-Wunused-result` warning。
+- 最终零 warning run `30516007475` 对应 warning 修复提交；Ubuntu 24.04.4 LTS、GCC 13.3.0、CMake 3.31.6 的 Debug/Release configure 和 build 均成功。
+- Debug CTest 87/87、Release CTest 87/87，均为 0 failed；每个配置实际执行 44 个 Reactor 测试：UniqueFd 8、Socket 5、Channel 7、EpollPoller 7、EventLoop 17。
+- Release `--version` 输出 `IndustrialAIServiceFramework 0.1.0`，示例配置输出包含 `configuration validated for service IndustrialAIServiceFramework`。
+- workflow attempt 1 最终 conclusion 为 `success`；两个 job 和所有步骤均为 `success`，没有 skipped、cancelled 或 `continue-on-error`。
+- 最终 Debug/Release 编译日志中项目源码 warning 为 0、项目测试 warning 为 0；两处被忽略的 `read()` 返回值已由 warning 修复提交验证消除。
 - 不实现 HTTP、完整 `TcpConnection` 协议处理、ThreadPool、TaskRepository、PluginManager、timerfd 任务超时、signalfd 优雅停止、异步日志或 AI 插件。
 
 建议 commit message：
 
 ```text
-feat: implement Linux reactor core
+docs: complete phase 2 validation record
 ```
 
-## 6. Phase 3：HTTP 协议与路由
+## 6. Phase 3：TCP 连接层
 
-状态：**planned，未开始**。只有 Phase 2 对应提交在真实 Linux Debug/Release CI 中完成 configure、build 和 CTest，并经用户确认后才进入本阶段。
+状态：**planned，未开始**。Phase 2 已完成 Linux CI 验收；仍需用户明确要求后才能开始本阶段。
 
-目标：把 TCP 字节安全转换为 HTTP/1.1 请求并提供健康检查。
+目标：在现有单 Reactor Core 上建立完整、可测试的 TCP 连接生命周期，不引入 HTTP 或业务执行。
 
 交付：
 
-- `HttpRequest`、`HttpResponse`、`HttpParser`、`HttpSession`
-- 方法/路径 Router 和统一错误响应
-- `GET /health`
-- request line/header/body 限制和基础 keep-alive
-- 400/404/405/413/500 响应
+- `Buffer`
+- `Acceptor`
+- `TcpConnection`
+- `TcpServer`
+- 输入缓冲区和输出缓冲区
+- ET accept/read/write 循环到 `EAGAIN`
+- 输出缓冲非空时启用、写空后停用 `EPOLLOUT`
+- 输出缓冲高水位和慢客户端边界
+- 连接建立、读半关闭、写半关闭和最终关闭生命周期
+- 基础回显或原始字节集成测试
 
 验收：
 
-- `curl http://127.0.0.1:8080/health` 返回 200 JSON。
-- 完整、逐字节/分段、非法 CRLF、非法 Content-Length、超限 body 测试通过。
-- 不完整请求不会被误判为完整。
-- chunked 明确拒绝，不误解析。
+- ET accept/read/write 均 drain 到 `EAGAIN`，不会因单次系统调用遗漏事件。
+- 多客户端基础回显或原始字节传输自动化测试通过。
+- `EPOLLOUT` 仅在有待发送数据时关注，不产生空转。
+- peer 半关闭后仍能处理已接收数据并按约定完成关闭。
+- Channel 移除和连接销毁遵守 active batch 延迟规则，无 fd 泄漏。
+
+明确不包含：
+
+- HTTP parser、HttpRouter 或 `/health`
+- ThreadPool、TaskRepository、TaskManager、PluginManager
+- timerfd、signalfd、异步日志
+- AI 推理、工业业务插件或 benchmark
 
 建议 commit message：
 
 ```text
-feat(http): complete phase 3 parser routing and health API
+feat(net): implement TCP connection layer
 ```
 
 ## 7. Phase 4：线程池与任务系统
