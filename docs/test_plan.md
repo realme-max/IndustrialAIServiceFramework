@@ -2,7 +2,7 @@
 
 ## 1. 状态与原则
 
-Phase 1 已实现基础单元测试和 CLI smoke，并在 Phase 1B 加强 Error 边界、Result 引用类别、配置数值类型和 UTF-8 字节限制覆盖。提交 `63b30cffcbe3e621af33664721b3675a647bd1a1` 已在 Ubuntu 24.04 GitHub Actions 上完成 Debug、Release、CTest 和 Release smoke 验证。Phase 2 Reactor 代码和测试已实现，但尚未在真实 Linux 上运行，当前状态为 `PHASE_2_REACTOR_CORE_IMPLEMENTED_LINUX_VALIDATION_BLOCKED`。
+Phase 1 已实现基础单元测试和 CLI smoke，并在 Phase 1B 加强 Error 边界、Result 引用类别、配置数值类型和 UTF-8 字节限制覆盖。Phase 2 Reactor 实现提交为 `f76993e09767a2d6b6e1cbd2bcb22cfa1df6f74f`，warning 修复及最终验证提交为 `4db8708a5121f8477d835addd0b16170a3e2054f`；[GitHub Actions Linux CI run 30516007475](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30516007475) 已完成 Debug、Release、CTest 和 Release smoke 零 warning 验证，当前状态为 `PHASE_2_REACTOR_CORE_COMPLETED`。
 
 测试原则：
 
@@ -122,7 +122,7 @@ Phase 1B 的临时配置 fixture 使用原子创建的唯一系统临时目录�
 
 ## 5. Phase 2 Network/Reactor 基础测试
 
-状态：测试已实现，真实 Linux Debug/Release configure、build 和 CTest 尚未执行。Phase 2 只验证 fd RAII、Linux Socket 基础封装和事件循环原语。
+状态：completed。Phase 2 只验证 fd RAII、Linux Socket 基础封装和事件循环原语。
 
 ### 5.1 Unit/component
 
@@ -134,16 +134,53 @@ Phase 1B 的临时配置 fixture 使用原子创建的唯一系统临时目录�
 | `tests/net/test_epoll_poller.cpp` | 7 | add/mod/del、重复/未注册操作、eventfd ET、容量/timeout、fd 删除后复用映射 |
 | `tests/net/test_event_loop.cpp` | 17 | owner/state、stop-before-run、Stopping 拒绝、跨线程容量竞争、失败回调不执行、唤醒失败回滚、嵌套 queue、active 批次延迟移除、异常边界、eventfd drain/EAGAIN |
 
-合计 44 个 Phase 2 `TEST` 定义。连同 Phase 1 的 43 项，若全部被 CMake 发现，Linux CTest 预计接近 87 项。定义数和预计数都不是已执行的通过数；真实总数与结果必须以 Linux CTest 输出为准。
+合计 44 个 Phase 2 Reactor `TEST`。Linux Debug 和 Release 均实际发现并执行全部 44 项；加上 Phase 1 的 43 项，每个配置实际执行 87 项。
 
 正式 Linux 验证矩阵：
 
-| 环境/job | Configure | Build | CTest | Smoke | 当前证据 |
-|---|---|---|---|---|---|
-| Ubuntu 24.04 GCC Debug | pending | pending | pending | 不适用 | 尚无 Phase 2 run |
-| Ubuntu 24.04 GCC Release | pending | pending | pending | pending（Phase 1 CLI） | 尚无 Phase 2 run |
-| Windows VS2022 Debug（网络 OFF） | pass | pass | 43/43 pass | CTest 内 2 项 pass | 2026-07-30 本地回归 |
-| Windows VS2022 Release（网络 OFF） | pass | pass | 43/43 pass | version/config exit 0 | 2026-07-30 本地回归 |
+| 环境/job | Configure | Build | CTest 总数/通过/失败 | Reactor 通过 | Smoke | warning |
+|---|---|---|---|---|---|---:|
+| Ubuntu 24.04 GCC Debug | pass | pass | 87 / 87 / 0 | 44 / 44 | CTest 内 2 项 pass | 0 |
+| Ubuntu 24.04 GCC Release | pass | pass | 87 / 87 / 0 | 44 / 44 | 独立 version/config pass | 0 |
+| Windows VS2022 Debug（网络 OFF） | pass | pass | 43 / 43 / 0 | 不适用 | CTest 内 2 项 pass | 0 |
+| Windows VS2022 Release（网络 OFF） | pass | pass | 43 / 43 / 0 | 不适用 | version/config exit 0 | 0 |
+
+首次功能 CI：
+
+- [run 30514521602](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30514521602) 对应 Reactor 实现提交 `f76993e09767a2d6b6e1cbd2bcb22cfa1df6f74f`。
+- Debug/Release configure、build、87/87 CTest 和 smoke 均通过。
+- Release 测试构建存在 2 条 `-Wunused-result`，来自 `tests/net/test_event_loop.cpp:721` 和 `:746` 忽略 `read()` 返回值；该 run 不是最终零 warning 证据。
+
+最终零 warning CI 证据：
+
+| 项目 | 实际记录 |
+|---|---|
+| workflow / run | `Linux CI` / `30516007475` |
+| URL | [https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30516007475](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30516007475) |
+| event / attempt | `push` / `1` |
+| branch / head SHA | `phase/2-reactor-core` / `4db8708a5121f8477d835addd0b16170a3e2054f` |
+| checkout SHA | `4db8708a5121f8477d835addd0b16170a3e2054f`，Debug/Release 一致 |
+| status / conclusion | `completed` / `success` |
+| runner / OS | GitHub-hosted `ubuntu-24.04` / Ubuntu 24.04.4 LTS |
+| GCC / CMake | 13.3.0 / 3.31.6 |
+| jobs | `Linux Debug`、`Linux Release` 均为 `success` |
+| CTest | Debug 87/87、Release 87/87，均为 0 failed |
+| Reactor | Debug 44/44、Release 44/44 |
+| targets | `iaisf_net`、`iaisf_net_tests` 在 Debug/Release 均实际构建 |
+| warning | 项目源码 0；项目测试 0 |
+| 非成功步骤 | 0；没有 skipped、cancelled、neutral |
+| `continue-on-error` | 对应 workflow revision 未配置；日志无被掩盖的非零退出 |
+
+Release smoke 原始输出：
+
+```text
+IndustrialAIServiceFramework 0.1.0
+2026-07-30T05:14:04.588Z [INFO] [Application] configuration validated for service IndustrialAIServiceFramework
+```
+
+最终编译日志核验：Debug/Release 项目源码 warning 为 0，项目测试 warning 为 0，
+两处 `-Wunused-result` 已消失。checkout 日志中的 `git init` 默认分支提示含有单词
+“warning”，但不是项目或第三方编译 warning。
 
 Linux 原始命令：
 
@@ -179,12 +216,20 @@ ctest --test-dir build/linux-release --output-on-failure
 ### 5.2 Phase 2 暂不执行
 
 - HTTP parser/request/response/router。
-- 完整 `TcpConnection` 协议处理、Acceptor/TcpServer 和 TCP echo 集成。
-- ThreadPool、TaskRepository 和 PluginManager。
+- Buffer、完整 `TcpConnection` 协议处理、Acceptor/TcpServer 和 TCP echo 集成。
+- ThreadPool、TaskRepository、TaskManager 和 PluginManager。
 - timerfd 任务超时、signalfd 优雅停止。
 - 异步日志或 AI 插件。
 
-### 5.3 fd 泄漏
+### 5.3 Phase 3 计划测试边界
+
+Phase 3 尚未开始。建议自动化覆盖 Buffer、Acceptor/TcpConnection/TcpServer、
+ET accept/read/write 到 `EAGAIN`、`EPOLLOUT` 动态启停、输出缓冲高水位、连接
+建立/半关闭/关闭生命周期，以及原始字节 Echo 集成测试。Phase 3 测试不得提前引入
+HTTP parser、HttpRouter、ThreadPool、TaskRepository、TaskManager、PluginManager、
+timerfd、signalfd、异步日志、AI 推理或 benchmark。
+
+### 5.4 fd 泄漏
 
 Phase 2 单元测试重复创建和释放受管 fd，并检查所有权转移后只关闭一次。真实服务进程的 `/proc/<pid>/fd` 稳定性检查延后到连接层集成阶段。
 

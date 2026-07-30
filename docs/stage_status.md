@@ -3,17 +3,17 @@
 ## 当前结论
 
 ```text
-PHASE_2_REACTOR_CORE_IMPLEMENTED_LINUX_VALIDATION_BLOCKED
+PHASE_2_REACTOR_CORE_COMPLETED
 ```
 
 - 当前阶段：Phase 2 Linux Reactor Core
-- 实现状态：Phase 2 代码、测试和构建接入已实现；未完成 Linux 验收
+- 实现状态：完成
 - Windows 验证：Visual Studio 2022 x64 Debug/Release Phase 1 回归完成，均为 43/43
-- Linux CI 验证：Phase 1 的 [run 30508113122](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30508113122) 已完成；当前 Phase 2 改动尚无真实 run
+- Linux CI 验证：最终零 warning [run 30516007475](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30516007475) 已在 warning 修复提交上完成
 - 日期：2026-07-30（Asia/Shanghai）
-- 下一阶段：Phase 3，尚未开始；必须先完成 Phase 2 Linux CI 验收并由用户确认
+- 下一阶段：Phase 3 TCP 连接层，planned，尚未开始，需用户明确要求
 
-Phase 2 只实现 Linux Reactor 原语，没有监听端口或建立连接。HTTP、线程池、任务、插件、定时器与异步日志仍未实现。
+Phase 2 只实现 Linux Reactor 原语，没有监听端口或建立 TCP 连接。Buffer、Acceptor、TcpConnection、TcpServer、HTTP、线程池、任务、插件、定时器与异步日志仍未实现。
 
 ## Git 状态
 
@@ -23,10 +23,13 @@ Phase 2 只实现 Linux Reactor 原语，没有监听端口或建立连接。HTT
 | Phase 0 提交 | `5fbcec0 docs: complete phase 0 architecture design` |
 | Phase 1 最终实现提交 | `63b30cffcbe3e621af33664721b3675a647bd1a1` |
 | Phase 2 起始 HEAD / main / origin/main | `6065d91b277c07ed04e64b3f08034788965e6ac1` |
+| Phase 2 Reactor 实现提交 | `f76993e09767a2d6b6e1cbd2bcb22cfa1df6f74f` |
+| warning 修复 / 最终验证提交 | `4db8708a5121f8477d835addd0b16170a3e2054f` |
+| origin Phase 2 | `origin/phase/2-reactor-core` = `4db8708a5121f8477d835addd0b16170a3e2054f` |
 | origin | `https://github.com/realme-max/IndustrialAIServiceFramework.git` |
-| 开始时工作区 | clean |
-| Phase 2 commit | 未执行 |
-| Phase 2 push | 未执行 |
+| Phase 2E 开始时工作区 | 仅七份 Phase 2 验证文档有未提交修改 |
+| Phase 2E commit | 未执行 |
+| Phase 2E push | 未执行 |
 
 本阶段没有 amend、reset、rebase、merge、commit、push 或修改 origin。
 
@@ -36,8 +39,8 @@ Phase 2 只实现 Linux Reactor 原语，没有监听端口或建立连接。HTT
 |---:|---|---|---|
 | 0 | 只读调查与架构设计 | completed | 已提交为 `5fbcec0` |
 | 1 | C++17 基础工程与公共基础设施 | completed | Windows 补充回归完成；Linux CI run `30508113122` success |
-| 2 | Socket、epoll 与 EventLoop | implemented / Linux validation blocked | Phase 2B 并发审计完成；44 个 Linux-only 测试定义尚未在 Linux 运行 |
-| 3 | HTTP 协议与路由 | planned | 未开始 |
+| 2 | Socket、epoll 与 EventLoop | completed | Debug/Release 均 87/87；44 个 Reactor 测试均实际执行 |
+| 3 | TCP 连接层 | planned | 未开始 |
 | 4 | 线程池与任务系统 | planned | 未开始 |
 | 5 | 插件系统 | planned | 未开始 |
 | 6 | 定时器与任务超时 | planned | 未开始 |
@@ -182,15 +185,57 @@ logging.level
 
 ### Phase 2 测试与验证
 
-- 当前 44 个 Linux-only `TEST` 定义：UniqueFd 8、Socket 5、Channel 7、EpollPoller 7、EventLoop 17；连同 Phase 1 预计接近 87 个 Linux CTest，须以真实发现结果为准。
+- 44 个 Linux-only Reactor 测试：UniqueFd 8、Socket 5、Channel 7、EpollPoller 7、EventLoop 17；Debug/Release 均实际执行 44/44。
 - 测试只使用 `eventfd` 和 `socketpair`，不监听端口、不依赖外部网络；等待均有有限超时，CTest timeout 为 10 秒。
 - Phase 2B 新增 HUP/RDHUP 顺序、fd 复用、stop-before-run、Stopping 拒绝、多生产者容量竞争、唤醒失败回滚、active 批次延迟移除、Channel 异常边界和多次 eventfd drain 覆盖。
 - Windows VS2022 Debug configure/build/CTest：pass，43/43；Release clean build/CTest：pass，43/43。
 - Windows Release `--version` 输出 `IndustrialAIServiceFramework 0.1.0`，示例配置 smoke 退出码为 0。
 - 非 Linux 显式开启网络选项的负向 configure：按预期失败，诊断为仅支持 Linux epoll/eventfd。
 - 三个 shell 脚本通过 `bash -n`，workflow YAML 可解析；禁止实现项扫描与 `git diff --check` 通过。
-- 本机没有 Linux/WSL/Docker/Podman，因此没有运行 Phase 2 Linux configure、build 或 CTest，也没有 Phase 2 GitHub Actions run。
+- Phase 2 Linux Debug/Release configure、build 均成功；CTest 均为 87/87、0 failed，其中 Reactor 44/44。
+- Release 独立 smoke 成功；最终 Debug/Release 项目源码 warning 为 0、项目测试 warning 为 0。
 - 未安装 cppcheck、clang-tidy、actionlint、shellcheck；未自动安装。Sanitizer 未执行。
+
+### Phase 2 首次功能 Linux CI
+
+[run 30514521602](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30514521602)
+对应 Reactor 实现提交 `f76993e09767a2d6b6e1cbd2bcb22cfa1df6f74f`。Debug/Release
+configure、build、87/87 CTest 和 smoke 均通过，但 Release 测试构建存在 2 条
+`-Wunused-result` warning，因此它只作为首次功能通过记录，不是最终零 warning 证据。
+
+### Phase 2 最终零 warning Linux CI
+
+| 项目 | 实际记录 |
+|---|---|
+| workflow | `Linux CI` |
+| run ID / attempt | `30516007475` / `1` |
+| run URL | [https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30516007475](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30516007475) |
+| event | `push` |
+| branch | `phase/2-reactor-core` |
+| head SHA | `4db8708a5121f8477d835addd0b16170a3e2054f` |
+| checkout SHA | Debug/Release 均为 `4db8708a5121f8477d835addd0b16170a3e2054f` |
+| status / conclusion | `completed` / `success` |
+| runner | 两个 job 均为 GitHub-hosted `ubuntu-24.04` |
+| OS / kernel | Ubuntu 24.04.4 LTS / 6.17.0-1020-azure x86_64 |
+| GCC / CMake | 13.3.0 / 3.31.6 |
+| Debug | configure pass；build pass；CTest 87/87，0 failed |
+| Release | configure pass；build pass；CTest 87/87，0 failed |
+| Reactor 参与度 | `iaisf_net`、`iaisf_net_tests` 均构建；Debug/Release 各执行 Reactor 44/44 |
+| smoke | version 和示例配置均 pass |
+| 非成功 job/step | 0；没有 failed、cancelled、skipped 或 neutral |
+| `continue-on-error` | 0 |
+| 项目源码 warning | Debug 0；Release 0 |
+| 项目测试 warning | Debug 0；Release 0；两处 `-Wunused-result` 已消失 |
+
+Release smoke 实际输出：
+
+```text
+IndustrialAIServiceFramework 0.1.0
+2026-07-30T05:14:04.588Z [INFO] [Application] configuration validated for service IndustrialAIServiceFramework
+```
+
+完整日志中只有 `git init` 默认分支提示含有单词 “warning”；它不是项目源码、
+项目测试或第三方依赖的编译 warning。
 
 ## 环境调查
 
@@ -323,7 +368,9 @@ bash -n \
   scripts/smoke_linux.sh
 ```
 
-正式 Linux 脚本曾由上述 Phase 1 GitHub Actions run 执行；Phase 2 修改尚未提交或 push，因而没有可归属当前代码的 Linux run。本机仍没有可运行的 Linux/WSL 环境。
+正式 Linux 脚本已由最终 Phase 2 GitHub Actions run `30516007475` 在提交
+`4db8708a5121f8477d835addd0b16170a3e2054f` 上执行。本机仍没有可运行的
+Linux/WSL 环境，因此本地未复现这次 CI。
 
 ## 参考工程保护
 
@@ -337,7 +384,7 @@ bash -n \
 
 ## 未实现
 
-- Acceptor、TcpConnection、TcpServer、bind/listen/accept/connect、连接缓冲和网络监听
+- Buffer、Acceptor、TcpConnection、TcpServer、bind/listen/accept/connect、连接缓冲和网络监听
 - HTTP request/response/parser/router
 - ThreadPool 和运行时任务队列
 - TaskManager、TaskRepository、TaskExecutor
@@ -352,8 +399,8 @@ bash -n \
 ## 当前阻塞与风险
 
 - Phase 1 没有剩余验收阻塞。
-- Phase 2 缺少与当前改动对应的 Ubuntu 24.04 GCC Debug/Release configure、build 和 CTest 证据，因此不能标记 completed。
-- 本机仍无 Linux/WSL；Phase 2 Linux 结果需在用户 commit/push 后由可追溯的 GitHub Actions run 提供。
+- Phase 2 没有剩余验收阻塞。
+- 本机仍无 Linux/WSL；当前 Linux 结论来自可追溯的 GitHub Actions run。
 - 默认 FetchContent 首次 Linux 配置需要 GitHub 网络和有效 CA 证书。
 - 系统依赖模式已设计但未在已安装 Linux 包环境验证。
 - Windows/NTFS 工作区不能可靠表达新 shell 脚本的 POSIX executable bit；workflow 会在运行时执行 `chmod +x scripts/*.sh`，人工 Linux 使用前仍应确认权限。
@@ -361,19 +408,22 @@ bash -n \
 
 ## Phase 3 入口
 
-Phase 3 尚未开始。进入前必须：
+Phase 3 尚未开始，需用户明确要求。建议范围：
 
-1. 用户审阅并提交/推送当前 Phase 2 改动；
-2. 当前提交在 Ubuntu 24.04 GCC Debug/Release 中 configure、build 和 CTest 全部通过；
-3. 记录真实 run URL、commit SHA、测试总数和编译 warning；
-4. 用户明确允许开始 Phase 3。
+- Buffer、Acceptor、TcpConnection、TcpServer；
+- ET accept/read/write 到 `EAGAIN`；
+- `EPOLLOUT` 动态启停；
+- 输出缓冲高水位；
+- 连接建立、半关闭和关闭生命周期；
+- 原始字节 Echo 集成测试。
 
-Phase 3 建议只处理连接层与 HTTP 边界时，仍不得提前加入 ThreadPool、TaskRepository、PluginManager、timerfd 任务超时、signalfd、异步日志或 AI 插件。
+Phase 3 不包含 HTTP parser、HttpRouter、ThreadPool、TaskRepository、TaskManager、
+PluginManager、timerfd、signalfd、异步日志、AI 推理或 benchmark。
 
 ## 建议 commit
 
 未执行 commit。建议：
 
 ```text
-feat: implement Linux reactor core
+docs: complete phase 2 validation record
 ```
