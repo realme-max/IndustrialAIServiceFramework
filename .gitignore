@@ -3,6 +3,12 @@
 /build-*/
 /out/
 /cmake-build-*/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+CTestTestfile.cmake
+compile_commands.json
 
 # Generated binaries and libraries
 *.a
@@ -27,14 +33,16 @@
 *.gcno
 *.profraw
 *.profdata
-core
-core.*
+/core
+/core.*
 
 # Editor and operating-system files
 .idea/
 .vscode/
+.vs/
 *.swp
 *.swo
+*.tmp
 .DS_Store
 Thumbs.db
 
@@ -46,4 +54,3 @@ Thumbs.db
 # Read-only reference material is not part of this project
 /TinyWebServer_reference/
 /TinyWebServer/
-

@@ -2,194 +2,279 @@
 
 面向工业 AI 应用的 C++ 高性能任务服务框架。
 
-> 当前状态：**Phase 0（架构设计）已完成**。目前只有设计文档和目录骨架，尚无可编译服务端；构建、运行、API 和测试能力均从 Phase 1 起逐步实现。本文不会把 planned 能力描述为已实现能力。
+> 当前状态：Phase 1 基础工程与 Phase 1B 代码审计已经实现，并在 Windows/MSVC 上完成补充构建与测试。Linux GitHub Actions workflow 已创建，但尚未 push、运行或取得成功证据，因此 **Linux Debug、Release、CTest 和 smoke 尚未验证**。状态标记为 `PHASE_1_FOUNDATION_IMPLEMENTED_LINUX_VALIDATION_BLOCKED`。
 
 ## 项目定位
 
-IndustrialAIServiceFramework 面向 Linux 服务端，以 C++17、POSIX Socket、epoll、Reactor、线程池和插件机制为技术主线，把算法调用统一抽象为可提交、可查询、可超时的工业 AI 任务。
+项目最终目标是在 Linux 上使用 C++17、POSIX Socket、epoll ET、单 Reactor、线程池和插件机制，把工业算法封装为可提交、可查询、可超时的任务服务。
 
-框架层只负责网络、协议、路由、任务调度、插件管理、状态、日志、配置和错误处理。焊缝、点云、机器人等领域语义只能出现在插件层。`PTV2-WeldSeg-Deployment` 和 `weld_agent` 不在当前工作区内，也不会在本阶段接入。
+框架层只负责网络、协议、路由、任务调度、插件管理、状态、日志、配置和错误处理。焊缝、点云、机器人等领域语义只能进入插件层。
 
-Agent、LLM、RAG、多 Agent 和机器人控制不属于当前阶段；未来 Agent 最多是一类可选编排插件。
+Phase 1 只建立可测试的公共基础设施，不启动网络服务，也不进入常驻循环。
 
-## 目标架构
+## Phase 1 已实现
 
-```text
-Client (HTTP/1.1; framed TCP JSON is planned)
-  -> Network: Socket / epoll ET / single Reactor
-  -> Protocol: incremental HTTP parser
-  -> Router and API services
-  -> TaskManager and bounded task repository
-  -> bounded ThreadPool
-  -> PluginManager
-  -> EchoPlugin / MockVisionPlugin / future industrial plugins
-```
+- CMake 3.22+、C++17、target 级依赖与编译警告配置
+- `iaisf_core` 静态库、`iaisf_server`、`iaisf_tests`
+- CMake `configure_file` 生成的稳定版本信息 `0.1.0`
+- `ErrorCode`、`Error`、`Result<T>` 和 `Result<void>`
+- nlohmann/json 驱动的严格 `AppConfig`
+- `LogLevel`、`ILogger` 和同步、互斥保护的 `ConsoleLogger`
+- 支持 `--help`、`--version`、`--config <path>` 的最小 `Application`
+- GoogleTest + CTest 单元测试和 CLI smoke 测试
+- Debug/Release Linux 构建、测试和 smoke 脚本
+- Ubuntu 24.04 GCC Debug/Release GitHub Actions workflow
+- Apache License 2.0
 
-关键约束：
+Phase 1B 审计修正了 Error 非空消息的文档边界，移除了未实现的 CMake 安装接口，并加强了 Result 引用类别、配置类型和 UTF-8 字节上限测试。Windows/MSVC 补充验证共注册 43 个 CTest，2026-07-30 的 Debug 和 Release 回归均为 43/43 通过；该结果不替代 Linux 验收。
 
-- 网络 I/O 和连接生命周期限定在一个 EventLoop 线程。
-- 业务计算不得在网络线程执行。
-- 队列、请求、连接和任务存储均设置容量上限。
-- 第一版插件采用显式静态注册，不宣称支持动态加载 `.so`。
-- MockVisionPlugin 只返回带 `mock: true` 标识的模拟结果。
-- 首版不是多 Reactor、不是零拷贝，也不接入 TensorRT、PCL、真实点云或机器人。
+## 尚未实现
 
-完整设计见 [architecture.md](docs/architecture.md)、[plugin_design.md](docs/plugin_design.md) 和 [protocol.md](docs/protocol.md)。
+- Socket、epoll、Channel、Poller、EventLoop 和网络监听
+- HTTP request/response/parser/router
+- 线程池和有界工作队列
+- Task、TaskManager、TaskRepository 和任务 API
+- PluginManager、EchoPlugin、MockVisionPlugin 或动态 `.so`
+- timerfd、任务超时和连接超时
+- 异步日志、文件日志和日志轮转
+- TensorRT、PCL、真实点云、机器人或 Agent 能力
+- 性能压测和任何 QPS/延迟结论
 
-## 技术栈
-
-计划使用：
-
-- C++17
-- Linux、GCC 或 Clang
-- CMake、CTest
-- POSIX Socket、epoll、timerfd、eventfd
-- `std::thread`、`std::mutex`、`std::condition_variable`
-- nlohmann/json
-- GoogleTest
-- AddressSanitizer；UBSan、Valgrind 和 clang-tidy 为后续可选检查
-
-核心网络层不会使用 Boost.Asio 或现成 Web 框架替代 epoll。
-
-## 当前完成情况
-
-已完成：
-
-- 工作区、Git 边界、宿主工具和只读参考工程调查
-- 分层架构、核心类、类关系和请求数据流设计
-- 单 Reactor 线程模型、ET 读写策略和连接生命周期设计
-- HTTP API、插件契约、错误模型和任务状态机设计
-- 测试策略、Phase 1—9 开发计划和交接文档
-- 基础空目录与 `.gitignore`
-
-尚未实现：
-
-- CMake 工程和任何 C++ 可执行程序
-- Socket、epoll、HTTP、线程池、任务、插件、定时器、日志和配置代码
-- 单元测试、集成测试、性能测试
-- EchoPlugin 和 MockVisionPlugin
-- 动态插件加载、真实工业视觉和机器人能力
-
-进度事实以 [stage_status.md](docs/stage_status.md) 为准。
-
-## 推荐项目结构
+## 架构 Roadmap
 
 ```text
-IndustrialAIServiceFramework/
-├── CMakeLists.txt                 # Phase 1
-├── README.md
-├── LICENSE                       # 待确认许可证后创建
-├── config/
-│   └── server.json               # Phase 1
-├── docs/
-├── include/iaisf/
-│   ├── core/
-│   ├── network/
-│   ├── http/
-│   ├── concurrency/
-│   ├── task/
-│   ├── plugin/
-│   ├── timer/
-│   ├── logging/
-│   └── config/
-├── src/
-│   ├── core/
-│   ├── network/
-│   ├── http/
-│   ├── concurrency/
-│   ├── task/
-│   ├── plugin/
-│   ├── timer/
-│   ├── logging/
-│   ├── config/
-│   └── main.cpp                  # Phase 1
-├── plugins/
-│   ├── echo/
-│   └── mock_vision/
-├── examples/
-├── tests/
-│   ├── unit/
-│   └── integration/
-└── scripts/
+Phase 1 (implemented, Linux validation blocked)
+  C++17 / CMake / Error / Result / AppConfig / ConsoleLogger / CLI / tests
+
+Phase 2 (planned)
+  UniqueFd / Socket / Channel / EpollPoller / EventLoop / eventfd
+
+Phase 3—7 (planned)
+  HTTP -> task system -> static plugins -> timers -> async logging
+
+Phase 8—9 (planned)
+  measured engineering baseline -> production vision-plugin boundary
 ```
 
-模块内公共接口和实现分离，业务插件不会放入 `src/` 核心目录。构建必须使用源码树外目录。
+目标架构和阶段边界见 [architecture.md](docs/architecture.md) 与 [development_plan.md](docs/development_plan.md)。
 
-## 构建与启动
+## 依赖
 
-Phase 0 没有可构建目标。下面是 **Phase 1 计划采用、但当前尚未验证** 的 Linux 命令：
+固定版本：
+
+- nlohmann/json `v3.11.3`
+- GoogleTest `v1.15.2`
+
+默认使用 FetchContent，源码和构建产物只进入 build 目录：
+
+```text
+IAISF_BUILD_TESTS=ON
+IAISF_USE_SYSTEM_DEPS=OFF
+```
+
+启用 `IAISF_USE_SYSTEM_DEPS=ON` 时使用 `find_package`，缺少兼容依赖会明确失败，不会静默切换模式。关闭 `IAISF_BUILD_TESTS` 后不获取 GoogleTest。
+
+## Linux 构建
+
+需要：
+
+- Linux 或 WSL2 Linux
+- GCC/Clang 的 C++17 工具链
+- CMake 3.22+
+- Git 和 CA 证书（默认 FetchContent 首次下载需要）
+
+Debug：
 
 ```bash
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DBUILD_TESTING=ON
-cmake --build build --parallel
-ctest --test-dir build --output-on-failure
-./build/bin/iaisf_server --config config/server.json
+./scripts/build_linux.sh Debug
+./scripts/test_linux.sh Debug
 ```
 
-当前宿主是 Windows 10，未检测到可运行的 WSL Linux 发行版。Windows 上的 MinGW GCC 5.3.0 既过旧，也无法编译 Linux `epoll`；因此 Phase 1 验收必须在原生 Linux、可用 WSL2 或 Linux CI 中进行。
-
-## API 示例
-
-以下均为 **Phase 3—5 planned**，当前不可调用。
+Release：
 
 ```bash
-curl http://127.0.0.1:8080/health
+./scripts/build_linux.sh Release
+./scripts/test_linux.sh Release
 ```
+
+Smoke：
 
 ```bash
-curl -X POST http://127.0.0.1:8080/api/v1/tasks \
-  -H 'Content-Type: application/json' \
-  -d '{"plugin":"echo","task_type":"echo","input":{"message":"hello"}}'
+./scripts/smoke_linux.sh
 ```
 
-MockVisionPlugin 的结果必须包含显式模拟标识：
+当前环境没有真实执行这些 Linux 脚本。[Linux CI workflow](.github/workflows/linux-ci.yml) 会在分支被用户提交并 push 后运行相同脚本；workflow 文件存在不代表 CI 已通过。完整说明见 [linux_build.md](docs/linux_build.md)。
+
+## 命令行
+
+版本：
+
+```bash
+build/linux-release/iaisf_server --version
+```
+
+稳定输出：
+
+```text
+IndustrialAIServiceFramework 0.1.0
+```
+
+帮助：
+
+```bash
+build/linux-release/iaisf_server --help
+```
+
+验证配置：
+
+```bash
+build/linux-release/iaisf_server \
+  --config config/iaisf.example.json
+```
+
+无参数时输出版本和 Phase 1 提示后立即退出。未知参数、参数冲突和缺失配置路径返回非零。
+
+## 配置
+
+[iaisf.example.json](config/iaisf.example.json)：
 
 ```json
 {
-  "mock": true,
-  "detected": true,
-  "weld_type": "straight",
-  "start_point": [0.0, 0.0, 0.0],
-  "end_point": [100.0, 0.0, 0.0],
-  "confidence": 0.95
+  "service": {
+    "name": "IndustrialAIServiceFramework"
+  },
+  "runtime": {
+    "worker_threads": 4,
+    "task_queue_capacity": 1024
+  },
+  "logging": {
+    "level": "info"
+  }
 }
 ```
 
-完整请求、响应、限制与错误映射见 [protocol.md](docs/protocol.md)。
+安全默认值：
+
+- `service.name = IndustrialAIServiceFramework`
+- `runtime.worker_threads = clamp(hardware_concurrency, 1, 256)`
+- `runtime.task_queue_capacity = 1024`
+- `logging.level = info`
+
+限制：
+
+- service name 最大 128 bytes，不能空、全空白或包含控制字符；
+- worker threads 范围 1—256；
+- task queue capacity 范围 1—1,000,000；
+- 日志级别严格区分大小写，只接受 `trace/debug/info/warn/error`；
+- 分组或字段缺失使用默认值；
+- 未知顶层/分组字段、错误类型和非法值返回 `ConfigError`；
+- 文件不存在、无法打开或无法读取返回 `IoError`。
+
+Phase 1 不支持 YAML、TOML、环境变量覆盖、热更新、多文件合并或注释 JSON。
+
+## Error 与 Result
+
+`ErrorCode` 当前只包含 Phase 1 必需值：
+
+```text
+InvalidArgument / ConfigError / IoError / InternalError
+```
+
+`Result<T>` 使用标准库 `std::variant`，支持 move-only 类型且不要求 `T` 默认构造。`Result<void>` 表达只返回成功/错误的操作。
+
+预期失败通过 Result 返回；对失败 Result 调用 `value()`，或对成功 Result 调用 `error()`，会抛出 `std::logic_error`，表示程序员 API 误用，不用于普通错误流程。
+
+`Error` 是公开字段的可变值类型，因此“message 非空”不是类型系统可永久维持的不变量。项目生产代码通过 `make_error` 创建 Error，构造边界和 `Result::failure` 边界都会把空消息归一化为 `unspecified error`。
+
+## 同步日志
+
+Phase 1 的 `ConsoleLogger`：
+
+- 通过 `ILogger` 注入，不是全局单例；
+- 支持五个日志级别和阈值过滤；
+- 使用 mutex 保证一条记录完整输出；
+- 使用注入的 `std::ostream&`，便于测试；
+- 输出 UTC 时间、level、component 和 message；
+- 转义换行和控制字符。
+
+它没有后台线程、异步队列、文件 sink、轮转或压缩。这些属于 Phase 7。
 
 ## 测试
 
-Phase 0 只完成测试设计，没有执行编译或运行测试。计划通过 GoogleTest + CTest 覆盖增量 HTTP 解析、ET I/O 边界、线程池停止、任务状态竞争、插件异常、定时器更新，以及端到端任务 API。
+Linux 计划命令：
 
-性能数字仅允许在 Phase 8 按真实硬件和原始命令测量后记录。当前没有 QPS、并发连接数、延迟、CPU 或内存结果。详见 [test_plan.md](docs/test_plan.md)。
+```bash
+ctest --test-dir build/linux-debug --output-on-failure
+ctest --test-dir build/linux-release --output-on-failure
+```
 
-## 与 TinyWebServer 的关系和差异
+测试覆盖：
 
-工作区中的 `TinyWebServer_reference` 仅被只读调查。借鉴范围限于 Linux Socket、epoll 事件循环、非阻塞 I/O、HTTP 状态机、线程池、超时和日志等通用思想，没有复制源码。
+- 版本和 ErrorCode 字符串
+- Result 成功/失败、void、const、move-only 和误用
+- 默认/合法/非法/未知字段配置
+- 真实示例配置文件加载
+- 日志解析、阈值、格式、换行和清洗
+- Application 的 help/version/config/非法参数
+- CTest CLI version 和 example-config smoke
 
-本项目重新设计：
+真实结果见 [stage_status.md](docs/stage_status.md)。当前仅有 Windows/MSVC 补充结果，Linux 结果明确为未执行。
 
-- 从混合职责的 `WebServer/http_conn` 结构改为 `EventLoop`、`Channel`、`EpollPoller`、`Acceptor`、`TcpServer`、`TcpConnection` 和 `HttpSession` 等明确边界。
-- 从静态数组、裸指针和全局/单例式状态改为 RAII、智能指针、实例依赖注入和 EventLoop 线程归属。
-- 从 MySQL 登录、HTML 静态站点和 CGI 业务改为 JSON 任务 API；不引入数据库用户系统。
-- 从连接对象直接承担业务处理改为 Router → TaskManager → ThreadPool → PluginManager。
-- 从信号驱动的有序链表定时器改为 `timerfd + 最小堆`。
-- 从面向连接对象的线程池改为执行通用闭包的有界、可停止线程池。
-- 新增任务状态机、插件隔离、结构化错误、容量治理和自动化测试边界。
+## 项目结构
 
-详细调查依据和自主改造点见 [architecture.md](docs/architecture.md)。
+```text
+IndustrialAIServiceFramework/
+├── .gitattributes
+├── .github/workflows/linux-ci.yml
+├── CMakeLists.txt
+├── LICENSE
+├── cmake/
+│   ├── CompilerOptions.cmake
+│   └── Dependencies.cmake
+├── config/
+│   └── iaisf.example.json
+├── include/iaisf/
+│   ├── app/
+│   ├── config/
+│   ├── core/
+│   ├── logging/
+│   └── version.hpp.in
+├── src/
+│   ├── app/
+│   ├── config/
+│   ├── core/
+│   ├── logging/
+│   └── main.cpp
+├── tests/
+├── scripts/
+└── docs/
+```
 
-## 工业视觉插件定位
+Phase 2 及以后目录当前可以为空；没有创建误导性的网络、任务或插件空壳类。
 
-MockVisionPlugin 只验证服务框架如何承载工业任务，不读取真实点云，不调用 PCL/TensorRT，不声称具备算法精度。未来真实视觉插件必须在前序阶段稳定后再设计模型生命周期、GPU 并发、数据传输、取消和结果序列化。
+## 与 TinyWebServer 的差异
 
-## 文档索引
+`TinyWebServer_reference` 仅用于只读了解 Socket、epoll、HTTP、线程池、定时器和日志等通用思想。本项目没有复制其源码、类名或目录结构。
+
+本项目采用分层模块、RAII、实例依赖注入、统一 Result、任务状态机和插件边界，不包含 MySQL 登录、HTML、静态文件、CGI 或参考工程性能数字。
+
+## 性能
+
+未执行性能测试，没有 QPS、并发连接数、延迟、CPU 或内存结论。性能只能在 Phase 8 按真实硬件和原始命令测量后填写。
+
+## 许可证
+
+Licensed under the Apache License 2.0. See [LICENSE](LICENSE).
+
+第三方依赖保留各自许可证，本项目许可证不会重新授权第三方代码。
+
+## 文档
 
 - [总体架构](docs/architecture.md)
+- [Linux 构建](docs/linux_build.md)
 - [分阶段计划](docs/development_plan.md)
 - [协议设计](docs/protocol.md)
 - [插件设计](docs/plugin_design.md)
 - [测试计划](docs/test_plan.md)
 - [阶段状态](docs/stage_status.md)
 - [上下文交接](docs/context_handoff.md)
-

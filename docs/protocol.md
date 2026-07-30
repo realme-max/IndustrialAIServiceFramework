@@ -2,7 +2,7 @@
 
 ## 1. 范围与状态
 
-本文定义目标协议。Phase 0 只有设计；所有端点均为 planned。
+本文定义目标协议。Phase 1 只实现配置验证 CLI，没有 Socket、HTTP parser 或端点；本文件中的所有网络 API 仍为 planned。
 
 首个可用协议是 HTTP/1.1 + UTF-8 JSON。原始 TCP JSON 仅保留扩展设计，不在 Phase 1—5 的首要验收范围。服务不提供 HTML、文件下载、任意路径读取、shell 或客户端代码执行。
 
@@ -88,7 +88,7 @@
 - `cancelled`
 - `timeout`
 
-终态是 `success`、`failed`、`cancelled`、`timeout`。
+终态是 `success`、`failed`、`cancelled`、`timeout`。内部状态可命名为 `Succeeded`，JSON v1 仍稳定序列化为 `success`。
 
 ### 5.2 任务快照
 
@@ -173,6 +173,8 @@ Location: /api/v1/tasks/task_opaque
 - 503：任务队列/仓储满、线程池拒绝或服务停止中。
 
 如果排队未被接受，不返回 task ID，也不留下可查询的孤儿任务。
+
+工作队列满是服务容量不足，固定使用 503，不能包装为插件执行失败。429 只保留给未来独立的用户级请求限流。
 
 ### 6.3 GET /api/v1/tasks/{task_id}
 

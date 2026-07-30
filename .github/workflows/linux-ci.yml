@@ -1,0 +1,62 @@
+name: Linux CI
+
+on:
+  push:
+    branches:
+      - main
+      - "phase/**"
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: linux-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  linux-debug:
+    name: Linux Debug
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+
+      - name: Record environment
+        run: |
+          uname -a
+          cat /etc/os-release
+          cmake --version
+          c++ --version
+          git --version
+
+      - name: Prepare scripts
+        run: chmod +x scripts/*.sh
+
+      - name: Build Debug
+        run: ./scripts/build_linux.sh Debug
+
+      - name: Test Debug
+        run: ./scripts/test_linux.sh Debug
+
+  linux-release:
+    name: Linux Release
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+
+      - name: Prepare scripts
+        run: chmod +x scripts/*.sh
+
+      - name: Build Release
+        run: ./scripts/build_linux.sh Release
+
+      - name: Test Release
+        run: ./scripts/test_linux.sh Release
+
+      - name: Smoke Release
+        run: ./scripts/smoke_linux.sh
