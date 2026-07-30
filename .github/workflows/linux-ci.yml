@@ -21,6 +21,7 @@ jobs:
   linux-debug:
     name: Linux Debug
     runs-on: ubuntu-24.04
+    timeout-minutes: 15
     steps:
       - name: Check out source
         uses: actions/checkout@v6
@@ -45,6 +46,7 @@ jobs:
   linux-release:
     name: Linux Release
     runs-on: ubuntu-24.04
+    timeout-minutes: 15
     steps:
       - name: Check out source
         uses: actions/checkout@v6

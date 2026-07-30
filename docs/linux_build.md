@@ -2,7 +2,7 @@
 
 ## 1. 为什么必须使用 Linux
 
-IndustrialAIServiceFramework 的后续网络核心将直接使用 epoll、eventfd、timerfd、signalfd 和 POSIX Socket。Windows MinGW 或 MSVC 可以帮助发现一部分可移植 C++ 问题，但不能替代真实 Linux 构建、测试和运行验证。
+IndustrialAIServiceFramework 的 Phase 2 网络核心直接使用 epoll、eventfd 和 POSIX Socket；timerfd 与 signalfd 仍是后续计划。Windows MinGW 或 MSVC 可以帮助发现一部分可移植 C++ 问题，但不能替代真实 Linux 构建、测试和运行验证。
 
 推荐环境：
 
@@ -45,7 +45,10 @@ Codex 的 Phase 1 执行不会自动运行这些 `sudo` 命令。
 ```text
 IAISF_BUILD_TESTS=ON
 IAISF_USE_SYSTEM_DEPS=OFF
+IAISF_BUILD_LINUX_NETWORK=ON  # Linux 默认；其他平台默认 OFF
 ```
+
+`IAISF_BUILD_LINUX_NETWORK=ON` 创建 Linux-only `iaisf_net` / `iaisf::net` 和对应测试。该选项在非 Linux 平台显式开启会直接 configure 失败，不提供空实现或静默关闭。
 
 CMake FetchContent 使用固定 tag：
 
@@ -76,7 +79,8 @@ CMake FetchContent 使用固定 tag：
 cmake -S . -B build/linux-debug \
   -DCMAKE_BUILD_TYPE=Debug \
   -DIAISF_BUILD_TESTS=ON \
-  -DIAISF_USE_SYSTEM_DEPS=OFF
+  -DIAISF_USE_SYSTEM_DEPS=OFF \
+  -DIAISF_BUILD_LINUX_NETWORK=ON
 cmake --build build/linux-debug --parallel
 ctest --test-dir build/linux-debug --output-on-failure
 ```
@@ -96,7 +100,8 @@ ctest --test-dir build/linux-debug --output-on-failure
 cmake -S . -B build/linux-release \
   -DCMAKE_BUILD_TYPE=Release \
   -DIAISF_BUILD_TESTS=ON \
-  -DIAISF_USE_SYSTEM_DEPS=OFF
+  -DIAISF_USE_SYSTEM_DEPS=OFF \
+  -DIAISF_BUILD_LINUX_NETWORK=ON
 cmake --build build/linux-release --parallel
 ctest --test-dir build/linux-release --output-on-failure
 ```
@@ -127,7 +132,8 @@ Phase 1 程序验证配置后立即退出，不启动 Socket，不进入常驻�
 cmake -S . -B build/linux-system-deps \
   -DCMAKE_BUILD_TYPE=Release \
   -DIAISF_BUILD_TESTS=ON \
-  -DIAISF_USE_SYSTEM_DEPS=ON
+  -DIAISF_USE_SYSTEM_DEPS=ON \
+  -DIAISF_BUILD_LINUX_NETWORK=ON
 cmake --build build/linux-system-deps --parallel
 ctest --test-dir build/linux-system-deps --output-on-failure
 ```
@@ -147,7 +153,8 @@ ctest --test-dir build/linux-system-deps --output-on-failure
 cmake -S . -B build/linux-no-tests \
   -DCMAKE_BUILD_TYPE=Release \
   -DIAISF_BUILD_TESTS=OFF \
-  -DIAISF_USE_SYSTEM_DEPS=OFF
+  -DIAISF_USE_SYSTEM_DEPS=OFF \
+  -DIAISF_BUILD_LINUX_NETWORK=ON
 cmake --build build/linux-no-tests --parallel
 ```
 
@@ -171,10 +178,11 @@ rm -rf -- build/linux-system-deps
 
 - `linux-debug`：记录环境，执行 Debug configure/build/CTest；
 - `linux-release`：执行 Release configure/build/CTest 和 CLI smoke；
+- 两个 job 都通过构建脚本显式设置 `IAISF_BUILD_LINUX_NETWORK=ON`，并设置 15 分钟 job timeout；
 - 两个 job 都使用固定版本 FetchContent，不启用系统依赖模式；
 - 不使用 `continue-on-error`，不发布制品或部署。
 
-workflow 只有在用户提交并 push 分支后才能运行。当前尚无 GitHub Actions run 结果，不得把文件创建本身视为 Linux PASS。
+Phase 1 的历史成功证据是 [GitHub Actions run 30508113122](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30508113122)，它对应 Phase 1 提交，不覆盖当前 Phase 2 改动。workflow 只有在用户提交并 push 当前分支后才能运行；当前尚无 Phase 2 run，不得把 workflow 文件或测试定义本身视为 Linux PASS。
 
 ## 11. 环境记录
 
@@ -188,4 +196,8 @@ c++ --version
 git --version
 ```
 
-只有 Debug、Release、CTest 和 smoke 在真实 Linux 中全部成功后，才能把 Phase 1 标记为 Linux 验证通过。MinGW、MSVC 或仅执行 CMake configure 都不满足该门槛。
+只有当前 Phase 2 commit 的 Debug/Release configure、build、CTest 和 Release smoke 在真实 Linux 中全部成功后，才能把 Phase 2 标记为 completed。MinGW、MSVC、旧提交的 run 或仅执行 CMake configure 都不满足该门槛。
+
+Phase 2B 审计后当前包含 44 个 Linux-only `TEST` 源代码定义：UniqueFd 8、Socket 5、Channel 7、EpollPoller 7、EventLoop 17。连同 Phase 1 的 43 项，若全部被 CMake 发现，Linux CTest 预计接近 87 项。实际 discovery 数量、总数和通过数必须以目标 Linux 构建输出为准；尚未执行时不得预填为成功。
+
+Reactor 测试覆盖 HUP/RDHUP read-side 语义、active Channel 延迟移除、fd 复用、`queue_in_loop` 失败回滚、多线程容量竞争、EventLoop 状态矩阵、异常隔离和 eventfd drain。它们不访问外部网络或固定端口。

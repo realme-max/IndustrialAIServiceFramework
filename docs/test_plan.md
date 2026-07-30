@@ -2,7 +2,7 @@
 
 ## 1. 状态与原则
 
-Phase 1 已实现基础单元测试和 CLI smoke，并在 Phase 1B 加强 Error 边界、Result 引用类别、配置数值类型和 UTF-8 字节限制覆盖。提交 `63b30cffcbe3e621af33664721b3675a647bd1a1` 已在 Ubuntu 24.04 GitHub Actions 上完成 Debug、Release、CTest 和 Release smoke 验证。
+Phase 1 已实现基础单元测试和 CLI smoke，并在 Phase 1B 加强 Error 边界、Result 引用类别、配置数值类型和 UTF-8 字节限制覆盖。提交 `63b30cffcbe3e621af33664721b3675a647bd1a1` 已在 Ubuntu 24.04 GitHub Actions 上完成 Debug、Release、CTest 和 Release smoke 验证。Phase 2 Reactor 代码和测试已实现，但尚未在真实 Linux 上运行，当前状态为 `PHASE_2_REACTOR_CORE_IMPLEMENTED_LINUX_VALIDATION_BLOCKED`。
 
 测试原则：
 
@@ -122,16 +122,59 @@ Phase 1B 的临时配置 fixture 使用原子创建的唯一系统临时目录�
 
 ## 5. Phase 2 Network/Reactor 基础测试
 
-状态：planned，未开始。Phase 2 只验证 fd RAII、Linux Socket 基础封装和事件循环原语。
+状态：测试已实现，真实 Linux Debug/Release configure、build 和 CTest 尚未执行。Phase 2 只验证 fd RAII、Linux Socket 基础封装和事件循环原语。
 
 ### 5.1 Unit/component
 
-- `UniqueFd` 默认无效、析构关闭、release/reset、移动构造、移动赋值；禁止拷贝。
-- fd 为 0 时仍能正确管理，避免以 `> 0` 判断有效性。
-- Linux Socket 基础封装验证创建、非阻塞设置、错误返回和所有权转移。
-- EpollPoller add/mod/del 正常；重复注册、无效 fd 和删除后事件有明确错误。
-- Channel 关注事件变更只在 owner loop。
-- EventLoop 通过 `eventfd` 从其他线程唤醒，不丢回调，不 busy wait。
+| 测试文件 | 定义数 | 覆盖 |
+|---|---:|---|
+| `tests/net/test_unique_fd.cpp` | 8 | 默认/显式有效性、fd 0、析构、release/reset、move construct/assign、swap、禁止复制 |
+| `tests/net/test_socket.cpp` | 5 | 创建 IPv4 TCP、`O_NONBLOCK`、`FD_CLOEXEC`、`SO_REUSEADDR`、所有权转移与 write-half shutdown |
+| `tests/net/test_channel.cpp` | 7 | mask；RDHUP read；HUP-only close；HUP+IN read；ERR→read 与 read→write 顺序；非 owning |
+| `tests/net/test_epoll_poller.cpp` | 7 | add/mod/del、重复/未注册操作、eventfd ET、容量/timeout、fd 删除后复用映射 |
+| `tests/net/test_event_loop.cpp` | 17 | owner/state、stop-before-run、Stopping 拒绝、跨线程容量竞争、失败回调不执行、唤醒失败回滚、嵌套 queue、active 批次延迟移除、异常边界、eventfd drain/EAGAIN |
+
+合计 44 个 Phase 2 `TEST` 定义。连同 Phase 1 的 43 项，若全部被 CMake 发现，Linux CTest 预计接近 87 项。定义数和预计数都不是已执行的通过数；真实总数与结果必须以 Linux CTest 输出为准。
+
+正式 Linux 验证矩阵：
+
+| 环境/job | Configure | Build | CTest | Smoke | 当前证据 |
+|---|---|---|---|---|---|
+| Ubuntu 24.04 GCC Debug | pending | pending | pending | 不适用 | 尚无 Phase 2 run |
+| Ubuntu 24.04 GCC Release | pending | pending | pending | pending（Phase 1 CLI） | 尚无 Phase 2 run |
+| Windows VS2022 Debug（网络 OFF） | pass | pass | 43/43 pass | CTest 内 2 项 pass | 2026-07-30 本地回归 |
+| Windows VS2022 Release（网络 OFF） | pass | pass | 43/43 pass | version/config exit 0 | 2026-07-30 本地回归 |
+
+Linux 原始命令：
+
+```bash
+cmake -S . -B build/linux-debug \
+  -DCMAKE_BUILD_TYPE=Debug \
+  -DIAISF_BUILD_TESTS=ON \
+  -DIAISF_USE_SYSTEM_DEPS=OFF \
+  -DIAISF_BUILD_LINUX_NETWORK=ON
+cmake --build build/linux-debug --parallel
+ctest --test-dir build/linux-debug --output-on-failure
+
+cmake -S . -B build/linux-release \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DIAISF_BUILD_TESTS=ON \
+  -DIAISF_USE_SYSTEM_DEPS=OFF \
+  -DIAISF_BUILD_LINUX_NETWORK=ON
+cmake --build build/linux-release --parallel
+ctest --test-dir build/linux-release --output-on-failure
+./scripts/smoke_linux.sh
+```
+
+补充检查：
+
+- 非 Linux 平台默认不构建 `iaisf_net`；显式 `-DIAISF_BUILD_LINUX_NETWORK=ON` 必须在 configure 阶段失败。
+- Reactor 测试只使用 `eventfd` 和 `socketpair`，不监听端口、不访问外部网络。
+- 等待使用 condition variable/future 的有限超时；`iaisf_net_tests` CTest timeout 为 10 秒。
+- 并发容量测试用 condition variable 同步 32 个生产者，不用固定 sleep；成功数不超过容量，每个成功回调最多执行一次，失败回调执行次数为 0。
+- active 批次测试验证直接 remove 被拒绝、通过 `queue_in_loop` 延迟后成功，并保证同批其他 Channel 仍被处理。
+- Channel 异常测试固定策略：当前 Channel 剩余回调停止，后续 active Channel 继续；pending callback 同时覆盖标准和未知异常。
+- 当前未启用 sanitizer；ASan/UBSan 仍是后续可选验证，不能写成已通过。
 
 ### 5.2 Phase 2 暂不执行
 

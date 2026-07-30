@@ -10,6 +10,9 @@ enum class ErrorCode {
     InvalidArgument,
     ConfigError,
     IoError,
+    SystemError,
+    InvalidState,
+    ResourceExhausted,
     InternalError,
 };
 

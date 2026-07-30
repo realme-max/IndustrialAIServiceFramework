@@ -3,12 +3,12 @@
 ## 1. 文档状态
 
 - 项目：IndustrialAIServiceFramework
-- 阶段：Phase 1 基础工程
+- 阶段：Phase 2 Linux Reactor Core
 - 日期：2026-07-30
-- 状态：基础工程与 Phase 1B 审计已实现；Linux CI 尚未运行；网络及任务架构仍为 planned
+- 状态：Reactor 核心已实现；Phase 2 Linux CI 尚未运行；TCP 连接、HTTP 和任务架构仍为 planned
 - 目标平台：Linux x86_64，C++17
 
-本文同时记录已实现的 Phase 1 基础设施和后续目标边界。除明确列入“Phase 1 已实现”的类外，网络、HTTP、任务、插件和异步运行时类仍不存在。
+本文同时记录已实现的 Phase 1 基础设施、Phase 2 Reactor 核心和后续目标边界。只有明确列入已实现边界的类才是当前能力。
 
 ### 1.1 Phase 1 已实现边界
 
@@ -22,8 +22,24 @@
 
 未实现：
 
-- 本文后续描述的 Socket、Channel、Poller、EventLoop、HTTP、ThreadPool、Task、Plugin 和 Timer 类
+- 本文后续描述的 Acceptor、TcpConnection、TcpServer、HTTP、ThreadPool、Task、Plugin 和 Timer 类
 - 后台日志线程、异步队列、文件日志或日志轮转
+
+### 1.2 Phase 2 已实现边界
+
+Linux-only `iaisf_net` 当前实现：
+
+- `UniqueFd` 独占 fd；不可复制，可移动，析构不抛异常且不重试 `close(EINTR)`。
+- `Socket` 只创建 IPv4 TCP fd、设置 `SO_REUSEADDR` 和执行 write-half shutdown，不 bind/listen/accept/connect。
+- `Channel` 不拥有 fd，也不直接调用 `epoll_ctl`；fd 和所属 EventLoop 必须比 Channel 活得更久，注册期地址不可变化，析构前必须移除。
+- `EpollPoller` 独占 epoll fd，使用固定上限事件数组，不拥有注册的 Channel。
+- `EventLoop` 在构造线程运行；`update_channel/remove_channel/run` 仅允许所属线程调用。
+- `queue_in_loop/stop` 可跨线程调用，通过 nonblocking、close-on-exec 的 `eventfd` 唤醒。
+- 待执行回调队列按元素数硬限制；空回调返回 `InvalidArgument`，满队列返回 `ResourceExhausted`。
+- active Channel 批次分派期间直接 remove 被拒绝；移除和销毁通过 `queue_in_loop` 延迟到整批处理结束。
+- Channel 回调和待执行回调的异常被记录并隔离。一个 Channel 抛出后停止其本次剩余回调，但后续 active Channel 继续。Logger 不归 EventLoop 所有，必须活得更久。
+
+Phase 2 直接由 EventLoop 持有 `EpollPoller`，没有为了未来替换性创建空壳 `Poller` 基类。
 
 ## 2. 调查结果与设计来源
 
@@ -133,8 +149,8 @@ flowchart TB
 ```text
 include/iaisf/
   core/          Application, Error, Result, Router, ServiceContext
-  network/       UniqueFd, InetAddress, Buffer, Channel, Poller,
-                 EpollPoller, EventLoop, Acceptor, TcpServer, TcpConnection
+  net/           UniqueFd, InetAddress, Buffer, Channel, EpollPoller,
+                 EventLoop, Acceptor, TcpServer, TcpConnection
   http/          HttpRequest, HttpResponse, HttpParser, HttpSession, HttpRouter
   concurrency/   BoundedQueue, ThreadPool, CancellationToken
   task/          Task, TaskResult, TaskRepository, TaskManager, TaskExecutor
@@ -161,9 +177,8 @@ scripts/         构建、启动、smoke、sanitizer 辅助脚本
 | `InetAddress` | `sockaddr` 值对象和格式转换 | 不可变值对象 |
 | `Buffer` | 连续/分段输入输出缓冲，消费游标 | 仅归属 EventLoop |
 | `Channel` | fd、关注事件、回调，不拥有 fd | 仅 EventLoop 修改 |
-| `Poller` | 事件轮询抽象，便于测试 | 仅 EventLoop 使用 |
 | `EpollPoller` | RAII 管理 epoll fd 和 `epoll_ctl/wait` | 仅 EventLoop 使用 |
-| `EventLoop` | 轮询、定时器、跨线程待执行函数 | 本体单线程；`post()` 可跨线程 |
+| `EventLoop` | epoll 轮询、eventfd 唤醒、跨线程待执行函数 | 本体单线程；`queue_in_loop()`/`stop()` 可跨线程 |
 | `Acceptor` | 创建监听 fd、accept 循环、连接上限前置检查 | EventLoop 线程 |
 | `TcpServer` | 持有连接表、创建和移除连接、停止接收 | EventLoop 线程 |
 | `TcpConnection` | 连接状态、读写缓冲、半关闭和回压 | EventLoop 线程；外部只持弱引用/投递操作 |
@@ -177,7 +192,7 @@ scripts/         构建、启动、smoke、sanitizer 辅助脚本
 | `TaskExecutor` | 工作线程中的插件调用边界、异常隔离和结果提交 | 无共享或依赖线程安全服务 |
 | `IPlugin` | 插件生命周期和执行契约 | `execute` 在首版要求并发安全 |
 | `PluginManager` | 显式注册、冲突检测、初始化、查找、关闭 | 初始化阶段写；运行期只读查找 |
-| `TimerQueue` | `timerfd` + 最小堆、取消/更新、执行过期回调 | EventLoop 归属；跨线程操作通过 `post()` |
+| `TimerQueue` | `timerfd` + 最小堆、取消/更新、执行过期回调 | EventLoop 归属；跨线程操作通过 `queue_in_loop()` |
 | `Logger` | 有界日志队列、控制台/文件 sink、刷新停止 | 公共写接口线程安全 |
 | `ConfigLoader` | JSON 加载、默认值、类型和范围校验 | 启动期使用，产出不可变配置 |
 | `Application` | 组合根、启动顺序、优雅停止，不承担模块细节 | 主线程创建，EventLoop 运行期间协调生命周期 |
@@ -188,7 +203,6 @@ scripts/         构建、启动、smoke、sanitizer 辅助脚本
 classDiagram
     class Application
     class EventLoop
-    class Poller
     class EpollPoller
     class Channel
     class Acceptor
@@ -216,8 +230,7 @@ classDiagram
     Application *-- Logger
     Application ..> ConfigLoader
 
-    EventLoop *-- Poller
-    Poller <|-- EpollPoller
+    EventLoop *-- EpollPoller
     EventLoop *-- TimerQueue
     EventLoop o-- Channel
     TcpServer *-- Acceptor
@@ -240,7 +253,9 @@ classDiagram
 
 - `Application` 控制顶层服务的启动与销毁顺序。
 - `TcpServer` 的连接表拥有 `shared_ptr<TcpConnection>`；Channel 回调避免形成强引用环。
-- fd 由 `UniqueFd` 独占，Channel 永不关闭 fd。
+- fd 由 `UniqueFd` 独占，Channel 永不关闭 fd；fd 生命周期必须覆盖 Channel 的完整注册周期。
+- Poller 只保存非 owning Channel 指针。Channel 禁止复制/移动；注册期地址稳定，析构断言要求它已从 Poller 移除。
+- `epoll_wait` 返回的 active 指针在整个批次结束前都必须有效。任何回调都不能直接销毁本批次内的 Channel；EventLoop 在分派期间拒绝 remove，回调应通过 `queue_in_loop` 延迟移除和销毁。
 - Router handler 只捕获生命周期稳定的服务引用。
 - 工作任务不持有连接强引用；POST 提交立即响应，后续通过任务 ID 查询。
 
@@ -248,14 +263,14 @@ classDiagram
 
 ### 8.1 模式选择
 
-首版对监听和连接 fd 都使用 epoll ET：
+Phase 2 的 wakeup Channel 已使用 epoll ET；后续连接层计划对监听和连接 fd 也使用 ET：
 
 - ET 减少事件重复通知，能体现正确的非阻塞 I/O 边界处理。
 - 单 Reactor 降低首版生命周期和跨线程连接状态的复杂度。
 - 业务计算完全交给工作线程；EventLoop 只做 accept/read/parse/route/serialize/write 和短小状态更新。
 - 首版不使用 `EPOLLONESHOT`：只有 EventLoop 线程执行连接 I/O，不存在多个 I/O worker 同时处理同一 fd；事件通常关注 `EPOLLET | EPOLLRDHUP` 加实际读写位。
 
-### 8.2 accept/read/write 规则
+### 8.2 后续 accept/read/write 规则（planned）
 
 - 使用 `socket(..., SOCK_NONBLOCK | SOCK_CLOEXEC, ...)`，必要时以 `fcntl` 回退。
 - 监听设置 `SO_REUSEADDR`；`SO_REUSEPORT` 首版不启用。
@@ -263,11 +278,11 @@ classDiagram
 - 连接读取循环调用 `recv`，直到返回 `EAGAIN/EWOULDBLOCK`；`EINTR` 重试；`0` 表示 peer EOF。
 - 输出优先使用 `send(..., MSG_NOSIGNAL)`；进程启动时同时忽略 `SIGPIPE` 作为防御。
 - 写缓冲未清空时关注 `EPOLLOUT`；每次可写事件循环发送到 `EAGAIN`，清空后取消 `EPOLLOUT`，避免 busy loop。
-- `EPOLLERR/EPOLLHUP` 读取 `SO_ERROR` 后关闭。`EPOLLRDHUP` 标记读半关闭：处理已完整接收的请求并刷新响应，然后关闭；不再等待新请求。
+- `EPOLLERR` 路径读取 `SO_ERROR` 并决定关闭；`EPOLLRDHUP` 或 `EPOLLHUP` 同时可读时先循环读取剩余数据。只有 HUP 且没有 read-side 事件时才直接进入关闭流程。
 - `TcpConnection::close` 必须幂等：先从 epoll 删除，再从连接表移除，最后让 `UniqueFd` 关闭。
 - 可选启用 `TCP_NODELAY`，默认对小 JSON 响应启用，且通过配置覆盖。
 
-### 8.3 回压和容量
+### 8.3 后续回压和容量（planned）
 
 - 每连接限制 header、body、输入缓冲、输出缓冲和待处理请求数。
 - 输出超过高水位时暂停读事件；降到低水位后恢复。
@@ -278,7 +293,58 @@ classDiagram
 
 ### 8.4 EventLoop 唤醒
 
-`EventLoop::post()` 把短小回调放入有界/受控队列，并写 `eventfd` 唤醒 epoll。工作线程不得直接调用 `epoll_ctl`、修改 Channel 或写 Socket。
+`EventLoop::queue_in_loop()` 把短小回调放入有界队列，并写 `eventfd` 唤醒 epoll。状态检查、容量检查、入队、非阻塞写入和失败回滚由同一个 mutex 串行化：返回 failure 时本次回调不留在队列，返回 success 表示框架已经接受；显式 stop 仍可按下述状态语义取消或收尾。写入遇到 `EINTR` 重试，遇到 `EAGAIN` 视为已有待处理唤醒；其他错误回滚刚入队的回调。读取使用 `uint64_t` 并循环到 `EAGAIN`，短读、EOF 和其他错误会记录。回调先交换到局部队列，执行时不持有队列 mutex。未来工作线程不得直接调用 `epoll_ctl`、修改 Channel 或写 Socket。
+
+Channel 事件分派语义：
+
+1. `EPOLLHUP` 且没有 `EPOLLIN/EPOLLPRI/EPOLLRDHUP` 时调用 close callback；
+2. `EPOLLERR` 调用 error callback；
+3. `EPOLLIN/EPOLLPRI/EPOLLRDHUP` 任一存在时调用 read callback；
+4. `EPOLLOUT` 调用 write callback。
+
+因此 `EPOLLRDHUP` 不直接关闭，`EPOLLHUP|EPOLLIN` 仍先交给未来连接层读取剩余数据。Channel 只进行通知，不读取或写出 fd；未来 ET 连接层必须循环 I/O 到 `EAGAIN`。
+
+Phase 2 状态机为：
+
+```mermaid
+stateDiagram-v2
+    [*] --> Created
+    Created --> Running: owner-thread run
+    Created --> Stopped: stop before run, cancel queued callbacks
+    Running --> Stopping: thread-safe stop
+    Stopping --> Stopped: wake, drain, finish callbacks
+    Stopped --> Stopped: run is rejected
+```
+
+状态与提交矩阵：
+
+| 状态 | `run` | `queue_in_loop` | `stop` |
+|---|---|---|---|
+| Created | owner 可进入 Running | 接受；等待首次 run | 直接进入 Stopped，取消尚未执行回调 |
+| Running | 重入拒绝 | 接受 | 原子进入 Stopping 并唤醒 epoll |
+| Stopping | 拒绝 | 拒绝 | 幂等 |
+| Stopped | 拒绝再次运行 | 拒绝 | 幂等 |
+
+EventLoop 只能在构造线程析构；Running/Stopping 状态析构是违反生命周期契约的致命程序错误。正常 run 返回前一定进入 Stopped。
+
+事件流：
+
+```mermaid
+sequenceDiagram
+    participant P as Producer thread
+    participant Q as Bounded callback queue
+    participant E as eventfd
+    participant L as EventLoop owner thread
+    participant X as EpollPoller
+
+    P->>Q: queue_in_loop(callback)
+    P->>E: write uint64
+    E-->>X: EPOLLIN | EPOLLET
+    X-->>L: wakeup Channel
+    L->>E: read until EAGAIN
+    L->>Q: swap to local queue
+    L->>L: execute callbacks without queue lock
+```
 
 进程在启动时屏蔽 SIGINT/SIGTERM，并计划通过 `signalfd` 把停止通知纳入 EventLoop；SIGPIPE 独立忽略。顺序必须是：主线程先屏蔽目标信号，再创建 `signalfd`，最后才创建 worker 和日志线程，避免目标信号被其他线程异步接收。信号路径只请求停止，不执行非异步信号安全的清理逻辑。
 

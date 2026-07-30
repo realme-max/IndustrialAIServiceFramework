@@ -25,7 +25,7 @@
 
 - CMake 最低版本 3.22，C++17，禁止编译器扩展。
 - GCC 建议 10+ 或 Clang 建议 12+；Phase 1 已在 GCC 13.3.0 上验证，更低版本兼容性仍需单独测试。
-- Phase 1 生产核心依赖仅为 nlohmann/json `v3.11.3`；pthread/Threads 在真正需要线程时再引入。
+- Phase 1 生产核心依赖为 nlohmann/json `v3.11.3`；Phase 2 的 Linux-only `iaisf_net` 通过 `Threads::Threads` 表达线程运行时依赖。
 - 测试依赖 GoogleTest `v1.15.2`，只在 `IAISF_BUILD_TESTS=ON` 时启用。
 - 默认使用固定 tag 的 FetchContent；`IAISF_USE_SYSTEM_DEPS=ON` 时严格通过 `find_package` 查找，不静默 fallback。
 - CMake targets 按模块拆分，使用 target 级 include、warning 和 link 设置；不使用全局 `include_directories`。
@@ -36,6 +36,7 @@
 |---|---:|---|
 | `IAISF_BUILD_TESTS` | ON | 构建 GoogleTest/CTest；作为子项目可显式关闭 |
 | `IAISF_USE_SYSTEM_DEPS` | OFF | OFF 使用固定 FetchContent，ON 使用系统包 |
+| `IAISF_BUILD_LINUX_NETWORK` | Linux ON；其他平台 OFF | 构建 epoll/eventfd Reactor；非 Linux 显式设为 ON 时 configure 失败 |
 
 Sanitizer、examples 和 warnings-as-errors 开关尚未实现，按后续阶段需要增加。
 
@@ -101,11 +102,11 @@ docs: complete phase 1 validation record
 
 ## 5. Phase 2：Socket、epoll 与 EventLoop
 
-状态：**planned，未开始**
+状态：**implemented，Linux validation blocked（2026-07-30）**
 
-目标：建立 Linux fd RAII、Socket 基础操作与单 Reactor 事件循环的最小基础设施。
+已实现 Linux fd RAII、Socket 基础操作与单 Reactor 事件循环的最小基础设施；当前机器没有可运行的 Linux/WSL，真实 Linux Debug/Release 编译和测试尚未执行，因此不能标记为 completed。
 
-交付：
+已交付：
 
 - `UniqueFd`
 - Linux Socket 基础封装
@@ -113,27 +114,40 @@ docs: complete phase 1 validation record
 - `EpollPoller`
 - `EventLoop`
 - `eventfd` 跨线程唤醒
-- 对应单元测试
+- 有界跨线程回调队列
+- `iaisf_net` 静态库与 `iaisf::net` alias
+- 44 个 Linux-only Reactor 测试定义
 
-实施重点：
+已固定的实现契约：
 
-- 先固定 fd 所有权、移动语义和幂等关闭，再实现 Channel 与 epoll 注册生命周期。
-- `Channel` 不拥有 fd；`EventLoop` 是 Channel/Poller 操作的线程归属边界。
-- `eventfd` 只承担跨线程唤醒，不在本阶段引入任务调度。
+- `UniqueFd` 独占 fd、禁止复制、允许移动；析构时只尝试一次 `close`，不对 `EINTR` 重试。
+- `Socket` 创建 nonblocking、close-on-exec 的 IPv4 TCP fd；本阶段不提供 bind/listen/accept/connect。
+- `Channel` 不拥有 fd；稳定地址和 fd 的生命周期必须长于注册期，析构前必须移除。active 批次内禁止直接 remove/destroy，必须通过 `queue_in_loop` 延迟。
+- `EPOLLRDHUP` 是 read-side 通知；`HUP|IN` 仍执行 read，只有没有 read-side 事件的 HUP 才直接 close。Channel 不负责 ET drain。
+- `EventLoop` 构造线程是 owner；`run/update_channel/remove_channel` 仅 owner 可调用，`queue_in_loop/stop` 可跨线程调用。
+- epoll 使用 ET，不启用 ONESHOT；`eventfd` 只承担唤醒并读取到 `EAGAIN`。
+- 待执行队列按元素数限制；空回调和队列满返回明确 Error。状态/容量检查、入队、唤醒和失败回滚具有原子接受语义。
+- Created 可预入队；run 前 stop 直接进入 Stopped 并取消队列。Running stop 进入 Stopping，Stopping/Stopped 拒绝新提交。
+- 单个 Channel 回调异常终止该 Channel 本轮剩余分派，但后续 active Channel 继续；pending callback 异常逐个隔离。
 
-验收：
+当前验证：
 
-- `UniqueFd` 和 Socket 基础封装的所有权、移动与关闭行为有单测。
-- epoll add/mod/del 和 EventLoop wakeup 有单测。
+- Windows VS2022 Debug/Release Phase 1 回归均为 43/43 CTest 通过；Release 两项 CLI smoke 均成功。
+- 非 Linux 显式 `IAISF_BUILD_LINUX_NETWORK=ON` 的 CMake 负向检查按预期失败并给出明确诊断。
+- shell 语法、workflow YAML 解析、禁止实现项扫描和 `git diff --check` 已通过。
+- 44 个 Linux-only 测试覆盖 UniqueFd 8、Socket 5、Channel 7、EpollPoller 7、EventLoop 17；若全部被 CMake 发现，连同 Phase 1 的 43 项预计接近 87 项。这些只是源代码定义和预计值，尚不能写成 Linux CTest PASS。
+- Phase 2 的 Ubuntu 24.04 GCC Debug/Release configure、build、CTest 尚待提交后由 GitHub Actions 真实验证。
 - 不实现 HTTP、完整 `TcpConnection` 协议处理、ThreadPool、TaskRepository、PluginManager、timerfd 任务超时、signalfd 优雅停止、异步日志或 AI 插件。
 
 建议 commit message：
 
 ```text
-feat(network): add phase 2 event-loop foundations
+feat: implement Linux reactor core
 ```
 
 ## 6. Phase 3：HTTP 协议与路由
+
+状态：**planned，未开始**。只有 Phase 2 对应提交在真实 Linux Debug/Release CI 中完成 configure、build 和 CTest，并经用户确认后才进入本阶段。
 
 目标：把 TCP 字节安全转换为 HTTP/1.1 请求并提供健康检查。
 
