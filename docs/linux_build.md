@@ -3,9 +3,9 @@
 ## 1. 为什么必须使用 Linux
 
 IndustrialAIServiceFramework 的 Phase 2 Reactor、Phase 3 TCP Transport 和 Phase 4
-HTTP adapter 直接使用 epoll、eventfd、accept4 和 POSIX Socket；HTTP Core 本身可移植，
-HttpSession/HttpServer 与 loopback integration 已由最终 GitHub Actions Linux CI
-验证。timerfd 与 signalfd 仍是后续计划。
+HTTP adapter 直接使用 epoll、eventfd、accept4 和 POSIX Socket；HTTP Core 与
+Phase 5 Task Runtime 本身可移植。Phase 5 已在 Windows 验证，尚无包含 task targets
+的真实 Linux CI。timerfd 与 signalfd 仍是后续计划。
 Windows MinGW 或 MSVC 可以帮助发现一部分可移植 C++ 问题，但不能替代真实 Linux
 构建、测试和运行验证。
 
@@ -375,3 +375,50 @@ IndustrialAIServiceFramework 0.1.0
 同 SHA 的 PR run checkout 了 GitHub 临时 merge commit，因此最终封板选择 checkout
 SHA 与本地 HEAD/upstream 完全一致的 push run。Phase 4 状态为
 `PHASE_4_HTTP_PROTOCOL_COMPLETED`。
+
+## 14. Phase 5 Linux 验证入口
+
+Phase 5 新增跨平台 targets：
+
+```text
+iaisf_task
+iaisf_task_tests
+```
+
+它们不受 `IAISF_BUILD_LINUX_NETWORK` 控制；Linux CI 仍使用
+`IAISF_BUILD_LINUX_NETWORK=ON`，从而在同一矩阵构建 Foundation、Reactor、TCP、
+HTTP 和 Task Runtime。workflow 的 Debug/Release 显式验证命令均保留已有 HTTP
+targets，并追加：
+
+```bash
+cmake --build build/linux-debug --target iaisf_task iaisf_task_tests --parallel
+cmake --build build/linux-release --target iaisf_task iaisf_task_tests --parallel
+```
+
+实际 workflow 将它们与 HTTP targets 放在同一个 `cmake --build --target ...` 调用中；
+上面的拆分仅用于说明 task 入口。完整 CTest 和 Release CLI smoke 未删除，没有
+`continue-on-error`、artifact upload 或部署。
+
+Windows 已验证的 Task Runtime 定义数为 85。如果 Linux discovery 与当前定义一致，
+预期矩阵为：
+
+```text
+Foundation          43
+Reactor             45
+TCP                 51
+HTTP Core           84
+HTTP Integration    16
+Task Runtime        85
+expected total     324
+```
+
+这是待验证的预期，不是 Linux PASS。当前宿主没有 `bash`、WSL 或 Linux；
+`bash -n scripts/build_linux.sh` 因命令不存在而无法运行，也没有本地 Linux
+configure/build/CTest。Phase 5 提交、run URL、run ID、Ubuntu/GCC/CMake 版本、
+Debug/Release CTest 数量和 warning 结论都必须在 commit/push 后由真实 CI 记录。
+
+当前状态：
+
+```text
+PHASE_5_TASK_RUNTIME_IMPLEMENTED_LINUX_VALIDATION_BLOCKED
+```

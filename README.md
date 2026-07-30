@@ -2,7 +2,7 @@
 
 面向工业 AI 应用的 C++ 高性能任务服务框架。
 
-> 当前状态：`PHASE_4_HTTP_PROTOCOL_COMPLETED`。Phase 4 HTTP/1.1 Core 与 Linux TCP adapter 已完成；Windows Visual Studio 2022 Debug/Release 均为 127/127，最终 [Linux CI run 30539245789](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30539245789) 在 Ubuntu 24.04.4 LTS、GCC 13.3.0、CMake 3.31.6 上完成 Debug/Release configure、build 和 239/239 CTest，项目源码与测试 warning 为 0。
+> 当前状态：`PHASE_5_TASK_RUNTIME_IMPLEMENTED_LINUX_VALIDATION_BLOCKED`。跨平台有界线程池与任务运行时已完成 Phase 5B 并发、终态和生命周期专项审计；Windows Visual Studio 2022 Debug/Release 均为 212/212，其中 Task Runtime 85/85。Phase 5 提交尚未产生，对应 Linux CI 尚未运行，因此不能标记为完成。
 
 ## 项目定位
 
@@ -10,7 +10,7 @@
 
 框架层只负责网络、协议、路由、任务调度、插件管理、状态、日志、配置和错误处理。焊缝、点云、机器人等领域语义只能进入插件层。
 
-当前 `iaisf_server` 仍只验证 CLI 和配置后退出；Phase 4 已提供可组合的 HTTP Server API，但尚未接入常驻服务组合根，也没有新增不受控的 `--serve`。
+当前 `iaisf_server` 仍只验证 CLI 和配置后退出；Phase 4 已提供可组合的 HTTP Server API，Phase 5 已提供独立 Task Runtime API，但二者尚未在常驻服务组合根中连接，也没有新增不受控的 `--serve` 或任务 HTTP 路由。
 
 ## Phase 1 已实现
 
@@ -92,12 +92,32 @@ Phase 3 的线程边界不是“TCP 层整体线程安全”：只有 `EventLoop
 
 不支持 HTTP/1.0、HTTP/2、absolute/authority/asterisk-form、chunked、trailers、Upgrade、Expect、percent-decoding、路径规范化、动态路由、流式 body、TLS 或 WebSocket。
 
+## Phase 5 已实现，等待 Linux 验证
+
+- 跨平台 `iaisf_task` / `iaisf::task` 与 `iaisf_task_tests`，依赖 `iaisf::core`、`Threads::Threads` 和 nlohmann/json
+- `BoundedThreadPool`：固定 worker、有界 FIFO、非阻塞 `try_submit`、队列满 `ResourceExhausted`、drain-then-join shutdown
+- worker 隔离标准和未知异常；任务执行时不持有队列锁；并发 shutdown 只有首个 caller 执行 join，其他 caller 等待 Stopped
+- 禁止 restart、动态 resize、detached thread 和 worker self-shutdown；join 后销毁全部 worker thread 对象
+- 强类型 `TaskId`，稳定格式 `task-0000000000000001`；单进程内在线程安全仓库中单调生成，rollback/erase 后不复用，`uint64_t` 耗尽后永久拒绝
+- `TaskState` 仅含 Queued、Running、Succeeded、Failed、TimedOut；不提前加入取消、重试或优先级
+- `TaskLimits` 对仓库、operation、JSON input/result 和 error message 采用明确字节硬上限；JSON 按序列化 UTF-8 bytes 计数
+- 有界内存 `TaskRepository` 是状态转换唯一裁决者；只允许 Queued→Running 与 Running→三个终态
+- first-terminal-wins；Timeout 后晚到 success/failure 返回 AlreadyTerminal，不覆盖终态
+- `TaskExecutor` 通过注入式 `TaskHandler` 执行，不接触 Socket、Channel、EventLoop、TcpConnection 或 HTTP 对象
+- `TaskManager::submit` 通过 in-flight submission 计数进入事务；队列拒绝或闭包分配失败时回滚 Queued，失败提交不留可查询残留
+- shutdown 的线性化点是关闭 `accepting`；随后等待 in-flight submit 完整成功或回滚，再 drain/join 已接受任务
+- 正常返回、返回 Error、标准/未知异常、结果超限或 JSON 序列化失败均有 Failed/Success 终态出口；异常原文不进入 Snapshot
+- TimedOut 可显式删除但不会终止仍在运行的 handler；晚到完成遇到 AlreadyTerminal 或 NotFound 都计数并丢弃
+- 同一 `TaskHandler` 可被多个 worker 真正并发调用，调用者必须保证线程安全；非协作 handler 会延迟 shutdown
+- Repository 满时拒绝新任务，不自动驱逐终态、不做 TTL 或持久化；容量只通过显式 `erase_terminal` 释放
+
+Phase 5 尚未把 TaskManager 暴露为 HTTP API，也未实现自动 timeout 扫描。当前 Windows Debug/Release 均实际执行 Foundation 43、HTTP Core 84、Task Runtime 85，合计 212/212；Linux workflow 已显式加入 task targets，但只有新提交的真实 CI 成功后才能完成封板。
+
 ## 尚未实现
 
-- 线程池和有界工作队列
-- Task、TaskManager、TaskRepository 和任务 API
+- Task HTTP API、`/v1/tasks` 与 HTTP/Task Runtime 组合根
 - PluginManager、EchoPlugin、MockVisionPlugin 或动态 `.so`
-- timerfd、任务超时和连接超时
+- timerfd、自动任务超时扫描和连接超时
 - 异步日志、文件日志和日志轮转
 - TensorRT、PCL、真实点云、机器人或 Agent 能力
 - 性能压测和任何 QPS/延迟结论
@@ -117,8 +137,11 @@ Phase 3 (completed)
 Phase 4 (completed)
   HTTP/1.1 core / Router / Session / HttpServer / built-in health and version
 
+Phase 5 (implemented, Linux validation blocked)
+  bounded fixed thread pool / Task values and limits / Repository / Executor / Manager
+
 Later phases (planned)
-  task system -> static plugins -> timers -> async logging
+  static plugins -> timers -> async logging
 
 Phase 9—10 (planned)
   measured engineering baseline -> production vision-plugin boundary
@@ -294,7 +317,7 @@ ctest --test-dir build/linux-release --output-on-failure
 - CTest CLI version 和 example-config smoke
 - Linux `UniqueFd`、Socket、Channel、EpollPoller 和 EventLoop
 
-真实结果见 [stage_status.md](docs/stage_status.md)。Phase 4 Windows/MSVC Debug/Release 均为 127/127：Foundation 43/43、HTTP Core 84/84。Linux Debug/Release 均实际执行 Foundation 43/43、Reactor 45/45、TCP 51/51、HTTP Core 84/84、HTTP Integration 16/16，合计 239/239；Release `--version` 与示例配置 smoke 成功，项目源码和测试 warning 为 0。Phase 3 的历史封板结果仍保持 TCP 50/50、合计 138/138，不回写后续新增测试。
+真实结果见 [stage_status.md](docs/stage_status.md)。Phase 5B Windows/MSVC Debug/Release 均为 212/212：Foundation 43/43、HTTP Core 84/84、Task Runtime 85/85；Release `--version` 与示例配置 smoke 成功，项目源码和测试编译 warning 为 0。Phase 4 Linux Debug/Release 的已封板历史仍为 Foundation 43、Reactor 45、TCP 51、HTTP Core 84、HTTP Integration 16，合计 239/239；尚无包含 Task Runtime 的 Phase 5 Linux 结果。
 
 ## 项目结构
 
@@ -317,6 +340,7 @@ IndustrialAIServiceFramework/
 │   ├── logging/
 │   ├── net/
 │   │   └── tcp/
+│   ├── task/
 │   └── version.hpp.in
 ├── src/
 │   ├── app/
@@ -326,15 +350,17 @@ IndustrialAIServiceFramework/
 │   ├── logging/
 │   ├── net/
 │   │   └── tcp/
+│   ├── task/
 │   └── main.cpp
 ├── tests/
 │   ├── http/
-│   └── net/
+│   ├── net/
+│   └── task/
 ├── scripts/
 └── docs/
 ```
 
-`net` 包含 Phase 2 Reactor 原语和 Phase 3 `tcp/` 字节传输层；`http` 包含 Phase 4 协议核心与 Linux adapter。仍没有任务、插件、定时器或异步日志空壳类。
+`net` 包含 Phase 2 Reactor 原语和 Phase 3 `tcp/` 字节传输层；`http` 包含 Phase 4 协议核心与 Linux adapter；`task` 包含 Phase 5 的跨平台任务运行时。仍没有插件、定时器或异步日志空壳类。
 
 ## 与 TinyWebServer 的差异
 

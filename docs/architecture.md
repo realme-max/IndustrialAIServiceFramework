@@ -3,12 +3,12 @@
 ## 1. 文档状态
 
 - 项目：IndustrialAIServiceFramework
-- 阶段：Phase 4 HTTP/1.1 Protocol Layer
+- 阶段：Phase 5 Bounded Thread Pool and Task Runtime
 - 日期：2026-07-30
-- 状态：`PHASE_4_HTTP_PROTOCOL_COMPLETED`；HTTP Core、Linux adapter 与 loopback integration 已完成 Windows/Linux 分层验证
+- 状态：`PHASE_5_TASK_RUNTIME_IMPLEMENTED_LINUX_VALIDATION_BLOCKED`；跨平台 Task Runtime 已完成 Windows 分层验证，尚无对应 Linux CI
 - 目标平台：Linux x86_64，C++17
 
-本文同时记录已实现的 Phase 1 基础设施、Phase 2 Reactor 核心、当前 Phase 3 TCP 传输实现和后续目标边界。只有明确列入已实现边界的类才是当前能力。
+本文同时记录已实现的 Phase 1 基础设施、Phase 2 Reactor、Phase 3 TCP、Phase 4 HTTP 与 Phase 5 Task Runtime，以及后续目标边界。只有明确列入已实现边界的类才是当前能力。
 
 ### 1.1 Phase 1 已实现边界
 
@@ -110,6 +110,41 @@ CTest。最终 [Linux CI run 30539245789](https://github.com/realme-max/Industri
 target 均实际构建，Release CLI smoke 成功，项目源码和测试 warning 为 0。
 `iaisf_server` 仍没有进入常驻模式。
 
+### 1.6 Phase 5 已实现边界
+
+Phase 5 新增跨平台 `iaisf_task` / `iaisf::task`，PUBLIC 依赖 `iaisf::core`、
+`Threads::Threads` 和 nlohmann/json。它不依赖 Reactor、TCP 或 HTTP target。
+
+- `BoundedThreadPool` 在工厂成功返回前启动固定数量 worker；有界 FIFO 的
+  `try_submit` 不等待空位。队列满为 `ResourceExhausted`，shutdown 后为
+  `InvalidState`。
+- Pool 状态严格为 Running→ShuttingDown→Stopped；`try_submit` 和 shutdown
+  在同一 mutex 下线性化。首个 shutdown caller 执行 drain/join，其他并发 caller
+  等待 Stopped；join 后清空 thread 对象。worker self-shutdown 在修改状态前返回
+  `InvalidState`，之后仍可由外部线程正常 shutdown。
+- `TaskId` 是 `uint64_t` 强类型，仓库锁内单调分配；字符串最小宽度 16 位十进制，
+  不包含随机数、时间、机器信息，也不宣称跨进程或重启唯一。rollback 和 erase
+  不复用 ID；分配到最大值后永久返回 `ResourceExhausted`，不回绕。
+- `TaskLimits` 以 bytes 校验 operation/error，并以 nlohmann/json `dump()` 的
+  UTF-8 序列化 bytes 校验 input/result；非法 UTF-8、分配失败和长度错误转为
+  `Error`。error 超限使用固定长度 `#` 泛化，不保留敏感前缀。
+- `TaskRepository` 是唯一状态裁决者，持有有界内存记录和独立快照。它不自动驱逐、
+  不做 TTL/持久化；只有显式 `erase_terminal` 释放终态容量。
+- `TaskExecutor` 在仓库锁外调用注入式 `TaskHandler`。handler 标准/未知异常映射为
+  泛化 Failed，logger 异常被计数和隔离，超限或不可序列化结果转为 Failed。
+  TimedOut 后的晚到完成遇到 AlreadyTerminal，或 TimedOut 已删除后遇到 NotFound，
+  都作为 late completion 计数并丢弃。
+- `TaskManager::submit` 先在 admission mutex 下检查 `accepting` 并增加
+  `in_flight_submissions`，随后在锁外完成 validate/create/try_submit/rollback。
+  RAII guard 在所有返回路径减少计数；失败提交不保留 Queued 记录。
+- shutdown 的 Manager 线性化点是把 `accepting` 设为 false；它先等待
+  `in_flight_submissions == 0`，再调用 Pool drain/join。多个 submitter 不会串行
+  执行 handler，多个 shutdown caller 由 Pool 状态机收敛。
+
+Windows Debug/Release 均实际执行 Foundation 43、HTTP Core 84、Task Runtime 85，
+合计 212/212。Linux workflow 已显式构建两个 task target，但新提交及其真实 Linux
+CI 尚不存在，因此当前不使用 Phase 4 Linux 结果替代 Phase 5 验证。
+
 ## 2. 调查结果与设计来源
 
 ### 2.1 当前工作区
@@ -178,8 +213,8 @@ flowchart TB
     Network["network<br/>Socket / Channel / EventLoop / TCP"]
     Http["http<br/>Parser / Session / Response"]
     Router["core<br/>Router / API handlers"]
-    Task["task<br/>TaskManager / Repository / Scheduler"]
-    Concurrency["concurrency<br/>BoundedQueue / ThreadPool"]
+    Task["task<br/>TaskManager / Repository / Executor"]
+    Concurrency["task runtime<br/>BoundedThreadPool"]
     Plugin["plugin<br/>PluginManager / IPlugin"]
     Examples["plugins<br/>Echo / MockVision"]
     Timer["timer<br/>TimerQueue / timerfd"]
@@ -221,8 +256,8 @@ include/iaisf/
   net/           UniqueFd, InetAddress, Buffer, Channel, EpollPoller,
                  EventLoop, Acceptor, TcpServer, TcpConnection
   http/          HttpRequest, HttpResponse, HttpParser, HttpSession, HttpRouter
-  concurrency/   BoundedQueue, ThreadPool, CancellationToken
-  task/          Task, TaskResult, TaskRepository, TaskManager, TaskExecutor
+  task/          TaskId, TaskState, TaskLimits, BoundedThreadPool,
+                 TaskRepository, TaskManager, TaskExecutor
   plugin/        IPlugin, PluginTypes, PluginManager
   timer/         TimerId, TimerQueue
   logging/       LogRecord, ILogger, Logger
@@ -254,11 +289,11 @@ scripts/         构建、启动、smoke、sanitizer 辅助脚本
 | `HttpParser` | 增量解析 request line/headers/body | 每连接独占，无共享 |
 | `HttpSession` | 把 TCP 字节转换为 HTTP 请求/响应 | EventLoop 线程，不执行耗时业务 |
 | `HttpRouter` | 方法 + 路径模板匹配 | 启动后只读 |
-| `ThreadPool` | 固定工作线程、有界闭包队列、drain/stop | 公共方法线程安全 |
-| `Task` | 任务标识、输入、状态、时间、结果和错误 | 状态由仓储锁保护或通过受控方法修改 |
+| `BoundedThreadPool` | 固定工作线程、有界 FIFO、drain/join | 公共方法线程安全；worker self-shutdown 拒绝 |
+| `TaskRequest/Snapshot` | 通用 JSON 输入与独立状态快照 | 值对象；不含网络引用 |
 | `TaskRepository` | 有界内存存储、查询、合法状态转换、终态清理 | 内部互斥，公共方法线程安全 |
 | `TaskManager` | 校验提交、创建任务、排队、查询、超时协调 | 公共 API 线程安全 |
-| `TaskExecutor` | 工作线程中的插件调用边界、异常隔离和结果提交 | 无共享或依赖线程安全服务 |
+| `TaskExecutor` | 工作线程中的 handler 调用边界、异常隔离和结果提交 | 不创建线程；handler 必须并发安全 |
 | `IPlugin` | 插件生命周期和执行契约 | `execute` 在首版要求并发安全 |
 | `PluginManager` | 显式注册、冲突检测、初始化、查找、关闭 | 初始化阶段写；运行期只读查找 |
 | `TimerQueue` | `timerfd` + 最小堆、取消/更新、执行过期回调 | EventLoop 归属；跨线程操作通过 `queue_in_loop()` |
@@ -283,7 +318,7 @@ classDiagram
     class HttpRouter
     class TaskManager
     class TaskRepository
-    class ThreadPool
+    class BoundedThreadPool
     class TaskExecutor
     class PluginManager
     class IPlugin
@@ -296,7 +331,6 @@ classDiagram
     Application *-- HttpRouter
     Application *-- TaskManager
     Application *-- PluginManager
-    Application *-- ThreadPool
     Application *-- Logger
     Application ..> ConfigLoader
 
@@ -316,9 +350,10 @@ classDiagram
 
     HttpRouter --> TaskManager
     TaskManager *-- TaskRepository
-    TaskManager --> ThreadPool
-    ThreadPool --> TaskExecutor
-    TaskExecutor --> PluginManager
+    TaskManager *-- BoundedThreadPool
+    TaskManager *-- TaskExecutor
+    BoundedThreadPool --> TaskExecutor
+    TaskExecutor ..> PluginManager : future TaskHandler adapter
     PluginManager o-- IPlugin
 ```
 
@@ -556,10 +591,18 @@ flowchart LR
   不得阻塞磁盘、网络或执行 AI；未来 worker 仍不得操作 HTTP/TCP/epoll 对象。
 - HttpServer stop 镜像 TcpServer：禁止 restart，active batch 内可能异步完成，
   `stopped()` 同时要求底层 stopped 且 Session 表为空；未完成 stop 前析构是契约错误。
+- TaskManager 声明顺序为 Repository → Executor → Pool，析构体先调用 shutdown；
+  成员逆序销毁时 Pool 先析构/join，之后才销毁 Executor 和 Repository。worker closure
+  捕获稳定 Executor 地址而不是裸 TaskManager；Logger 由调用者持有且必须比 Manager
+  存活更久。禁止从 worker 内 shutdown 或销毁 TaskManager。
 
 ## 10. 请求数据流
 
-### 10.1 提交任务
+### 10.1 提交任务（planned HTTP adapter）
+
+Phase 5 尚未实现本节 HTTP 路由。下图是未来组合方式，不是当前可调用路径；当前
+`TaskManager::submit(TaskRequest)` 直接完成 Repository create、bounded submit 和
+失败 rollback。
 
 ```mermaid
 sequenceDiagram
@@ -637,7 +680,11 @@ flowchart LR
   Acceptor start/stop、TcpServer start/stop、TcpConnection send/shutdown/close-after-write/
   force-close、
   callback setter 和连接表操作均不保证线程安全，必须由 owner 执行。
-- `TaskRepository`、`ThreadPool::submit/stop` 和 Logger 写接口内部同步。
+- `TaskRepository`、`BoundedThreadPool::try_submit/shutdown` 和
+  `TaskManager` 公共接口内部同步；注入 handler 必须允许并发调用。
+- TaskManager 的 admission mutex 只保护 accepting/in-flight 计数，不跨越
+  Repository 事务、Pool submit 或 handler；shutdown 关闭 admission 后通过
+  condition variable 等待已获准 submit 结束。
 - 插件初始化/关闭在工作线程启动前/停止后串行执行。
 - 插件 `execute` 可能被多个 worker 并发调用；不满足并发安全的未来插件必须通过专用执行策略或并发闸门限制。
 - 停止顺序：停止 accept → 处理/关闭连接 → 拒绝新任务 → 按策略 drain 工作队列 → shutdown 插件 → flush/stop Logger → 退出。
@@ -650,31 +697,36 @@ flowchart LR
 stateDiagram-v2
     [*] --> Queued
     Queued --> Running
-    Queued --> Cancelled
     Running --> Succeeded
     Running --> Failed
-    Running --> Cancelled
-    Running --> Timeout
+    Running --> TimedOut
     Succeeded --> [*]
     Failed --> [*]
-    Cancelled --> [*]
-    Timeout --> [*]
+    TimedOut --> [*]
 ```
 
-`TaskRepository` 是任务状态转换的唯一裁决者。`Running -> Succeeded`、`Running -> Failed` 和 `Running -> Timeout` 的竞争必须通过一个受控原子状态转换裁决：第一个成功进入终态的事件获胜，其余晚到结果不能覆盖终态；Timeout 后返回的插件结果只能记录并丢弃。
+`TaskRepository` 是任务状态转换的唯一裁决者。`Running -> Succeeded`、
+`Running -> Failed` 和 `Running -> TimedOut` 的竞争在同一仓库互斥区内裁决：
+第一个成功进入终态的事件获得 `Applied`，其余获得 `AlreadyTerminal`，不能覆盖
+终态。TimedOut 后返回的 handler 结果被丢弃并增加 late-completion counter。
+TimedOut 记录允许显式 `erase_terminal` 释放容量；删除不取消 handler，之后的
+晚到 success/failure 会得到 NotFound，同样只增加 late-completion counter。TaskId
+永不复用。
 
 任务若未能进入有界队列，则不被 API 接受并从仓储移除；不会为了排队失败而扩展 `Queued -> Failed`。worker 取到任务后先转换为 Running，后续内部或插件错误才转换为 Failed。
 
-工作队列满表示服务容量不足，未来 HTTP 层固定映射为 `503 Service Unavailable`，不能误报为插件内部错误。只有未来实现用户级请求限流时，才使用 `429 Too Many Requests`。
+工作队列满和 Repository 满在当前层都返回 `ResourceExhausted`。HTTP 状态映射尚未
+实现；未来可以映射为 `503 Service Unavailable`，但 Phase 5 不返回 HTTP 响应。
 
 C++17 无法安全强杀执行任意插件代码的线程。Phase 7 的超时语义是：
 
-1. 截止时间到达后把仍为 Running 的任务原子地标记为 Timeout；
-2. 触发自定义 `CancellationToken`，要求插件协作退出；
-3. 插件若继续运行，晚到结果被丢弃；
-4. worker 线程只能在插件返回后复用。
+1. 截止时间到达后把仍为 Running 的任务原子地标记为 TimedOut；
+2. handler 若继续运行，晚到结果被丢弃；
+3. worker 线程只能在 handler 返回后复用。
 
-因此，卡死的非协作插件仍会占用 worker。这是已知边界，真实 GPU/机器人插件必须设计可取消调用或进程隔离。
+Phase 5 只提供外部 `mark_timed_out` 接入点，没有 timerfd、自动扫描或
+CancellationToken。因此，卡死的非协作 handler 会占用 worker 并延迟 shutdown；
+真实 GPU/机器人插件必须设计可取消调用或进程隔离。
 
 执行超时从任务进入 Running 开始。排队等待上限是独立概念；有界队列只限制容量，不能天然保证排队时延。未来可单独增加 queue-wait timeout，但不属于 Phase 1。
 
@@ -691,7 +743,8 @@ C++17 无法安全强杀执行任意插件代码的线程。Phase 7 的超时语
 应用：
 
 - 每次有效网络活动更新连接 idle timer。
-- 任务进入 Running 时按执行超时设置 deadline timer；终态时取消。排队时间不计入首版执行超时，停止服务时仍在 Queued 的任务转为 Cancelled。
+- 任务进入 Running 时按执行超时设置 deadline timer；终态时取消。排队时间不计入
+  首版执行超时。若未来增加 Cancelled，必须先扩展并测试状态机；Phase 5 没有该状态。
 - 未来心跳仍复用同一 TimerQueue。
 
 ## 14. 配置模型
@@ -744,7 +797,8 @@ Phase 1 的 `Error` 保留公开字段以维持轻量值语义，因此调用者
 - `main/Application`：捕获启动异常，记录后返回非零。
 - EventLoop 回调：捕获到未处理异常时记录连接上下文并关闭相关连接；EventLoop 不能退出。
 - worker：每个任务外围 `try/catch`，`std::exception` 和未知异常均转换为 Failed；线程继续工作。
-- PluginManager/TaskExecutor：插件异常转为 `PluginExecutionFailed`，不泄露异常文本给远端。
+- Phase 5 TaskExecutor：handler 异常转为 `InternalError` 和泛化消息，不把异常原文写入 Snapshot。
+- 未来 PluginManager：插件专属错误码与远端映射需在 Phase 6 单独设计。
 - Logger：sink 失败进入可观测降级状态，避免递归记录。
 
 禁止空 catch 和吞错。客户端只获得稳定错误码；详细路径、errno、栈信息只进入服务端日志。
@@ -785,12 +839,12 @@ Phase 1 的 `Error` 保留公开字段以维持轻量值语义，因此调用者
 - 持久任务：以 `ITaskRepository` 抽象替换内存实现，但首版不引入数据库。
 - 可观测性：后续增加 metrics/tracing，不在当前阶段宣称已有。
 
-## 19. Phase 5 建议边界
+## 19. Phase 6 建议边界
 
-Phase 4 已由最终 Debug/Release Linux CI 封板；Phase 5 尚未开始。下一阶段建议只实现
-有界工作队列、固定线程池、Task 值对象、
-内存 TaskRepository、合法状态转换、TaskManager 和不依赖插件的测试执行器。
+Phase 5 代码已实现但等待真实 Linux CI。Phase 6 尚未开始；建议只在 Phase 5 封板后
+实现最小静态插件契约、PluginRequest/PluginResult、IPlugin、PluginManager、
+EchoPlugin、显式名称冲突/未知插件处理与 MockVisionPlugin（结果强制 `mock: true`）。
 
-Phase 5 不应提前实现 PluginManager、MockVision、timerfd/signalfd、异步日志、真实
-AI、机器人、Agent、动态 `.so`、多 Reactor 或 benchmark。worker 不能直接持有或
-操作 TcpConnection、HttpSession、Channel、Socket 或 epoll。
+Phase 6 不应实现动态 `.so`、timerfd/signalfd、异步日志、真实 TensorRT/PCL/GPU、
+机器人、Agent、多 Reactor、数据库或 benchmark。插件适配 `TaskHandler`，不重写
+TaskRepository，也不能直接操作 TcpConnection、HttpSession、Channel、Socket 或 epoll。

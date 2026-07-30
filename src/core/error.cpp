@@ -16,6 +16,8 @@ std::string_view to_string(const ErrorCode code) noexcept {
             return "invalid_state";
         case ErrorCode::ResourceExhausted:
             return "resource_exhausted";
+        case ErrorCode::NotFound:
+            return "not_found";
         case ErrorCode::InternalError:
             return "internal_error";
     }

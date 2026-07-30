@@ -35,6 +35,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 list(APPEND CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake")
 include(CompilerOptions)
 include(Dependencies)
+find_package(Threads REQUIRED)
 
 set(IAISF_GENERATED_INCLUDE_DIR "${PROJECT_BINARY_DIR}/generated/include")
 file(MAKE_DIRECTORY "${IAISF_GENERATED_INCLUDE_DIR}/iaisf")
@@ -66,6 +67,33 @@ target_link_libraries(iaisf_core PRIVATE nlohmann_json::nlohmann_json)
 iaisf_enable_project_warnings(iaisf_core)
 
 add_library(
+  iaisf_task
+  STATIC
+  src/task/task_executor.cpp
+  src/task/task_limits.cpp
+  src/task/task_manager.cpp
+  src/task/task_repository.cpp
+  src/task/task_types.cpp
+  src/task/thread_pool.cpp
+)
+add_library(iaisf::task ALIAS iaisf_task)
+target_compile_features(iaisf_task PUBLIC cxx_std_17)
+target_include_directories(
+  iaisf_task
+  PUBLIC
+    "$<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>"
+    "$<BUILD_INTERFACE:${IAISF_GENERATED_INCLUDE_DIR}>"
+)
+target_link_libraries(
+  iaisf_task
+  PUBLIC
+    iaisf::core
+    nlohmann_json::nlohmann_json
+    Threads::Threads
+)
+iaisf_enable_project_warnings(iaisf_task)
+
+add_library(
   iaisf_http_core
   STATIC
   src/http/builtin_routes.cpp
@@ -88,8 +116,6 @@ target_link_libraries(iaisf_http_core PUBLIC iaisf::core)
 iaisf_enable_project_warnings(iaisf_http_core)
 
 if(IAISF_BUILD_LINUX_NETWORK)
-  find_package(Threads REQUIRED)
-
   add_library(
     iaisf_net
     STATIC

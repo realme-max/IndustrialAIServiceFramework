@@ -2,7 +2,7 @@
 
 ## 1. 状态与原则
 
-Phase 1 已实现基础单元测试和 CLI smoke，并在 Phase 1B 加强 Error 边界、Result 引用类别、配置数值类型和 UTF-8 字节限制覆盖。Phase 2 Reactor 最终 [GitHub Actions Linux CI run 30516007475](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30516007475) 已完成 Debug、Release、87/87 CTest 和 Release smoke 零 warning 验证。Phase 3 最终 [Linux CI run 30524686201](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30524686201) 已完成 Debug/Release 138/138 CTest，其中 Foundation 43、Reactor 45、TCP 50。Phase 4 状态为 `PHASE_4_HTTP_PROTOCOL_COMPLETED`：Windows Debug/Release 127/127，最终 [Linux CI run 30539245789](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30539245789) Debug/Release 239/239，项目源码与测试 warning 为 0。
+Phase 1 已实现基础单元测试和 CLI smoke，并在 Phase 1B 加强 Error 边界、Result 引用类别、配置数值类型和 UTF-8 字节限制覆盖。Phase 2 Reactor 最终 [GitHub Actions Linux CI run 30516007475](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30516007475) 已完成 Debug、Release、87/87 CTest 和 Release smoke 零 warning 验证。Phase 3 最终 [Linux CI run 30524686201](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30524686201) 已完成 Debug/Release 138/138 CTest，其中 Foundation 43、Reactor 45、TCP 50。Phase 4 状态为 `PHASE_4_HTTP_PROTOCOL_COMPLETED`：最终 [Linux CI run 30539245789](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30539245789) Debug/Release 239/239。Phase 5B 状态为 `PHASE_5_TASK_RUNTIME_IMPLEMENTED_LINUX_VALIDATION_BLOCKED`：Windows Debug/Release 212/212，其中 Task Runtime 85/85；尚无对应 Linux CI，不能把预计数量写成 PASS。
 
 测试原则：
 
@@ -406,49 +406,86 @@ neutral、timeout 或 `continue-on-error`，完整编译日志中项目源码和
 
 ## 8. ThreadPool 与队列测试
 
-- 固定 worker 数启动。
-- 多任务恰好执行一次。
-- 有界队列满时 `submit` 返回 false。
-- `submit` 与 worker 并发无数据竞争。
-- condition variable 在空队列阻塞，无 busy waiting。
-- stop 后拒绝新任务。
-- drain stop 等待已接受任务。
-- 多次 stop 幂等。
-- 析构 join 所有线程，无 detached worker。
-- 任务抛 `std::exception`/未知异常后 worker 继续处理后续任务。
-- worker_count、queue_size 为 0 等非法构造失败。
-
-避免依赖固定 sleep 判断并发；使用 latch/barrier 的 C++17 自定义测试辅助和 condition variable。
+- 实际定义 18 项 `BoundedThreadPoolTest`。
+- 覆盖 worker/queue 的 0 和硬上限、空闭包、单任务、多 worker 并发、单 worker FIFO。
+- 队列满通过阻塞首个 worker 确定性构造，验证非阻塞 `ResourceExhausted`。
+- 标准异常和未知异常均被计数；同一 worker 后续任务继续。
+- worker 执行期间可再次 `try_submit`，证明闭包不持有队列 mutex。
+- 多 producer 的 100 个已接受闭包各执行一次。
+- shutdown 排空、幂等、停止后拒绝、worker self-shutdown 明确失败。
+- 多 caller 并发 shutdown 只有一个 joiner，其余等待 Stopped；显式 shutdown 后
+  pending 为 0 且 thread 对象已清空，随后析构不会重复 join。
+- submit/shutdown 同屏障竞争中，success 闭包恰好执行一次，failure 闭包从不执行。
+- 显式 shutdown 与析构路径均 join；无 detached thread。
+- 并发测试只使用 promise/future、atomic 和有界 `wait_for`，没有 fixed sleep。
+- 线程创建中途失败路径无法稳定注入，因此由工厂 `start()` 的 catch、stop、notify、
+  join 和 Stopped 状态代码审计覆盖。
 
 ## 9. Task 测试
 
-### 9.1 状态转换
+### 9.1 实际定义
 
-允许：
+| Suite | 定义数 | 覆盖重点 |
+|---|---:|---|
+| `TaskIdTest` / `TaskStateTest` | 3 | ID 格式、hash/equality、稳定状态字符串与终态分类 |
+| `TaskLimitsTest` | 8 | signed factory、硬上限、operation、全部 JSON value kind、UTF-8 bytes、error 泛化 |
+| `TaskRepositoryTest` | 20 | ID/overflow、容量、快照、状态机、多轮终态竞争、erase/late、NotFound |
+| `TaskExecutorTest` | 14 | success/failure、异常、超限/非法 JSON、logger、late NotFound、锁边界 |
+| `TaskManagerTest` | 22 | submit/rollback、in-flight 屏障、并发 shutdown、容量竞态、timeout/erase、生命周期 |
+| `BoundedThreadPoolTest` | 18 | 固定有界 pool、submit/shutdown 竞争、单 joiner 与 worker 清理 |
+| **Task Runtime 合计** | **85** | `unit;task` |
 
-- Queued → Running/Cancelled
-- Running → Succeeded/Failed/Cancelled/Timeout
+### 9.2 状态与容量
 
-拒绝：
+允许状态转换：
 
-- Succeeded → Running
-- Failed → Queued
-- Timeout → Succeeded
-- 任意终态 → 其他状态
-- 重复完成（除非明确作为幂等 no-op，首版建议返回 false）
-- Queued → Failed（排队失败不创建任务；执行错误必须先进入 Running）
+- Queued → Running
+- Running → Succeeded/Failed/TimedOut
 
-### 9.2 并发与容量
+Queued 不能直接进入终态，Running 不能返回 Queued，任意终态不能被覆盖。终态竞争
+返回 `Applied` 或 `AlreadyTerminal`；不存在与非法转换分别返回 NotFound 和
+InvalidState。Repository 容量满不自动驱逐；只有 `erase_terminal` 释放记录。
 
-- success 与 timeout 同时竞争，只有一个成功转换。
-- cancel 与 worker start 竞争。
-- 查询得到自洽快照，时间字段满足 create ≤ start ≤ finish。
-- progress 范围校验。
-- 队列满不留下 task。
-- repository 满拒绝新任务。
-- 终态清理后查询 404。
-- 插件晚到结果不覆盖 Timeout。
-- Succeeded、Failed 与 Timeout 同时到达时，第一个被 TaskRepository 接受的终态获胜。
+测试覆盖并发 ID、独立 Snapshot、create ≤ start ≤ finish、success/failure/timeout
+多线程竞争、timeout 后晚到 success/failure、结果超限保持 Running、error message
+泛化、并发查询/erase/转换、Queued rollback、ID 不复用、接近 `uint64_t` 溢出、
+active erase 拒绝、终态清理后再创建，以及 validation failure 后仍可转 Failed。
+
+### 9.3 TaskManager 事务与生命周期
+
+- request 校验失败不创建记录。
+- queue 满时 rollback Queued 记录，失败 ID 不可查询。
+- queue capacity 与 repository capacity 独立验证。
+- submit/shutdown 竞争的每次调用要么返回 TaskId 且最终终态，要么完整拒绝。
+- 受控 test seam 验证 shutdown 关闭 admission 后等待 in-flight submission 归零；
+  queue full/repository full 与 shutdown 同时发生时不留下孤儿记录。
+- handler Error、标准/未知异常和 logger 异常被隔离。
+- timeout 先到时 late result 不覆盖；success/failed 先到时 timeout 获得 AlreadyTerminal。
+- TimedOut erase 后 late success/failure 得到 NotFound，计数并丢弃，worker 继续。
+- 三个 handler 可在三个 worker 中同时运行，证明 Executor 不做全局串行化。
+- shutdown 排空、幂等、停止后拒绝；析构也先 drain/join。
+- 非协作 handler 会延迟 shutdown，这是语义限制而不是测试用强杀路径。
+
+### 9.4 Phase 5 Windows 实际矩阵
+
+| 配置 | Foundation | HTTP Core | Task Runtime | 总计 | 失败 |
+|---|---:|---:|---:|---:|---:|
+| VS2022 x64 Debug | 43 | 84 | 85 | 212 | 0 |
+| VS2022 x64 Release | 43 | 84 | 85 | 212 | 0 |
+
+Release smoke：
+
+```text
+IndustrialAIServiceFramework 0.1.0
+2026-07-30T13:23:45.738Z [INFO] [Application] configuration validated for service IndustrialAIServiceFramework
+```
+
+MSVC 项目源码与测试编译 warning 为 0。构建环境仍出现既有、非致命的
+`pwsh.exe` applocal 诊断；它不是编译器 warning，且 target 和 CTest 均成功。
+
+Phase 5 Linux workflow 已显式请求 `iaisf_task` 和 `iaisf_task_tests`。若测试定义不再
+变化，Linux 预计发现 Foundation 43、Reactor 45、TCP 51、HTTP Core 84、
+HTTP Integration 16、Task Runtime 85，共 324 项；这是待 CI 验证的预期，不是结果。
 
 ## 10. Plugin 测试
 

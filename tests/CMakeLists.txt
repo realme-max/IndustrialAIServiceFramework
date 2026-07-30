@@ -53,6 +53,34 @@ set_tests_properties(
     TIMEOUT 10
 )
 
+add_executable(
+  iaisf_task_tests
+  task/test_task_executor.cpp
+  task/test_task_limits.cpp
+  task/test_task_manager.cpp
+  task/test_task_repository.cpp
+  task/test_task_types.cpp
+  task/test_thread_pool.cpp
+)
+target_compile_features(iaisf_task_tests PRIVATE cxx_std_17)
+target_link_libraries(
+  iaisf_task_tests
+  PRIVATE
+    iaisf::task
+    GTest::gtest
+    GTest::gtest_main
+    Threads::Threads
+)
+iaisf_enable_project_warnings(iaisf_task_tests)
+
+gtest_add_tests(TARGET iaisf_task_tests TEST_LIST IAISF_TASK_TESTS)
+set_tests_properties(
+  ${IAISF_TASK_TESTS}
+  PROPERTIES
+    LABELS "unit;task"
+    TIMEOUT 10
+)
+
 if(TARGET iaisf_net)
   add_executable(
     iaisf_net_tests
