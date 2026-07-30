@@ -3,15 +3,15 @@
 ## 当前结论
 
 ```text
-PHASE_4_HTTP_PROTOCOL_IMPLEMENTED_LINUX_VALIDATION_BLOCKED
+PHASE_4_HTTP_PROTOCOL_COMPLETED
 ```
 
 - 当前阶段：Phase 4 HTTP/1.1 Protocol Layer
-- 实现状态：HTTP Core 与 Linux adapter 已实现；尚未 commit/push，Linux CI 未运行
-- Windows 验证：Visual Studio 2022 x64 Debug/Release 均为 126/126（Foundation 43 + HTTP Core 83）
-- Linux CI 验证：blocked；不得使用 Phase 3 run 代替 HTTP 结果
+- 实现状态：HTTP Core 与 Linux adapter 已实现并完成最终 Linux 验证
+- Windows 验证：Visual Studio 2022 x64 Debug/Release 均为 127/127（Foundation 43 + HTTP Core 84）
+- Linux CI 验证：最终 push run `30539245789` success；Debug/Release 均 239/239
 - 日期：2026-07-30（Asia/Shanghai）
-- 下一阶段：Phase 5 线程池与任务系统；必须等待 Phase 4 Linux CI 完成后才允许开始
+- 下一阶段：Phase 5 线程池与任务系统，尚未开始
 
 Phase 4 已实现 HTTP/1.1 增量解析、有界响应、精确路由、每连接 Session 和 HttpServer
 API，但 `iaisf_server` 仍不启动监听。线程池、任务、插件、定时器与异步日志未实现。
@@ -29,11 +29,13 @@ API，但 `iaisf_server` 仍不启动监听。线程池、任务、插件、定�
 | Phase 2 文档封板 / Phase 3 基线 | `e14b23131eb917df5758a10a305c2c87997f24cf` |
 | Phase 3 开始时 main / origin/main | `e14b23131eb917df5758a10a305c2c87997f24cf` |
 | Phase 3 实现提交 | `0a45658d0e450dd9dfde052808a27ae92ad08881` |
-| Phase 3 文档封板 / Phase 4 基线 / 当前 HEAD / main / origin/main | `7096191ca8f7a3fe9e9acfb31ceba0a2c2fc3483` |
-| `phase/4-http-protocol` upstream | 未设置 |
+| Phase 3 文档封板 / Phase 4 基线 / main / origin/main | `7096191ca8f7a3fe9e9acfb31ceba0a2c2fc3483` |
+| Phase 4 HTTP 实现提交 | `9b87fdb8804ee37a8cf3b87a7b9193a3130b85d3` |
+| Phase 4 测试修复 / 最终验证提交 | `0818ebf4f71366cc3cd2fe4e36e95fe667b687a5` |
+| 当前 HEAD / `phase/4-http-protocol` upstream | `0818ebf4f71366cc3cd2fe4e36e95fe667b687a5` |
 | origin | `https://github.com/realme-max/IndustrialAIServiceFramework.git` |
 | Phase 3 开始时工作区 | clean |
-| Phase 4 commit / push | 未执行；当前实现和文档均为工作区 diff |
+| Phase 4 实现与测试修复 commit / push | 已完成；本轮只产生未提交文档 diff |
 
 本阶段没有 amend、reset、stash、rebase、merge、commit、push 或修改 origin。
 
@@ -45,7 +47,7 @@ API，但 `iaisf_server` 仍不启动监听。线程池、任务、插件、定�
 | 1 | C++17 基础工程与公共基础设施 | completed | Windows 补充回归完成；Linux CI run `30508113122` success |
 | 2 | Socket、epoll 与 EventLoop | completed | Debug/Release 均 87/87；44 个 Reactor 测试均实际执行 |
 | 3 | TCP Transport Layer | completed | Debug/Release 138/138；Foundation 43、Reactor 45、TCP 50 |
-| 4 | HTTP 协议与健康路由 | implemented / Linux validation blocked | Windows 126/126；Linux HTTP 尚未执行 |
+| 4 | HTTP 协议与健康路由 | completed | Windows 127/127；Linux Debug/Release 239/239 |
 | 5 | 线程池与任务系统 | planned | 未开始 |
 | 6 | 插件系统 | planned | 未开始 |
 | 7 | 定时器与任务超时 | planned | 未开始 |
@@ -364,7 +366,7 @@ IndustrialAIServiceFramework 0.1.0
 仍打印缺少 `pwsh.exe` 的非致命辅助诊断，但 configure/build 退出码、43/43 CTest
 和两项 smoke 均成功；该诊断不属于 Linux/TCP 结果。
 
-## Phase 4 已实现，Linux 验证 blocked
+## Phase 4 HTTP Protocol 已完成
 
 ### Targets 与能力
 
@@ -409,20 +411,39 @@ Upgrade、Expect、HTTP/1.0/2、percent decode、动态参数或流式 body。
 
 | 配置 | Build | Foundation | HTTP Core | CTest | smoke | 项目 warning |
 |---|---|---:|---:|---:|---|---:|
-| VS2022 Debug | pass | 43/43 | 83/83 | 126/126 | CTest 内 version/config | 0 |
-| VS2022 Release | pass | 43/43 | 83/83 | 126/126 | 独立 version/config exit 0 | 0 |
+| VS2022 Debug | pass | 43/43 | 84/84 | 127/127 | CTest 内 version/config | 0 |
+| VS2022 Release | pass | 43/43 | 84/84 | 127/127 | 独立 version/config exit 0 | 0 |
 
 最终 Debug/Release `--clean-first --parallel` 均成功。项目源码/测试没有 warning。
 已知缺失 `pwsh.exe` 诊断仍来自 VS/vcpkg applocal，不是项目编译 warning。
 
-### Linux 待验证
+### Linux 最终验证
 
-源码定义为 HTTP Core 83、HTTP integration 16；结合 Foundation 43、Reactor 45 和
-当前 TCP 51，预计 CTest 发现 238 项。该数目尚未由 Linux CTest 验证，不能写成
-PASS。Phase 3 历史结果仍为 TCP 50/50、总计 138/138，不能把新增测试写回旧 run。
-workflow 已显式构建四个 HTTP targets。需要提交/push 后取得 Ubuntu 24.04
-Debug/Release 完整成功 run、零项目 warning、Release smoke，才能将状态改为
-`PHASE_4_HTTP_PROTOCOL_COMPLETED`。
+| 项目 | 结果 |
+|---|---|
+| workflow | Linux CI |
+| run | [30539245789](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30539245789) |
+| attempt / event / conclusion | 1 / push / success |
+| branch | `phase/4-http-protocol` |
+| head / checkout / local / upstream | `0818ebf4f71366cc3cd2fe4e36e95fe667b687a5` |
+| runner / OS | `ubuntu-24.04` / Ubuntu 24.04.4 LTS |
+| GCC / CMake | 13.3.0 / 3.31.6 |
+| Debug | configure/build pass；239/239，0 failed |
+| Release | configure/build pass；239/239，0 failed |
+| 分项 | Foundation 43；Reactor 45；TCP 51；HTTP Core 84；HTTP Integration 16 |
+| HTTP targets | `iaisf_http_core`、`iaisf_http_core_tests`、`iaisf_http`、`iaisf_http_tests` 均在两个 job 构建 |
+| Release smoke | version/config pass |
+| 项目源码/测试 warning | 0 / 0 |
+| 非成功或掩盖 | failed/cancelled/skipped/neutral/timeout/continue-on-error 均为 0 |
+
+首次 [run 30537924856](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30537924856)
+对应实现提交 `9b87fdb8804ee37a8cf3b87a7b9193a3130b85d3`，Debug/Release
+均为 237/238。唯一失败测试的 32 字节响应 Header 单行 fixture 无法容纳含 CRLF
+共 41 字节的固定错误 `Content-Type` 行；Parser 已得到 400，错误响应预检失败后
+按设计 fail-closed。修复提交 `0818ebf4f71366cc3cd2fe4e36e95fe667b687a5`
+调整该测试容量并新增 exact-limit portable 回归。最终 run 中原失败测试
+`HttpServerTest.RejectsFramingAmbiguitiesAndConfiguredLimits` 在 Debug/Release
+均实际通过。
 
 ## 环境调查
 
@@ -588,7 +609,7 @@ Phase 4 开始和交付前均复核为 62 个文件、59,240,225 字节和相同
 - Phase 1 没有剩余验收阻塞。
 - Phase 2 没有剩余验收阻塞。
 - Phase 3 没有剩余封板阻塞；本机仍无 Linux/WSL，当前 Linux 结论来自可追溯的 GitHub Actions run。
-- Phase 4 实现完成但 Linux 验证 blocked；当前只验证 portable Core，不能声称 Linux adapter 通过。
+- Phase 4 已完成最终 Linux 封板；本机仍无 Linux/WSL，Linux 结论来自可追溯的最终 GitHub Actions run。
 - 默认 FetchContent 首次 Linux 配置需要 GitHub 网络和有效 CA 证书。
 - 系统依赖模式已设计但未在已安装 Linux 包环境验证。
 - Windows/NTFS 工作区不能可靠表达新 shell 脚本的 POSIX executable bit；workflow 会在运行时执行 `chmod +x scripts/*.sh`，人工 Linux 使用前仍应确认权限。
@@ -596,7 +617,7 @@ Phase 4 开始和交付前均复核为 62 个文件、59,240,225 字节和相同
 
 ## Phase 5 建议入口
 
-Phase 5 尚未开始，且在 Phase 4 Linux CI 完成前禁止开始。建议只包含有界队列、
+Phase 5 尚未开始。建议只包含有界队列、
 固定线程池、Task/TaskStatus、内存 TaskRepository、合法状态转换、TaskManager 和
 不依赖插件的测试执行器。worker 必须通过跨线程完成通道返回结果，不能操作
 TcpConnection、HttpSession、Channel、Socket 或 epoll。
@@ -606,8 +627,8 @@ Phase 5 暂不包含 PluginManager、AI/mock vision、timerfd/signalfd、异步�
 
 ## 建议 commit
 
-未执行 commit。建议：
+本轮未执行 commit。建议：
 
 ```text
-feat: implement HTTP protocol layer
+docs: complete phase 4 validation record
 ```

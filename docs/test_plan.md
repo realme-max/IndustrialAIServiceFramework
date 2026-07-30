@@ -2,7 +2,7 @@
 
 ## 1. 状态与原则
 
-Phase 1 已实现基础单元测试和 CLI smoke，并在 Phase 1B 加强 Error 边界、Result 引用类别、配置数值类型和 UTF-8 字节限制覆盖。Phase 2 Reactor 最终 [GitHub Actions Linux CI run 30516007475](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30516007475) 已完成 Debug、Release、87/87 CTest 和 Release smoke 零 warning 验证。Phase 3 最终 [Linux CI run 30524686201](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30524686201) 已完成 Debug/Release 138/138 CTest，其中 Foundation 43、Reactor 45、TCP 50。当前 Phase 4 状态为 `PHASE_4_HTTP_PROTOCOL_IMPLEMENTED_LINUX_VALIDATION_BLOCKED`：Windows Debug/Release 126/126 已通过，Linux HTTP 尚未执行。
+Phase 1 已实现基础单元测试和 CLI smoke，并在 Phase 1B 加强 Error 边界、Result 引用类别、配置数值类型和 UTF-8 字节限制覆盖。Phase 2 Reactor 最终 [GitHub Actions Linux CI run 30516007475](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30516007475) 已完成 Debug、Release、87/87 CTest 和 Release smoke 零 warning 验证。Phase 3 最终 [Linux CI run 30524686201](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30524686201) 已完成 Debug/Release 138/138 CTest，其中 Foundation 43、Reactor 45、TCP 50。Phase 4 状态为 `PHASE_4_HTTP_PROTOCOL_COMPLETED`：Windows Debug/Release 127/127，最终 [Linux CI run 30539245789](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30539245789) Debug/Release 239/239，项目源码与测试 warning 为 0。
 
 测试原则：
 
@@ -304,25 +304,25 @@ Linux/TCP 测试结果。
 
 ## 7. Phase 4 HTTP 测试
 
-状态：implementation complete，Linux validation blocked。
+状态：completed。
 
 ### 7.1 可移植 HTTP Core
 
-`iaisf_http_core_tests` 当前有 **83 个 TEST 定义**：
+`iaisf_http_core_tests` 当前有 **84 个 TEST 定义**：
 
 | 文件 | 定义数 | 重点 |
 |---|---:|---|
 | `test_http_limits.cpp` | 8 | 默认/有符号 factory、零/负数/硬上限、CRLF 与跨字段关系 |
 | `test_http_parser.cpp` | 40 | incremental CRLF/line/header/body、pipeline、重复 header、Connection token、歧义与全部限制 |
-| `test_http_request_response.cpp` | 20 | owning request、binary body、framing、响应 count/line/total 精确边界、稳定顺序与失败不变性 |
+| `test_http_request_response.cpp` | 21 | owning request、binary body、framing、响应 count/line/total 精确边界、标准错误响应 41 字节单行边界、稳定顺序与失败不变性 |
 | `test_http_router.cpp` | 15 | exact/freeze/capacity/404/405/Allow、handler response 限制、异常、built-ins |
 
 实际 Windows 矩阵：
 
 | 配置 | Configure | Clean build | Foundation | HTTP Core | CTest 总计 | smoke | 项目 warning |
 |---|---|---|---:|---:|---:|---|---:|
-| VS2022 Debug | pass | pass | 43/43 | 83/83 | 126/126 | CTest 内 2 项 | 0 |
-| VS2022 Release | 同一 multi-config tree | pass | 43/43 | 83/83 | 126/126 | version/config exit 0 | 0 |
+| VS2022 Debug | pass | pass | 43/43 | 84/84 | 127/127 | CTest 内 2 项 | 0 |
+| VS2022 Release | 同一 multi-config tree | pass | 43/43 | 84/84 | 127/127 | version/config exit 0 | 0 |
 
 最终规定的 Debug/Release clean build 均成功。没有项目源码/测试编译错误或 warning。
 现有 VS/vcpkg applocal 仍可能打印缺失 `pwsh.exe` 的非致命诊断，应与项目 warning 分开。
@@ -369,11 +369,40 @@ bad_alloc/length_error 由生产边界转换为 `ResourceExhausted`/500；当前
 读写有 10 秒 timeout，CTest 单项 timeout 20 秒，线程全部 join。`/proc/self/fd`
 测试在单独 gtest filter 进程中比较完整创建/销毁前后数量。
 
-这些 integration 只在 Linux target 存在时注册。本机无 Linux/WSL，**尚未执行**；
-当前源码定义数为 Foundation 43 + Reactor 45 + TCP 51 + HTTP Core 83 +
-HTTP integration 16 = 238，但必须以未来 CI 的 CTest 输出为准，不能写成 238 PASS。
-Phase 3 历史 CI 的 TCP 50/50 与总计 138/138 保持不变；新增 TCP 测试只验证
-`close_after_write()` 的 Phase 4 传输契约，尚未取得 Linux PASS。
+这些 integration 只在 Linux target 存在时注册。最终 push run `30539245789` 已在
+Debug/Release 实际执行 Foundation 43 + Reactor 45 + TCP 51 + HTTP Core 84 +
+HTTP Integration 16 = 239 项，两个配置均 239/239、0 failed。Phase 3 历史 CI 的
+TCP 50/50 与总计 138/138 保持不变，不回写后续新增测试。
+
+### 7.3 Phase 4 最终验证矩阵
+
+| 环境/job | Configure | Build | Foundation | Reactor | TCP | HTTP Core | HTTP Integration | CTest | smoke | 项目 warning |
+|---|---|---|---:|---:|---:|---:|---:|---:|---|---:|
+| Windows VS2022 Debug | pass | pass | 43/43 | N/A | N/A | 84/84 | N/A | 127/127 | CTest 内 2 项 | 0 |
+| Windows VS2022 Release | pass | pass | 43/43 | N/A | N/A | 84/84 | N/A | 127/127 | version/config exit 0 | 0 |
+| Ubuntu 24.04 Debug | pass | pass | 43/43 | 45/45 | 51/51 | 84/84 | 16/16 | 239/239 | CTest 内 2 项 | 0 |
+| Ubuntu 24.04 Release | pass | pass | 43/43 | 45/45 | 51/51 | 84/84 | 16/16 | 239/239 | version/config pass | 0 |
+
+首次 pull-request run `30537924856` 对实现提交
+`9b87fdb8804ee37a8cf3b87a7b9193a3130b85d3` 的 Debug/Release 均为 237/238；
+唯一失败为 `HttpServerTest.RejectsFramingAmbiguitiesAndConfiguredLimits`。fixture
+把响应 Header 单行限制设为 32 字节，而固定错误 `Content-Type` 行含 CRLF 为
+41 字节；Parser 已映射缺失 Host 为 400，但错误响应序列化预检失败并按设计
+fail-closed。修复提交 `0818ebf4f71366cc3cd2fe4e36e95fe667b687a5`
+将 fixture 设为精确 41 字节，同时保留 44 字节请求 Header 继续验证 431，并增加
+portable 边界测试。
+
+最终证据为 push [run 30539245789](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30539245789)，
+attempt 1；head、两个 job checkout、本地 HEAD 和 upstream 均为修复提交 SHA。
+原失败测试在 Debug/Release 中均实际通过。Release smoke 输出：
+
+```text
+IndustrialAIServiceFramework 0.1.0
+2026-07-30T11:38:17.579Z [INFO] [Application] configuration validated for service IndustrialAIServiceFramework
+```
+
+两个 job 和全部 Actions steps 均为 success；没有 failed、cancelled、skipped、
+neutral、timeout 或 `continue-on-error`，完整编译日志中项目源码和测试 warning 为 0。
 
 ## 8. ThreadPool 与队列测试
 
@@ -593,4 +622,4 @@ Phase 0 的非运行验证项：
 - 调查时参考聚合 SHA-256：
   `83AE7E469DEA30C860DEFD4D26CB313B7B3C87EFCD9387414741E152EE46CF27`。
 - 当前宿主无可用 Linux/epoll 构建环境，因此没有伪造编译结果。
-- Phase 0 结束时复算哈希应一致。
+- Phase 4C 封板前复算仍为 62 个文件、59,240,225 bytes 和相同聚合 SHA-256。

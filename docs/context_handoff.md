@@ -12,20 +12,26 @@
 - Phase 2 文档封板 / Phase 3 基线：`e14b23131eb917df5758a10a305c2c87997f24cf`
 - Phase 3 TCP 实现提交：`0a45658d0e450dd9dfde052808a27ae92ad08881`
 - Phase 3 文档封板 / Phase 4 基线：`7096191ca8f7a3fe9e9acfb31ceba0a2c2fc3483`
+- Phase 4 HTTP 实现提交：`9b87fdb8804ee37a8cf3b87a7b9193a3130b85d3`
+- Phase 4 测试修复 / 最终验证提交：`0818ebf4f71366cc3cd2fe4e36e95fe667b687a5`
 - 当前阶段：Phase 4 HTTP/1.1 Protocol Layer
-- 状态：`PHASE_4_HTTP_PROTOCOL_IMPLEMENTED_LINUX_VALIDATION_BLOCKED`
+- 状态：`PHASE_4_HTTP_PROTOCOL_COMPLETED`
 - 日期：2026-07-30
 - Phase 1 GitHub Actions run：[30508113122](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30508113122)
 - Phase 2 首次功能 GitHub Actions run：[30514521602](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30514521602)
 - Phase 2 最终零 warning GitHub Actions run：[30516007475](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30516007475)
 - Phase 3 最终 GitHub Actions run：[30524686201](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30524686201)
+- Phase 4 首次失败 GitHub Actions run：[30537924856](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30537924856)
+- Phase 4 最终 GitHub Actions run：[30539245789](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30539245789)
 - Phase 2 实现、warning 修复和文档封板：已合并 main
-- Phase 4 commit/push：未执行
-- 阻塞：本机无 Linux/WSL；Phase 4 Linux adapter 和 integration 必须由新提交 CI 验证
+- Phase 4 实现与测试修复 commit/push：已完成
+- 当前 HEAD / upstream：`0818ebf4f71366cc3cd2fe4e36e95fe667b687a5`
+- 阻塞：Phase 4 无剩余封板阻塞；Phase 5 尚未开始
 
-Phase 4 portable HTTP Core 已在 Windows Debug/Release 各通过 83/83，加 Foundation
-43 后均为 126/126；Linux-only HttpSession/HttpServer 和 16 项 integration 已实现但
-未在 Linux 运行。Phase 3 的 138/138 CI 历史仍有效，但不能代替 Phase 4 验证。
+Phase 4 portable HTTP Core 已在 Windows Debug/Release 各通过 84/84，加 Foundation
+43 后均为 127/127。最终 Linux Debug/Release 均为 239/239：Foundation 43、
+Reactor 45、TCP 51、HTTP Core 84、HTTP Integration 16。Phase 3 的 138/138 CI
+历史仍有效，但不回写 Phase 4 新增测试。
 
 ## 2. Phase 1 文件
 
@@ -586,6 +592,9 @@ EventLoop 或 TcpServer。
   或 CRLF 注入；序列化 preflight 检查 body、header count/line/head total，包含
   自动 framing、状态行、CRLF 与终止空行；错误响应固定 plain text + close，失败
   不产生部分字符串。
+- 请求与响应共享 Header 容量；若配置小到无法容纳框架错误响应，preflight 失败后
+  Session 直接 fail-closed，不发送截断或缺少 Content-Length/Connection 的降级响应。
+  固定错误 Content-Type 行含 CRLF 为 41 字节，portable exact-limit 测试覆盖该边界。
 - Router exact method+path、query 不参与、freeze 后只读；404、405/sorted Allow；
   handler Error、标准/未知异常变成 closed 500，内部文本不外泄。
 - Built-ins 只包含 GET `/health` 和 `/version`。health 只说明 HTTP/EventLoop 可响应，
@@ -662,24 +671,25 @@ multi-client、容量、dynamic EPOLLOUT/high-water rearm、half-close、RST、�
 close once、普通队列满清理、active stop、多连接清理、EOF 部分/不消费、析构契约、
 active batch 后延迟 remove、最后强引用释放和 stop cleanup。
 
-Phase 3 最终 Linux 历史结果仍为 TCP 50/50；上面的第 51 项是本轮新增的
-`close_after_write()` 传输契约测试，尚未取得 Linux PASS。
+Phase 3 最终 Linux 历史结果仍为 TCP 50/50；上面的第 51 项是 Phase 4 新增的
+`close_after_write()` 传输契约测试，已由 Phase 4 最终 Linux run 验证，但不回写
+Phase 3 历史矩阵。
 
 Phase 4 HTTP 测试定义：
 
 ```text
 HttpLimits: 8
 HttpParser: 40
-HttpRequest/Response/Status: 20
+HttpRequest/Response/Status: 21
 HttpRouter/Builtins: 15
-Portable HTTP Core total: 83
+Portable HTTP Core total: 84
 Linux HttpSession/HttpServer integration: 16
 ```
 
-Windows Debug/Release 均实际为 Foundation 43/43 + HTTP Core 83/83 = 126/126；
+Windows Debug/Release 均实际为 Foundation 43/43 + HTTP Core 84/84 = 127/127；
 Release version/config smoke exit 0，项目 warning 0。既知 vcpkg applocal
-`pwsh.exe` 诊断非项目 warning。Linux HTTP 尚未执行，源码定义总数 238 不能写成
-PASS。
+`pwsh.exe` 诊断非项目 warning。最终 Linux Debug/Release 均实际执行 239/239，
+HTTP Integration 16/16。
 
 ## 14. 环境和实际结果
 
@@ -868,6 +878,53 @@ IndustrialAIServiceFramework 0.1.0
 步骤。完整 build/test 日志没有项目源码或测试 warning；checkout 的 `git init`
 默认分支提示不是项目 warning。
 
+Phase 4 首次失败与最终验证：
+
+```text
+implementation commit: 9b87fdb8804ee37a8cf3b87a7b9193a3130b85d3
+first failing run ID: 30537924856
+first failing result: Debug 237/238; Release 237/238
+failure: HttpServerTest.RejectsFramingAmbiguitiesAndConfiguredLimits
+root cause: response header-line fixture 32 bytes < fixed error Content-Type line 41 bytes
+behavior: parser mapped missing Host to 400; error response preflight failed; session fail-closed
+fix commit: 0818ebf4f71366cc3cd2fe4e36e95fe667b687a5
+
+workflow: Linux CI
+final run ID / attempt: 30539245789 / 1
+final run URL: https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30539245789
+event / branch: push / phase/4-http-protocol
+head SHA: 0818ebf4f71366cc3cd2fe4e36e95fe667b687a5
+checkout SHA: 0818ebf4f71366cc3cd2fe4e36e95fe667b687a5 (both jobs)
+local HEAD / upstream: 0818ebf4f71366cc3cd2fe4e36e95fe667b687a5
+runner / OS: ubuntu-24.04 / Ubuntu 24.04.4 LTS
+kernel: 6.17.0-1020-azure x86_64
+GCC / CMake: 13.3.0 / 3.31.6
+Linux Debug configure/build: pass
+Linux Debug CTest: 239/239 pass, 0 failed
+Linux Release configure/build: pass
+Linux Release CTest: 239/239 pass, 0 failed
+actual suites: Foundation 43; Reactor 45; TCP 51; HTTP Core 84; HTTP Integration 16
+original failing test: pass in Debug and Release
+targets: iaisf_http_core, iaisf_http_core_tests, iaisf_http, iaisf_http_tests built
+project source warnings: Debug 0; Release 0
+project test warnings: Debug 0; Release 0
+run status / conclusion: completed / success
+non-success jobs/steps: 0
+continue-on-error: 0
+```
+
+Phase 4 Release smoke 实际输出：
+
+```text
+IndustrialAIServiceFramework 0.1.0
+2026-07-30T11:38:17.579Z [INFO] [Application] configuration validated for service IndustrialAIServiceFramework
+```
+
+最终采用 push run；同 SHA 的成功 PR run checkout 为 GitHub 临时 merge commit，
+不用于满足 checkout/local/upstream SHA 完全一致的封板条件。最终 push run 两个 job
+和全部步骤均为 success，没有 failed、cancelled、skipped、neutral、timeout 或
+`continue-on-error`，编译日志中项目源码和测试 warning 为 0。
+
 ## 15. Linux 命令
 
 ```bash
@@ -897,7 +954,7 @@ aggregate sha256:
 83AE7E469DEA30C860DEFD4D26CB313B7B3C87EFCD9387414741E152EE46CF27
 ```
 
-Phase 4 开始和交付前复核结果完全一致：62 个文件、59,240,225 字节，聚合 SHA-256 仍为
+Phase 4 开始、实现交付和 Phase 4C 封板前复核结果完全一致：62 个文件、59,240,225 字节，聚合 SHA-256 仍为
 `83AE7E469DEA30C860DEFD4D26CB313B7B3C87EFCD9387414741E152EE46CF27`。
 参考目录被 `.gitignore` 排除。
 
@@ -929,7 +986,7 @@ Phase 4 开始和交付前复核结果完全一致：62 个文件、59,240,225 �
 
 ## 19. 当前阻塞和遗留
 
-1. Phase 1、Phase 2、Phase 3 均无剩余验收阻塞；Phase 4 等待新提交 Linux CI。
+1. Phase 1、Phase 2、Phase 3、Phase 4 均无剩余验收阻塞；Phase 5 尚未开始。
 2. 默认 FetchContent 的首次 Linux 配置需要 GitHub 网络和 CA。
 3. 系统依赖模式尚未在 Linux 系统包环境验证。
 4. 本机没有可运行 Linux/WSL，不能在本机复现 CI。
@@ -940,7 +997,7 @@ Phase 4 开始和交付前复核结果完全一致：62 个文件、59,240,225 �
 
 ## 20. Phase 5 入口
 
-Phase 5 未开始且必须等待 Phase 4 Linux CI 封板。建议只包含：
+Phase 5 未开始。建议只包含：
 
 ```text
 bounded blocking queue

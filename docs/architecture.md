@@ -5,7 +5,7 @@
 - 项目：IndustrialAIServiceFramework
 - 阶段：Phase 4 HTTP/1.1 Protocol Layer
 - 日期：2026-07-30
-- 状态：`PHASE_4_HTTP_PROTOCOL_IMPLEMENTED_LINUX_VALIDATION_BLOCKED`；HTTP Core 已完成 Windows Debug/Release 验证，Linux adapter 等待真实 CI
+- 状态：`PHASE_4_HTTP_PROTOCOL_COMPLETED`；HTTP Core、Linux adapter 与 loopback integration 已完成 Windows/Linux 分层验证
 - 目标平台：Linux x86_64，C++17
 
 本文同时记录已实现的 Phase 1 基础设施、Phase 2 Reactor 核心、当前 Phase 3 TCP 传输实现和后续目标边界。只有明确列入已实现边界的类才是当前能力。
@@ -103,10 +103,12 @@ Phase 4 新增两个清晰 target：
 - Linux-only `iaisf_http` / `iaisf::http`，依赖 `iaisf::http_core` 与
   `iaisf::tcp`，包含 HttpSession 和 HttpServer。
 
-Windows Debug/Release 已各实际执行 Foundation 43 + HTTP Core 83，共 126/126
-CTest；Release CLI smoke 成功，项目 warning 为 0。Linux adapter 源码和 16 项
-loopback 集成测试已实现，但当前提交尚无真实 Linux CI，因此不能写成已通过。
-`iaisf_server` 没有进入常驻模式。
+Windows Debug/Release 已各实际执行 Foundation 43 + HTTP Core 84，共 127/127
+CTest。最终 [Linux CI run 30539245789](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30539245789)
+对应修复提交 `0818ebf4f71366cc3cd2fe4e36e95fe667b687a5`；Debug/Release configure/build
+和 239/239 CTest 均成功，其中 HTTP Core 84/84、HTTP Integration 16/16。四个 HTTP
+target 均实际构建，Release CLI smoke 成功，项目源码和测试 warning 为 0。
+`iaisf_server` 仍没有进入常驻模式。
 
 ## 2. 调查结果与设计来源
 
@@ -524,6 +526,9 @@ stateDiagram-v2
 终止空行。失败不返回部分响应。HTTP `Connection: close` 调用
 `TcpConnection::close_after_write()`：拒绝后续 send，写尽当前输出后主动全关闭，
 不等待 peer EOF。原有 `shutdown()` 仍保留为写半关闭并等待 peer EOF 的独立契约。
+请求与响应共享 Header 容量限制；若配置的响应单行或总 Header 上限小到无法容纳
+框架标准错误响应，序列化预检失败并关闭连接，不降级为无 `Content-Length` 的响应，
+也不发送部分 Header。测试 fixture 至少为固定错误 `Content-Type` 行保留 41 字节。
 
 ### 9.1 所有权和线程边界
 
@@ -782,8 +787,8 @@ Phase 1 的 `Error` 保留公开字段以维持轻量值语义，因此调用者
 
 ## 19. Phase 5 建议边界
 
-Phase 4 已实现但 Linux 验证仍 blocked。只有新提交的 Debug/Release Linux CI 完整
-通过后才可进入 Phase 5。下一阶段建议只实现有界工作队列、固定线程池、Task 值对象、
+Phase 4 已由最终 Debug/Release Linux CI 封板；Phase 5 尚未开始。下一阶段建议只实现
+有界工作队列、固定线程池、Task 值对象、
 内存 TaskRepository、合法状态转换、TaskManager 和不依赖插件的测试执行器。
 
 Phase 5 不应提前实现 PluginManager、MockVision、timerfd/signalfd、异步日志、真实
