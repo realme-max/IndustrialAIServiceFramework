@@ -19,7 +19,8 @@ constexpr double kDefaultThreshold = 0.5;
 constexpr double kMockConfidence = 0.93;
 
 bool contains_control(const std::string_view value) noexcept {
-    for (const unsigned char byte : value) {
+    for (const char character : value) {
+        const auto byte = static_cast<unsigned char>(character);
         if (byte < 0x20U || byte == 0x7FU) {
             return true;
         }

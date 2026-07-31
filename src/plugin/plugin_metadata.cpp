@@ -10,7 +10,8 @@ namespace iaisf::plugin {
 namespace {
 
 bool has_control_character(const std::string_view value) noexcept {
-    for (const unsigned char byte : value) {
+    for (const char character : value) {
+        const auto byte = static_cast<unsigned char>(character);
         if (byte < 0x20U || byte == 0x7FU) {
             return true;
         }
@@ -102,7 +103,8 @@ Result<void> validate_canonical_identifier(
             ErrorCode::InvalidArgument,
             std::string(field) + " contains an empty segment"));
     }
-    for (const unsigned char byte : operation) {
+    for (const char character : operation) {
+        const auto byte = static_cast<unsigned char>(character);
         const bool valid =
             (byte >= static_cast<unsigned char>('a') &&
              byte <= static_cast<unsigned char>('z')) ||
