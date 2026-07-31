@@ -2,7 +2,7 @@
 
 面向工业 AI 应用的 C++ 高性能任务服务框架。
 
-> 当前状态：`PHASE_5_TASK_RUNTIME_COMPLETED`。跨平台有界线程池与任务运行时已完成 Phase 5B 并发、终态和生命周期专项审计；Windows Visual Studio 2022 Debug/Release 均为 212/212。最终 Linux CI 的 Debug/Release 均为 324/324，其中 Task Runtime 85/85，项目源码和测试编译 warning 为 0。
+> 当前状态：`PHASE_6_PLUGIN_SYSTEM_IMPLEMENTED_LINUX_VALIDATION_BLOCKED`。跨平台静态插件系统及 Task Runtime 适配已完成并通过专项审计；Windows Visual Studio 2022 Debug/Release 均为 316/316（Task Runtime 97、Plugin System 92），项目源码和测试编译 warning 为 0。当前未提交改动尚无对应的真实 Linux CI，不能标记 Phase 6 completed。
 
 ## 项目定位
 
@@ -10,7 +10,7 @@
 
 框架层只负责网络、协议、路由、任务调度、插件管理、状态、日志、配置和错误处理。焊缝、点云、机器人等领域语义只能进入插件层。
 
-当前 `iaisf_server` 仍只验证 CLI 和配置后退出；Phase 4 已提供可组合的 HTTP Server API，Phase 5 已提供独立 Task Runtime API，但二者尚未在常驻服务组合根中连接，也没有新增不受控的 `--serve` 或任务 HTTP 路由。
+当前 `iaisf_server` 仍只验证 CLI 和配置后退出；Phase 4 已提供可组合的 HTTP Server API，Phase 5 已提供独立 Task Runtime API，Phase 6 已提供可通过 C++ 组合进 TaskManager 的静态 Plugin System API，但这些模块尚未在常驻服务组合根中连接，也没有 `--serve`、任务 HTTP 路由或 CLI 插件加载。
 
 ## Phase 1 已实现
 
@@ -113,10 +113,30 @@ Phase 3 的线程边界不是“TCP 层整体线程安全”：只有 `EventLoop
 
 Phase 5 尚未把 TaskManager 暴露为 HTTP API，也未实现自动 timeout 扫描。Windows Debug/Release 均实际执行 Foundation 43、HTTP Core 84、Task Runtime 85，合计 212/212。最终 [Linux CI run 30547126540](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30547126540) 对实现提交 `79d3d4e89feb71595dc67d820f9a5398dcc814d4` 完成真实验证：Debug/Release 均为 Foundation 43、Reactor 45、TCP 51、HTTP Core 84、HTTP Integration 16、Task Runtime 85，合计 324/324；两个配置均实际构建 `iaisf_task` 和 `iaisf_task_tests`，项目源码和测试编译 warning 为 0。
 
+## Phase 6 已实现、等待 Linux 验证
+
+- 跨平台 `iaisf_plugin` / `iaisf::plugin` 与 `iaisf_plugin_tests`，不依赖 net、tcp 或 http
+- `PluginLimits` 对注册数量、元数据、错误、输入/输出序列化字节、JSON 深度、总节点数、单字符串以及 capabilities 设置经校验的硬上限
+- 值语义 `PluginMetadata`；operation/capability 只接受规范小写 ASCII，capabilities 有数量、字节和去重约束
+- 最小 `IAlgorithmPlugin` 接口只暴露 metadata、快速无 I/O 校验和可并发 execute；同一实例的 validate/execute 可同时运行，插件作者负责线程安全
+- `PluginManager` 显式注册 `shared_ptr<const IAlgorithmPlugin>`，保存一次性取得的 metadata 副本；无宏注册、全局 registry、目录扫描或动态 `.so`
+- 注册表状态为 Configuring → Frozen；freeze 幂等且不可逆，冻结前 list/lookup/validate/execute 全部返回 InvalidState，冻结后并发执行这些操作；调用插件前复制 handle 并释放 registry mutex
+- 重复 operation、容量耗尽、非法 metadata 和 metadata 异常均不留下半注册项；列表返回按 operation 排序的独立副本
+- TaskManager 保留旧 handler-only 工厂，并新增可选 `TaskValidator`；通用限制和 validator 都在 TaskId 分配前运行，shutdown 等待 in-flight validator 完成
+- Task/Plugin JSON 在插件代码前做有界结构遍历，并用无整文档副本的流式计数器精确核对 nlohmann/json 紧凑序列化字节；引号、转义、键、标点和 UTF-8 均计入，超过上限时立即终止序列化；discarded、非法 UTF-8 和非有限浮点数 fail-closed
+- `PluginManager::execute` 对直接 C++ 调用也执行输入与插件校验，所有插件成功输出在进入 TaskRepository 前统一校验；输出超限转为失败而非保存半结果
+- `PluginTaskAdapter` 只接受 frozen manager；生成的 validator/handler 只捕获 `shared_ptr<const PluginManager>`，不保活 Adapter 或 TaskManager，不形成强引用环；handler 对已拥有的 TaskRequest 快照做防御性二次插件校验
+- 未知 operation 返回结构化 `NotFound`，不创建 TaskId、Repository 记录或线程池队列项
+- validation/execute 的标准或未知异常被转换为固定安全错误；内部路径、`what()` 和原始输入不进入 TaskSnapshot，后续 worker 继续
+- `EchoPlugin` 接受严格 `{"payload": <任意 JSON>}`，成功时直接返回 payload 的独立副本，不附加 operation 包装
+- `MockVisionPlugin` 接受 image_id/width/height/可选 threshold，始终输出确定性 `mock: true`；它不读取图片或点云、不运行模型/GPU，不代表准确率或生产能力，不应直接驱动机器人
+
+Windows Debug/Release clean build 与完整 CTest 均为 316/316：Foundation 43、HTTP Core 84、Task Runtime 97、Plugin System 92；Release version/config smoke 均 exit 0，项目源码和测试编译 warning 为 0。由于本轮未 commit/push，尚无当前改动对应的 Linux CI，Phase 6 保持 validation blocked。
+
 ## 尚未实现
 
 - Task HTTP API、`/v1/tasks` 与 HTTP/Task Runtime 组合根
-- PluginManager、EchoPlugin、MockVisionPlugin 或动态 `.so`
+- 动态 `.so`/DLL、插件发现、热加载、热卸载或进程隔离
 - timerfd、自动任务超时扫描和连接超时
 - 异步日志、文件日志和日志轮转
 - TensorRT、PCL、真实点云、机器人或 Agent 能力
@@ -140,8 +160,11 @@ Phase 4 (completed)
 Phase 5 (completed)
   bounded fixed thread pool / Task values and limits / Repository / Executor / Manager
 
+Phase 6 (implemented; Linux validation blocked)
+  explicit static plugins / frozen registry / validator + handler adapter / Echo / MockVision
+
 Later phases (planned)
-  static plugins -> timers -> async logging
+  timers -> async logging
 
 Phase 9—10 (planned)
   measured engineering baseline -> production vision-plugin boundary
@@ -319,7 +342,7 @@ ctest --test-dir build/linux-release --output-on-failure
 - CTest CLI version 和 example-config smoke
 - Linux `UniqueFd`、Socket、Channel、EpollPoller 和 EventLoop
 
-真实结果见 [stage_status.md](docs/stage_status.md)。Windows/MSVC Debug/Release 均为 212/212：Foundation 43/43、HTTP Core 84/84、Task Runtime 85/85；Release `--version` 与示例配置 smoke 成功，项目源码和测试编译 warning 为 0。Phase 5 Linux Debug/Release 均为 Foundation 43、Reactor 45、TCP 51、HTTP Core 84、HTTP Integration 16、Task Runtime 85，合计 324/324；Release 两项 smoke 成功，项目源码和测试 warning 为 0。
+真实结果见 [stage_status.md](docs/stage_status.md)。Phase 6 Windows/MSVC Debug/Release 均为 316/316：Foundation 43/43、HTTP Core 84/84、Task Runtime 97/97、Plugin System 92/92；Release `--version` 与示例配置 smoke 成功，项目源码和测试编译 warning 为 0。最近的真实 Linux 结果仍是已封板 Phase 5 的 324/324；它不验证当前 Phase 6 未提交改动。
 
 ## 项目结构
 
@@ -342,6 +365,7 @@ IndustrialAIServiceFramework/
 │   ├── logging/
 │   ├── net/
 │   │   └── tcp/
+│   ├── plugin/
 │   ├── task/
 │   └── version.hpp.in
 ├── src/
@@ -352,17 +376,19 @@ IndustrialAIServiceFramework/
 │   ├── logging/
 │   ├── net/
 │   │   └── tcp/
+│   ├── plugin/
 │   ├── task/
 │   └── main.cpp
 ├── tests/
 │   ├── http/
 │   ├── net/
+│   ├── plugin/
 │   └── task/
 ├── scripts/
 └── docs/
 ```
 
-`net` 包含 Phase 2 Reactor 原语和 Phase 3 `tcp/` 字节传输层；`http` 包含 Phase 4 协议核心与 Linux adapter；`task` 包含 Phase 5 的跨平台任务运行时。仍没有插件、定时器或异步日志空壳类。
+`net` 包含 Phase 2 Reactor 原语和 Phase 3 `tcp/` 字节传输层；`http` 包含 Phase 4 协议核心与 Linux adapter；`task` 包含 Phase 5/6 的跨平台任务运行时与提交前验证器；`plugin` 包含 Phase 6 静态插件契约、冻结式注册表、Task 适配及两个无 I/O 内置插件。仍没有定时器或异步日志空壳类。
 
 ## 与 TinyWebServer 的差异
 

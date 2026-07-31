@@ -3,12 +3,12 @@
 ## 1. 文档状态
 
 - 项目：IndustrialAIServiceFramework
-- 阶段：Phase 5 Bounded Thread Pool and Task Runtime
+- 阶段：Phase 6 Static Algorithm Plugin System
 - 日期：2026-07-30
-- 状态：`PHASE_5_TASK_RUNTIME_COMPLETED`；跨平台 Task Runtime 已完成 Windows 分层回归和 Linux Debug/Release 最终验证
+- 状态：`PHASE_6_PLUGIN_SYSTEM_IMPLEMENTED_LINUX_VALIDATION_BLOCKED`；实现、专项审计与 Windows Debug/Release 316/316 已完成，当前改动尚无真实 Linux CI
 - 目标平台：Linux x86_64，C++17
 
-本文同时记录已实现的 Phase 1 基础设施、Phase 2 Reactor、Phase 3 TCP、Phase 4 HTTP 与 Phase 5 Task Runtime，以及后续目标边界。只有明确列入已实现边界的类才是当前能力。
+本文同时记录已实现的 Phase 1 基础设施、Phase 2 Reactor、Phase 3 TCP、Phase 4 HTTP、Phase 5 Task Runtime 与 Phase 6 静态插件系统，以及后续目标边界。只有明确列入已实现边界的类才是当前能力。
 
 ### 1.1 Phase 1 已实现边界
 
@@ -125,9 +125,10 @@ Phase 5 新增跨平台 `iaisf_task` / `iaisf::task`，PUBLIC 依赖 `iaisf::cor
 - `TaskId` 是 `uint64_t` 强类型，仓库锁内单调分配；字符串最小宽度 16 位十进制，
   不包含随机数、时间、机器信息，也不宣称跨进程或重启唯一。rollback 和 erase
   不复用 ID；分配到最大值后永久返回 `ResourceExhausted`，不回绕。
-- `TaskLimits` 以 bytes 校验 operation/error，并以 nlohmann/json `dump()` 的
-  UTF-8 序列化 bytes 校验 input/result；非法 UTF-8、分配失败和长度错误转为
-  `Error`。error 超限使用固定长度 `#` 泛化，不保留敏感前缀。
+- `TaskLimits` 以 bytes 校验 operation/error，并对 input/result 校验 JSON depth、
+  total elements、string/key bytes 与紧凑 UTF-8 serialized bytes；序列化计数不保存
+  第二份整文档。discarded、non-finite、非法 UTF-8、分配和长度错误转为 `Error`。
+  error 超限使用固定长度 `#` 泛化，不保留敏感前缀。
 - `TaskRepository` 是唯一状态裁决者，持有有界内存记录和独立快照。它不自动驱逐、
   不做 TTL/持久化；只有显式 `erase_terminal` 释放终态容量。
 - `TaskExecutor` 在仓库锁外调用注入式 `TaskHandler`。handler 标准/未知异常映射为
@@ -148,6 +149,54 @@ Windows Debug/Release 均实际执行 Foundation 43、HTTP Core 84、Task Runtim
 build 均成功，CTest 均为 324/324，其中 Task Runtime 85/85。两个配置均实际构建
 `iaisf_task` 与 `iaisf_task_tests`，Release version/config smoke 成功，项目源码
 和测试编译 warning 为 0。
+
+### 1.7 Phase 6 已实现边界
+
+Phase 6 新增跨平台 `iaisf_plugin` / `iaisf::plugin`，PUBLIC 依赖
+`iaisf::task`、`iaisf::core` 和 nlohmann/json，不依赖 Reactor、TCP 或 HTTP。
+
+- `PluginLimits` 是 factory 验证后的不可变安全边界；所有有符号输入先拒绝非正数，
+  再转换为 `size_t`。除 registry/metadata/error 外，还限制输入/输出紧凑序列化字节、
+  JSON 深度、总 value 节点数、单字符串/对象键和 capability 数量/字节。
+- `PluginMetadata` 是独立值；operation/capability 只接受小写 ASCII `a-z0-9._-`，
+  拒绝首尾点和连续空分段；capabilities 必须唯一，全部文本拒绝 NUL/控制字符和非法 UTF-8。
+- `IAlgorithmPlugin` 只暴露 metadata、无 I/O 快速 `validate_input` 和可并发
+  `execute`；接口中没有网络、HTTP、TaskRepository、文件系统、取消或 GPU 类型。
+- `PluginManager` 强持有 `shared_ptr<const IAlgorithmPlugin>`，禁止复制/移动，
+  operation 是唯一键。注册只调用一次 metadata 并保存副本；null、重复、容量、
+  非法 metadata 或异常失败都不改变 registry。
+- Manager 状态不可逆地从 Configuring 进入 Frozen。freeze 幂等；注册与 freeze 在同一
+  registry mutex 上线性化。Configuring 只允许 register/freeze，list/lookup/validate/
+  execute 均返回 InvalidState 且不调用插件；Frozen 后注册快速拒绝，其他操作可并发。
+  调用插件前在锁内复制 shared handle，释放锁后才进入插件代码，因而阻塞插件不阻塞
+  其他 metadata lookup。
+- 通用 JSON 审计先做有界结构遍历，再由 nlohmann/json serializer 向 counting stream
+  输出，从而精确计算与 `dump()` 相同的紧凑 JSON bytes；对象/数组标点、键、引号、
+  转义和 UTF-8 实际字节均计入，不保留整份序列化文本，并在首个超限字节立即中止。
+  discarded、non-JSON binary、非法 UTF-8 和非有限浮点数 fail-closed。
+- 公共 `PluginManager::execute` 自带输入容量和 plugin validation，直接 C++ 调用不能
+  绕过校验；插件成功输出在返回或进入 TaskRepository 前统一执行相同结构/字节校验。
+- `TaskManager` 新增可选 `TaskValidator` 且保留旧 handler-only API。submit 在
+  in-flight admission 后依次完成通用 TaskLimits 校验、锁外 validator、create_queued、
+  non-blocking try_submit 与失败 rollback；validator failure 不分配 TaskId。成功 submit
+  前 Repository 与 worker closure 已各自拥有 request 数据，调用方后续修改或销毁
+  operation/input 不影响已接收任务。
+- `PluginTaskAdapter` 只接受 Frozen Manager。它生成的 validator/handler 只捕获
+  `shared_ptr<const PluginManager>`，不保活 Adapter 或 TaskManager；Manager 再强持有
+  plugin，因此所有权图无反向边和强引用环。提交前校验一次，worker 对已拥有的
+  TaskRequest 快照再做一次 plugin contract 校验；结果变化返回固定 InternalError 且
+  不调用 execute。
+- validation 的安全 InvalidArgument/ResourceExhausted 受字节上限控制；validation/
+  execute 的标准或未知异常以及 execute 返回的任意插件 Error 均泛化为固定
+  InternalError。输出容量错误保留 ResourceExhausted，异常 `what()`、路径和原始输入
+  不写入 TaskSnapshot。
+- `EchoPlugin` 无状态、无 I/O，成功时直接复制返回 payload，不额外写入 operation；
+  `MockVisionPlugin` 无状态且始终 `mock: true`，只按 width/height/threshold 生成
+  确定性 JSON，不读取图片/点云、不运行模型或 GPU。
+
+Windows Debug/Release clean build 均为 316/316：Foundation 43、HTTP Core 84、
+Task Runtime 97、Plugin System 92，项目源码和测试 warning 为 0。当前未提交改动
+没有对应 Linux CI，因此不能宣称 Phase 6 completed。
 
 ## 2. 调查结果与设计来源
 
@@ -219,8 +268,8 @@ flowchart TB
     Router["core<br/>Router / API handlers"]
     Task["task<br/>TaskManager / Repository / Executor"]
     Concurrency["task runtime<br/>BoundedThreadPool"]
-    Plugin["plugin<br/>PluginManager / IPlugin"]
-    Examples["plugins<br/>Echo / MockVision"]
+    Plugin["plugin<br/>PluginManager / PluginTaskAdapter / IAlgorithmPlugin"]
+    Examples["plugin implementations<br/>Echo / MockVision"]
     Timer["timer<br/>TimerQueue / timerfd"]
     Logging["logging<br/>Logger"]
     Config["config<br/>typed configuration"]
@@ -230,7 +279,7 @@ flowchart TB
     Http --> Router
     Router --> Task
     Task --> Concurrency
-    Task --> Plugin
+    Plugin --> Task
     Plugin --> Examples
     Timer --> Network
     Timer --> Task
@@ -247,8 +296,8 @@ flowchart TB
 1. `network` 不依赖 `http`、`task` 或 `plugin`。
 2. `http` 通过字节流与回调适配 `network`，不执行任务。
 3. `core` 负责装配和路由，可以依赖上层服务接口。
-4. `task` 依赖抽象插件调用端口和执行器，不依赖具体插件。
-5. `plugins/*` 依赖公共插件契约，核心不反向依赖具体插件。
+4. `task` 只定义通用 TaskValidator/TaskHandler，不依赖 plugin。
+5. `plugin` 依赖 task 完成适配并拥有内置 Echo/MockVision；task/core/network 不反向依赖具体插件。
 6. `logging`、`config` 提供实例化服务，不使用全局可变单例。
 7. 跨层错误使用统一 `Error`，不得静默吞异常。
 
@@ -262,7 +311,8 @@ include/iaisf/
   http/          HttpRequest, HttpResponse, HttpParser, HttpSession, HttpRouter
   task/          TaskId, TaskState, TaskLimits, BoundedThreadPool,
                  TaskRepository, TaskManager, TaskExecutor
-  plugin/        IPlugin, PluginTypes, PluginManager
+  plugin/        IAlgorithmPlugin, PluginLimits, PluginMetadata,
+                 PluginManager, PluginTaskAdapter, EchoPlugin, MockVisionPlugin
   timer/         TimerId, TimerQueue
   logging/       LogRecord, ILogger, Logger
   config/        ServerConfig, ConfigLoader
@@ -296,10 +346,11 @@ scripts/         构建、启动、smoke、sanitizer 辅助脚本
 | `BoundedThreadPool` | 固定工作线程、有界 FIFO、drain/join | 公共方法线程安全；worker self-shutdown 拒绝 |
 | `TaskRequest/Snapshot` | 通用 JSON 输入与独立状态快照 | 值对象；不含网络引用 |
 | `TaskRepository` | 有界内存存储、查询、合法状态转换、终态清理 | 内部互斥，公共方法线程安全 |
-| `TaskManager` | 校验提交、创建任务、排队、查询、超时协调 | 公共 API 线程安全 |
+| `TaskManager` | 通用校验、可选 validator、创建任务、排队、查询、超时协调 | 公共 API 线程安全；validator/handler 可并发 |
 | `TaskExecutor` | 工作线程中的 handler 调用边界、异常隔离和结果提交 | 不创建线程；handler 必须并发安全 |
-| `IPlugin` | 插件生命周期和执行契约 | `execute` 在首版要求并发安全 |
-| `PluginManager` | 显式注册、冲突检测、初始化、查找、关闭 | 初始化阶段写；运行期只读查找 |
+| `IAlgorithmPlugin` | metadata、快速输入校验和算法执行契约 | validate/execute 可在同一实例同时运行；插件作者自行保证线程安全 |
+| `PluginManager` | 显式静态注册、freeze、查找、校验、异常隔离 | Configuring 写；Frozen 后并发只读/调用且不持锁进入插件 |
+| `PluginTaskAdapter` | 生成 TaskValidator/TaskHandler 并二次校验 | shared-owned；闭包保活 manager/plugin，无环 |
 | `TimerQueue` | `timerfd` + 最小堆、取消/更新、执行过期回调 | EventLoop 归属；跨线程操作通过 `queue_in_loop()` |
 | `Logger` | 有界日志队列、控制台/文件 sink、刷新停止 | 公共写接口线程安全 |
 | `ConfigLoader` | JSON 加载、默认值、类型和范围校验 | 启动期使用，产出不可变配置 |
@@ -325,7 +376,8 @@ classDiagram
     class BoundedThreadPool
     class TaskExecutor
     class PluginManager
-    class IPlugin
+    class PluginTaskAdapter
+    class IAlgorithmPlugin
     class TimerQueue
     class Logger
     class ConfigLoader
@@ -357,8 +409,9 @@ classDiagram
     TaskManager *-- BoundedThreadPool
     TaskManager *-- TaskExecutor
     BoundedThreadPool --> TaskExecutor
-    TaskExecutor ..> PluginManager : future TaskHandler adapter
-    PluginManager o-- IPlugin
+    TaskManager ..> PluginTaskAdapter : validator + handler
+    PluginTaskAdapter --> PluginManager
+    PluginManager o-- IAlgorithmPlugin
 ```
 
 所有权重点：
@@ -595,7 +648,7 @@ flowchart LR
   不得阻塞磁盘、网络或执行 AI；未来 worker 仍不得操作 HTTP/TCP/epoll 对象。
 - HttpServer stop 镜像 TcpServer：禁止 restart，active batch 内可能异步完成，
   `stopped()` 同时要求底层 stopped 且 Session 表为空；未完成 stop 前析构是契约错误。
-- TaskManager 声明顺序为 Repository → Executor → Pool，析构体先调用 shutdown；
+- TaskManager 声明顺序为 Validator → Repository → Executor → Pool，析构体先调用 shutdown；
   成员逆序销毁时 Pool 先析构/join，之后才销毁 Executor 和 Repository。worker closure
   捕获稳定 Executor 地址而不是裸 TaskManager；Logger 由调用者持有且必须比 Manager
   存活更久。禁止从 worker 内 shutdown 或销毁 TaskManager。
@@ -604,9 +657,8 @@ flowchart LR
 
 ### 10.1 提交任务（planned HTTP adapter）
 
-Phase 5 尚未实现本节 HTTP 路由。下图是未来组合方式，不是当前可调用路径；当前
-`TaskManager::submit(TaskRequest)` 直接完成 Repository create、bounded submit 和
-失败 rollback。
+Phase 6 仍未实现本节 HTTP 路由。下图是未来网络组合方式，不是当前可调用路径；
+当前 C++ 组合可由 `PluginTaskAdapter` 为 `TaskManager` 提供 validator/handler。
 
 ```mermaid
 sequenceDiagram
@@ -622,14 +674,14 @@ sequenceDiagram
     L->>H: readable bytes
     H->>H: incremental parse + JSON validation
     H->>M: submit(plugin, task_type, input, timeout)
-    M->>P: validate plugin availability
+    M->>P: validator: lookup + validate input
     M->>R: insert Queued task
     M->>Q: bounded submit
     alt accepted
         M-->>H: task_id + queued
         H-->>C: HTTP 202
         Q->>R: Queued -> Running
-        Q->>P: execute PluginRequest
+        Q->>P: revalidate + execute immutable TaskRequest
         P-->>Q: PluginResult or exception
         Q->>R: Running -> Succeeded/Failed
     else queue full or shutting down
@@ -685,12 +737,16 @@ flowchart LR
   force-close、
   callback setter 和连接表操作均不保证线程安全，必须由 owner 执行。
 - `TaskRepository`、`BoundedThreadPool::try_submit/shutdown` 和
-  `TaskManager` 公共接口内部同步；注入 handler 必须允许并发调用。
+  `TaskManager` 公共接口内部同步；注入 validator/handler 必须允许并发调用。
 - TaskManager 的 admission mutex 只保护 accepting/in-flight 计数，不跨越
   Repository 事务、Pool submit 或 handler；shutdown 关闭 admission 后通过
   condition variable 等待已获准 submit 结束。
-- 插件初始化/关闭在工作线程启动前/停止后串行执行。
-- 插件 `execute` 可能被多个 worker 并发调用；不满足并发安全的未来插件必须通过专用执行策略或并发闸门限制。
+- PluginManager 配置阶段显式注册并 freeze；本阶段没有 initialize/shutdown 生命周期、
+  动态卸载或热更新。
+- Frozen registry 的 lookup/validate/execute 支持并发；Manager 不持 registry mutex
+  调用插件。同一实例的 validate/execute 可能同时运行，多个 worker 也可并发 execute；
+  `const` 不等同线程安全，不满足并发安全的未来插件
+  必须通过专用执行策略或进程隔离限制。
 - 停止顺序：停止 accept → 处理/关闭连接 → 拒绝新任务 → 按策略 drain 工作队列 → shutdown 插件 → flush/stop Logger → 退出。
 
 ## 12. 任务状态与超时
@@ -802,7 +858,10 @@ Phase 1 的 `Error` 保留公开字段以维持轻量值语义，因此调用者
 - EventLoop 回调：捕获到未处理异常时记录连接上下文并关闭相关连接；EventLoop 不能退出。
 - worker：每个任务外围 `try/catch`，`std::exception` 和未知异常均转换为 Failed；线程继续工作。
 - Phase 5 TaskExecutor：handler 异常转为 `InternalError` 和泛化消息，不把异常原文写入 Snapshot。
-- 未来 PluginManager：插件专属错误码与远端映射需在 Phase 6 单独设计。
+- Phase 6 PluginManager：metadata/validation/execution 的标准和未知异常均在插件
+  边界捕获；validation 固定为 `plugin validation failed`，execution 固定为
+  `plugin execution failed`，不泄露 `what()`；防御性二次验证变化固定为内部契约错误，
+  输出超限在 Repository 写入前失败。
 - Logger：sink 失败进入可观测降级状态，避免递归记录。
 
 禁止空 catch 和吞错。客户端只获得稳定错误码；详细路径、errno、栈信息只进入服务端日志。
@@ -827,7 +886,7 @@ Phase 1 的 `Error` 保留公开字段以维持轻量值语义，因此调用者
 
 - 不实现通用文件读取、下载、静态文件或 shell 执行。
 - 核心只把 `input` JSON 作为数据传给已注册插件；不解释为命令。
-- MockVision 的路径字段只做格式验证，不实际打开文件。
+- MockVision 只接受 `image_id` 和数值尺寸/阈值，不接受路径字段，不实际打开文件。
 - 所有容量有上限；任务终态按保留期清理。
 - Task ID 和 request ID 由服务端生成，客户端不能覆盖。
 - 路由路径严格匹配，拒绝目录穿越形式。
@@ -843,14 +902,13 @@ Phase 1 的 `Error` 保留公开字段以维持轻量值语义，因此调用者
 - 持久任务：以 `ITaskRepository` 抽象替换内存实现，但首版不引入数据库。
 - 可观测性：后续增加 metrics/tracing，不在当前阶段宣称已有。
 
-## 19. Phase 6 建议边界
+## 19. Phase 7 建议边界
 
-Phase 5 已完成封板。Phase 6 尚未开始；建议只实现 `IAlgorithmPlugin` 或等价静态
-插件契约、`PluginMetadata`、`PluginManager` 静态注册、提交前快速校验、
-EchoPlugin、MockVisionPlugin（结果强制 `mock: true`）、插件异常隔离、既有
-`TaskHandler` 适配及对应单元测试。
+Phase 6 已实现但等待当前改动对应的 Linux CI。后续 Phase 7 建议只实现最小堆
+TimerQueue、timerfd 驱动、连接 idle timeout、任务 deadline 与 first-terminal-wins
+竞态测试；开始前必须先完成 Phase 6 commit/push/真实 Linux 验证。
 
-Phase 6 不应实现动态 `.so`、HTTP Task API、timerfd 自动超时、异步日志、真实
-TensorRT/PCL/GPU、真实点云、机器人、Agent、多 Reactor、数据库或 benchmark。
-插件不重写 TaskRepository，也不能直接操作 TcpConnection、HttpSession、Channel、
-Socket 或 epoll。
+Phase 7 不应顺带实现 HTTP Task API、动态插件、异步日志、TensorRT/PCL/GPU、
+真实文件读取、机器人、Agent、多 Reactor、数据库或 benchmark。插件仍不能直接
+操作 TcpConnection、HttpSession、Channel、Socket 或 epoll；未来高风险或不可信
+真实插件应评估独立进程隔离，而不是假设 C++ 异常边界等同故障隔离。

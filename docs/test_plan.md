@@ -2,7 +2,7 @@
 
 ## 1. 状态与原则
 
-Phase 1 已实现基础单元测试和 CLI smoke，并在 Phase 1B 加强 Error 边界、Result 引用类别、配置数值类型和 UTF-8 字节限制覆盖。Phase 2 Reactor 最终 [GitHub Actions Linux CI run 30516007475](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30516007475) 已完成 Debug、Release、87/87 CTest 和 Release smoke 零 warning 验证。Phase 3 最终 [Linux CI run 30524686201](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30524686201) 已完成 Debug/Release 138/138 CTest，其中 Foundation 43、Reactor 45、TCP 50。Phase 4 状态为 `PHASE_4_HTTP_PROTOCOL_COMPLETED`：最终 [Linux CI run 30539245789](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30539245789) Debug/Release 239/239。Phase 5 状态为 `PHASE_5_TASK_RUNTIME_COMPLETED`：Windows Debug/Release 212/212；最终 [Linux CI run 30547126540](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30547126540) Debug/Release 324/324，其中 Task Runtime 85/85。
+Phase 1 已实现基础单元测试和 CLI smoke，并在 Phase 1B 加强 Error 边界、Result 引用类别、配置数值类型和 UTF-8 字节限制覆盖。Phase 2 Reactor 最终 [GitHub Actions Linux CI run 30516007475](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30516007475) 已完成 Debug、Release、87/87 CTest 和 Release smoke 零 warning 验证。Phase 3 最终 [Linux CI run 30524686201](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30524686201) 已完成 Debug/Release 138/138 CTest，其中 Foundation 43、Reactor 45、TCP 50。Phase 4 状态为 `PHASE_4_HTTP_PROTOCOL_COMPLETED`：最终 [Linux CI run 30539245789](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30539245789) Debug/Release 239/239。Phase 5 状态为 `PHASE_5_TASK_RUNTIME_COMPLETED`：最终 [Linux CI run 30547126540](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30547126540) Debug/Release 324/324。Phase 6 当前为 `PHASE_6_PLUGIN_SYSTEM_IMPLEMENTED_LINUX_VALIDATION_BLOCKED`：Phase 6C 审计后 Windows Debug/Release 已各通过 316/316，当前未提交改动尚无真实 Linux CI。
 
 测试原则：
 
@@ -510,23 +510,79 @@ timeout 或 `continue-on-error`。Debug/Release 项目源码和测试编译 warn
 
 ## 10. Plugin 测试
 
-- 注册 Echo，按名称获取。
-- 空名/非法名拒绝。
-- 重复名称拒绝且原插件不被覆盖。
-- 未知/disabled 插件。
-- initialize 成功、失败、抛异常。
-- shutdown 顺序和幂等行为。
-- Echo 原样封装输入且无共享状态。
-- MockVision：
-  - 有效输入产生 `mock: true`；
-  - 标志不可关闭；
-  - 缺路径、绝对路径、`..`、NUL、非法 hint 被拒绝；
-  - 不要求文件真实存在；
-  - 延迟配置边界；
-  - Phase 6 不引入 cancellation 或自动 timeout。
-- execute 显式失败/抛异常被 TaskExecutor 转成 Failed，worker 存活。
+### 10.1 实际定义
 
-核心测试不链接 PCL、TensorRT、CUDA 或机器人 SDK。
+| 文件/suite | 定义数 | 覆盖 |
+|---|---:|---|
+| PluginLimits | 6 | 全部容量默认/显式值、零/负数、硬上限、exact hard maximum |
+| PluginMetadata | 12 | operation/capability 规范、去重、UTF-8、控制字符、count/byte limits |
+| PluginManager | 28 | 状态矩阵、注册事务、register/freeze/execute 竞态、精确 JSON 容量、错误边界、并发与锁外调用 |
+| EchoPlugin | 12 | 严格 schema、全部 JSON kind 的原值回显、binary string、独立副本、重复验证、validate/execute 并发 |
+| MockVisionPlugin | 18 | mock metadata、阈值/尺寸、确定性、重复验证、validate/execute 并发 |
+| PluginTaskAdapter | 16 | frozen/所有权释放/request snapshot/二次验证变化、E2E、失败路径、输出限制、多 worker |
+| **Plugin System 合计** | **92** | `unit;plugin` |
+
+TaskManager 原 9 项 validator 回归保留；Phase 6B 再增加 3 项 TaskLimits JSON
+结构测试，使 Task Runtime 从 85 增至 97：
+
+- handler-only 旧 API 由既有测试继续覆盖；
+- validator success、InvalidArgument、NotFound、标准/未知异常；
+- 通用 TaskLimits 先于 validator；
+- validator failure 不分配 TaskId、不改变 Repository/queue；
+- shutdown 等待 in-flight validator；
+- 多 submitter 可并发执行 validator；
+- validator 可重入 Manager/Repository 查询，证明不持相应 mutex。
+- 深度/节点数/字符串 exact 与超限；
+- discarded、非法 UTF-8 和 non-finite；
+- 通用 request/result 使用同一结构与流式序列化计数边界。
+
+### 10.2 端到端和异常边界
+
+- 显式注册 Echo/MockVision → freeze → Adapter → TaskManager；
+- Echo 将 `payload` 的任意 JSON kind 原值复制为结果，MockVision 最终 Succeeded 且
+  result 含 `mock: true`；
+- unknown/invalid/validation exception 在提交前失败且无记录；
+- execution exception 最终 Failed，固定消息不泄露路径，下一任务成功；
+- output 超过 TaskLimits 最终 Failed；
+- Echo/MockVision output 超过 PluginLimits 时均在 Repository success 前最终 Failed，
+  无半结果；
+- 防御性第二次 validation 变化固定 InternalError，execute 调用次数为 0；
+- submit 后修改/销毁调用方 request 不改变 worker-owned operation/input；
+- 4 worker 混合执行两种 operation，TaskId 唯一且结果独立；
+- validator/handler closure 只强持有只读 Manager；不持有 Adapter 或 TaskManager；
+  TaskManager 释放 validator、TaskExecutor 释放 handler 后 Manager/Plugin 可析构，无环；
+- plugin registry lock 不覆盖阻塞 execute，execute 可重入 metadata lookup。
+- Configuring 阶段 find/list/validate/execute 均为 InvalidState 且不调用插件；freeze 后
+  同一调用成功；
+- 精确 compact UTF-8 serialized bytes 覆盖引号、反斜杠、控制字符、UTF-8、转义 key
+  与嵌套 JSON；原始字符串可容纳但转义后超限时被拒绝；
+- JSON depth、node count 的 exact/over、宽数组/宽对象均覆盖；非法输入不调用插件，
+  随后的健康任务仍可成功。
+
+核心测试不链接 PCL、TensorRT、CUDA、OpenCV 或机器人 SDK，不访问文件和网络。
+
+### 10.3 Phase 6 Windows 实际矩阵
+
+| 配置 | Foundation | HTTP Core | Task Runtime | Plugin System | 总计 | 失败 |
+|---|---:|---:|---:|---:|---:|---:|
+| VS2022 x64 Debug | 43 | 84 | 97 | 92 | 316 | 0 |
+| VS2022 x64 Release | 43 | 84 | 97 | 92 | 316 | 0 |
+
+Release smoke：
+
+```text
+IndustrialAIServiceFramework 0.1.0
+2026-07-31T03:29:24.782Z [INFO] [Application] configuration validated for service IndustrialAIServiceFramework
+```
+
+MSVC 项目源码和测试 warning 为 0；既有 vcpkg applocal 缺少 `pwsh.exe` 是非致命
+环境诊断。当前 Linux 真实结果仍停留在 Phase 5 324/324；workflow 已显式加入
+plugin targets，但不能在 commit/push 和真实 CI 前把 Phase 6 描述为 Linux PASS。
+
+Linux CI 应实际执行 Foundation 43 + Reactor 45 + TCP 51 + HTTP Core 84 +
+HTTP Integration 16 + Task Runtime 97 + Plugin System 92 = 428 项；该数字目前只是
+当前源码定义矩阵，不能替代真实 Linux CTest。并发用例使用 promise/shared_future
+屏障和有限 `wait_for`，不使用 fixed sleep 或 detached thread。
 
 ## 11. Timer 测试
 
@@ -680,4 +736,4 @@ Phase 0 的非运行验证项：
 - 调查时参考聚合 SHA-256：
   `83AE7E469DEA30C860DEFD4D26CB313B7B3C87EFCD9387414741E152EE46CF27`。
 - 当前宿主无可用 Linux/epoll 构建环境，因此没有伪造编译结果。
-- Phase 5C 封板前复算仍为 62 个文件、59,240,225 bytes 和相同聚合 SHA-256。
+- Phase 5C 封板前以及 Phase 6 开始、交付前复算均仍为 62 个文件、59,240,225 bytes 和相同聚合 SHA-256。

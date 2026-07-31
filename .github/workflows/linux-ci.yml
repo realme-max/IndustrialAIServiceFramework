@@ -40,10 +40,10 @@ jobs:
       - name: Build Debug
         run: ./scripts/build_linux.sh Debug
 
-      - name: Verify HTTP and task targets Debug
+      - name: Verify HTTP, task, and plugin targets Debug
         run: |
           cmake --build build/linux-debug \
-            --target iaisf_http_core iaisf_http_core_tests iaisf_http iaisf_http_tests iaisf_task iaisf_task_tests \
+            --target iaisf_http_core iaisf_http_core_tests iaisf_http iaisf_http_tests iaisf_task iaisf_task_tests iaisf_plugin iaisf_plugin_tests \
             --parallel
 
       - name: Test Debug
@@ -63,10 +63,10 @@ jobs:
       - name: Build Release
         run: ./scripts/build_linux.sh Release
 
-      - name: Verify HTTP and task targets Release
+      - name: Verify HTTP, task, and plugin targets Release
         run: |
           cmake --build build/linux-release \
-            --target iaisf_http_core iaisf_http_core_tests iaisf_http iaisf_http_tests iaisf_task iaisf_task_tests \
+            --target iaisf_http_core iaisf_http_core_tests iaisf_http iaisf_http_tests iaisf_task iaisf_task_tests iaisf_plugin iaisf_plugin_tests \
             --parallel
 
       - name: Test Release

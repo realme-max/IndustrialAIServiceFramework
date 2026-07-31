@@ -1,323 +1,380 @@
-# 插件系统设计
+# 静态算法插件设计
 
-## 1. 目标与状态
+## 1. 状态与范围
 
-插件系统让框架承载不同工业任务，但框架本身不包含焊缝、点云、机器人或 Agent 语义。
+Phase 6 已实现跨平台静态插件系统，当前状态：
 
-Phase 0 只完成接口设计。Phase 5 首次实现静态插件；动态 `.so`、真实视觉、机器人和 Agent 都未实现。
+```text
+PHASE_6_PLUGIN_SYSTEM_IMPLEMENTED_LINUX_VALIDATION_BLOCKED
+```
 
-## 2. 边界原则
+Windows VS2022 Debug/Release 已各通过 316/316 CTest，其中 Task Runtime 97、
+Plugin System 92；当前改动尚未 commit/push，因此没有对应的真实 Linux CI。
 
-- 核心只识别 `plugin_name`、`task_type`、JSON `input`、deadline、结果和错误。
-- 具体输入校验和领域结果由插件负责。
-- 插件不能获得 `TcpConnection`、Socket fd、Router 或 EventLoop。
-- 插件不能直接构造 HTTP 响应。
-- 插件不能读取客户端指定的任意路径、执行 shell 或创建不受控线程。
-- 插件日志通过注入的日志接口，配置只来自服务端配置文件。
-- 插件异常必须在 `TaskExecutor` 边界被捕获。
+“静态”仅表示插件代码编译进进程，并在组合阶段显式注册对象。当前没有动态 `.so`/
+DLL、目录扫描、全局注册宏、热加载、卸载、HTTP Task API、自动 timeout、文件读取、
+GPU 推理或常驻 Application。
 
-## 3. 公共类型
+## 2. Target 与依赖
 
-以下是接口语义，不是已实现代码。
+```text
+iaisf_plugin / iaisf::plugin (portable STATIC)
+  PUBLIC -> iaisf::task
+  PUBLIC -> iaisf::core
+  PUBLIC -> nlohmann_json::nlohmann_json
 
-### 3.1 PluginRequest
+iaisf_plugin_tests (portable)
+  PRIVATE -> iaisf::plugin
+  PRIVATE -> GTest / Threads
+```
 
-字段：
+`iaisf_task` 不反向依赖 plugin，plugin 不依赖 net、tcp、http。网络层和 TaskRepository
+不理解 `echo`、`mock_vision.detect` 或任何工业领域字段。
 
-| 字段 | 类型语义 | 说明 |
-|---|---|---|
-| `task_id` | string | 服务端生成，不透明 |
-| `task_type` | string | 插件内操作名 |
-| `input` | JSON object | 插件专属输入 |
-| `deadline` | steady-clock time point | 单调时钟截止时间 |
-| `cancellation` | CancellationToken | C++17 自定义协作取消令牌 |
-| `request_context` | 只读结构 | request_id 等安全关联信息 |
+## 3. PluginLimits
 
-不得把连接指针、HTTP request 或可变全局配置放入请求。
+`PluginLimits::create` 生成经验证的不可变安全边界：
 
-### 3.2 PluginResult
+- `max_plugins`
+- `max_operation_bytes`
+- `max_name_bytes`
+- `max_version_bytes`
+- `max_description_bytes`
+- `max_error_message_bytes`
+- `max_input_bytes`
+- `max_output_bytes`
+- `max_json_depth`
+- `max_json_elements`
+- `max_string_bytes`
+- `max_capabilities`
+- `max_capability_bytes`
 
-使用显式成功/失败二选一，而不是通过特殊 JSON 表示失败：
+所有输入使用有符号整数接收，先拒绝零和负数，再检查公开硬上限和平台 `size_t`
+范围；不静默 clamp。字符串大小按 `std::string` 中 UTF-8 bytes 计算；depth 把根
+计为 1，elements 计算包括根在内的全部 JSON value 节点，对象键受 string limit
+约束。这些默认值是内存与输入安全边界，不是性能指标或容量承诺。
 
-- 成功：JSON object `output`，可选 metrics/metadata。
-- 失败：稳定 `ErrorCode`、安全 message、可选安全 details。
+## 4. PluginMetadata
 
-插件执行耗时由 TaskExecutor 测量，插件不自行伪造框架时间字段。
+值类型字段：
 
-### 3.3 PluginMetadata
+```text
+operation
+name
+version
+description
+mock
+capabilities
+```
 
-建议包含：
+规则：
 
-- 唯一 `name`
-- 人类可读 description
-- 插件语义版本
-- 支持的 `task_type` 列表
-- `mock` 标志
-- 执行并发策略描述
+- operation 非空，只接受小写 ASCII `a-z0-9._-`；
+- operation 不能以点开头/结尾，不能包含连续点形成空分段；
+- name/version/description 非空；
+- 所有字段遵守各自 byte limit；
+- 文本拒绝 NUL、C0/DEL 控制字符和非法 UTF-8；
+- capability 使用与 operation 相同的 canonical lowercase ASCII 规则，允许空列表，
+  但每个条目非空、列表内唯一，并受 count/byte 上限约束；
+- Manager 注册时只调用一次插件 `metadata()`，保存经过验证的独立副本；
+- lookup/list 不返回插件内部字符串引用；
+- Echo metadata 的 `mock=false`，MockVision 的 `mock=true`。
 
-运行期 API 不必暴露全部 metadata，后续可添加只读插件查询端点。
+operation 是进程内 registry key，不是动态库文件名。
 
-## 4. IPlugin 生命周期
+## 5. IAlgorithmPlugin
 
-目标接口职责：
-
-1. `name()` / `metadata()`：注册前可调用，不抛异常。
-2. `initialize(config, context)`：串行调用一次，验证专属配置并申请资源。
-3. `validate_request(task_type, input)`：提交前执行快速、确定、无 I/O 的 schema 校验。
-4. `execute(request)`：在 worker 线程调用零到多次。
-5. `shutdown()`：不再有 execute 后串行调用一次，释放资源。
-
-状态：
-
-```mermaid
-stateDiagram-v2
-    [*] --> Constructed
-    Constructed --> Initialized: initialize succeeds
-    Constructed --> InitFailed: initialize fails or throws
-    Initialized --> Running: manager published
-    Running --> Running: execute
-    Running --> Stopping: service stops
-    Stopping --> Stopped: no in-flight call + shutdown
-    InitFailed --> Stopped: cleanup
-    Stopped --> [*]
+```cpp
+class IAlgorithmPlugin {
+public:
+    virtual ~IAlgorithmPlugin() = default;
+    virtual PluginMetadata metadata() const = 0;
+    virtual Result<void> validate_input(const nlohmann::json&) const = 0;
+    virtual Result<nlohmann::json> execute(const nlohmann::json&) const = 0;
+};
 ```
 
 契约：
 
-- `initialize` 返回明确错误，不得部分成功后把泄漏资源留给管理器。
-- `validate_request` 只能做 task type、字段、类型、范围和字符串格式校验；不得读文件、访问网络、睡眠或执行模型。确定性错误在排队前返回 422。
-- `execute` 首版可能被多个 worker 并发调用；Echo 和 MockVision 必须无状态或内部同步。
-- `shutdown` 应幂等、noexcept 语义；异常只记录，不能中断其他插件关闭。
-- 插件析构是最终 RAII 防线，不能依赖进程强制退出。
+- `validate_input` 必须快速、确定、可重复、无外部可见副作用，不能做文件/网络 I/O
+  或真实推理；同一输入的成功/失败分类不得依赖调用次数；
+- 同一实例的 `validate_input` 与 `execute` 可能同时运行，多个 worker 也可能并发
+  `execute`；插件必须无共享可变状态或自行同步，`const` 本身不提供线程安全保证；
+- Manager 不提供覆盖所有插件的执行锁；
+- 接口不包含 Socket、Channel、EventLoop、HTTP、TaskRepository、文件系统、取消、
+  进度或 GPU context；
+- 本阶段没有 initialize/shutdown、配置注入或动态卸载生命周期。
 
-未来 GPU 插件可能要求 `max_concurrency=1` 或上下文池。该限制应由独立 `PluginExecutorPolicy`/semaphore 实现，而不是让网络层了解 GPU。
+## 6. 显式静态注册与所有权
 
-## 5. PluginManager
+组合方式：
 
-职责：
-
-- 接收 `unique_ptr<IPlugin>` 的显式注册。
-- 校验名称格式、空名称和冲突。
-- 按配置启用/禁用并初始化。
-- 只发布初始化成功的插件。
-- 运行期按名称返回受控引用/`shared_ptr`，不暴露内部 map。
-- 停止时阻止新执行，等待 TaskExecutor drain 后逆序 shutdown。
-
-非职责：
-
-- 不调度线程、不保存 Task、不解析 HTTP。
-- 不解释插件 `input`。
-- 不捕获后继续隐瞒初始化失败。
-- 不扫描目录或自动 `dlopen`。
-
-### 5.1 注册方式
-
-Phase 5 使用组合根显式注册：
-
-```text
-Application composition root
-  -> construct EchoPlugin
-  -> PluginManager.register(plugin)
-  -> construct MockVisionPlugin
-  -> PluginManager.register(plugin)
-  -> PluginManager.initialize_enabled(config.plugins)
+```cpp
+auto manager = std::make_shared<PluginManager>(limits);
+manager->register_plugin(std::make_shared<EchoPlugin>());
+manager->register_plugin(std::make_shared<MockVisionPlugin>());
+manager->freeze();
 ```
 
-不使用静态初始化宏或全局 registry，原因是：
+所有权：
 
-- 启动顺序和失败点可见；
-- 单元测试可构造独立 manager；
-- 避免全局可变状态；
-- 链接器裁剪和静态初始化次序不会悄悄改变注册结果。
+- PluginManager 使用 `shared_ptr`，禁止复制和移动；
+- registry 强持有 `shared_ptr<const IAlgorithmPlugin>`；
+- lookup 调用插件前在锁内复制 shared handle，释放锁后再调用；
+- PluginTaskAdapter 强持有 `shared_ptr<const PluginManager>`；
+- validator/handler closure 直接强持有只读 Manager，不持有 Adapter 或 TaskManager；
+- TaskManager 保存 validator，TaskExecutor 保存 handler；worker queue 只保存
+  TaskExecutor 非 owning 指针、TaskId 和独立 TaskRequest，不另存 handler；
+- Manager 强持有 Plugin，整个图没有指向 TaskManager 或 Adapter 的反向强引用；
+- TaskManager 销毁前先 drain/join worker，因此 Manager/Plugin 覆盖全部执行期；
+  TaskManager 销毁后闭包释放，最后引用可以正常归零。
 
-### 5.2 名称冲突
+不存在全局 manager、全局可变 registry、静态初始化次序或自动注册宏。
 
-- 名称建议匹配 `^[a-z][a-z0-9_-]{0,63}$`。
-- 重复名称返回 `PluginAlreadyRegistered`，启动配置中的重复是致命错误。
-- 名称比较区分大小写；规范要求插件只用小写。
-- disabled 插件不会对外可执行；请求返回 `PluginNotFound` 或 `PluginDisabled`，HTTP 层稳定映射。
-
-### 5.3 初始化失败
-
-- enabled 插件初始化失败默认使服务启动失败，避免健康但不可用的假象。
-- 可在未来加入 `required: false` 的降级插件；首版不增加该复杂度。
-- 错误日志包含插件名和内部原因，HTTP 不会看到配置或路径详情。
-
-## 6. 任务执行边界
+## 7. Configuring 与 Frozen
 
 ```mermaid
-sequenceDiagram
-    participant TM as TaskManager
-    participant TP as ThreadPool
-    participant TE as TaskExecutor
-    participant PM as PluginManager
-    participant PL as IPlugin
-    participant TR as TaskRepository
-
-    TM->>TP: submit bounded closure
-    TP->>TE: run task
-    TE->>TR: Queued -> Running
-    TE->>PM: acquire enabled plugin
-    PM-->>TE: plugin handle
-    TE->>PL: execute(request)
-    alt success before deadline
-        PL-->>TE: output
-        TE->>TR: Running -> Succeeded
-    else explicit plugin failure
-        PL-->>TE: Error
-        TE->>TR: Running -> Failed
-    else exception
-        PL--xTE: throws
-        TE->>TR: Running -> Failed
-    else timeout won race
-        PL-->>TE: late output/error
-        TE->>TR: transition rejected; discard late result
-    end
+stateDiagram-v2
+    [*] --> Configuring
+    Configuring --> Configuring: register_plugin
+    Configuring --> Frozen: freeze
+    Frozen --> Frozen: repeated freeze / lookup / validate / execute
 ```
 
-`TaskExecutor` 必须：
+| 状态 | register | freeze | list/lookup | validate/execute |
+|---|---|---|---|---|
+| Configuring | 允许 | 转入 Frozen | InvalidState | InvalidState，不调用插件 |
+| Frozen | InvalidState | 幂等成功 | 允许 | 允许，可并发 |
 
-- 在任何插件代码前检查任务仍为 Queued/可运行。
-- 以受控转换进入 Running。
-- 捕获 `std::exception` 和未知异常。
-- 不把异常 `what()` 原文直接发给客户端。
-- 完成后只尝试一次终态转换。
-- 对已 Timeout/Cancelled 的任务丢弃结果并记录 debug/warn。
-- 不让单个任务异常退出 worker。
+- 只有 Configuring 可注册；register/freeze 在同一 registry mutex 上线性化；
+- freeze 幂等且不可逆；
+- Frozen 后永久拒绝 register，并在调用插件 metadata 前快速拒绝；不支持
+  unfreeze/unregister/replace；
+- find/list/validate/execute 在 Configuring 返回 InvalidState；
+- Frozen 后 registry 不再修改，查询和插件调用支持多线程并发；
+- `list_metadata` 返回按 operation 排序的独立 vector；
+- 一个阻塞插件不会持有 registry mutex，也不会阻塞其他 operation 的 metadata lookup。
 
-## 7. 配置
+## 8. 注册事务与异常安全
 
-建议 Phase 5 配置：
+注册顺序：
+
+1. 拒绝 null，并在短锁内快速检查 Frozen；
+2. 在 registry lock 外调用一次 metadata；
+3. 捕获 metadata 标准/未知异常并返回安全固定错误；
+4. 校验 metadata/capabilities；
+5. 加锁后复查 Frozen、duplicate 和 capacity；此处是注册线性化点；
+6. 先复制独立 operation key，再移动 metadata/plugin 进入 map；
+7. map 插入成功才改变 size。
+
+这条独立 key 规则避免 C++ 函数参数求值顺序使 metadata 先被 move 后再读取 operation。
+测试锁定 metadata 只调用一次、copy 独立性、重复/容量/非法 metadata/异常后 size
+不变，以及失败后仍能注册合法插件。无法稳定注入真实 allocator `bad_alloc`，该路径
+由生产 catch 与容器强异常保证做代码审计，不伪造故障注入 PASS。
+
+## 9. Lookup、校验和执行错误
+
+未知 operation 使用结构化 `ErrorCode::NotFound`，不根据 message 文本判断。
+
+`validate_input` 返回的 InvalidArgument/ResourceExhausted 可保留经过
+`max_error_message_bytes` 限制的安全消息；其他错误映射为：
+
+```text
+InternalError("plugin validation failed")
+```
+
+validation 标准或未知异常也使用同一固定错误，不暴露 `what()`。
+
+`execute` 返回的任意插件 Error 都不能被假定为客户端安全内容，统一映射为：
+
+```text
+InternalError("plugin execution failed")
+```
+
+execute 标准或未知异常使用相同映射。框架自身的输出容量失败保留结构化
+ResourceExhausted；所有 PluginManager 对外错误字符串都受
+`max_error_message_bytes` 限制。随后 TaskRepository 的 TaskLimits 再做一次错误消息
+限制；异常文本、errno、系统路径、Token 和原始大 JSON 不进入 TaskSnapshot。插件
+异常不会退出 worker，下一任务继续。
+
+### 9.1 统一 JSON 容量与失败策略
+
+TaskLimits 与 PluginLimits 共用 `validate_json_value`。它在进入下一层前检查 depth，
+用受硬上限约束的节点计数立即停止超宽/超深结构，并检查字符串/对象键、discarded、
+non-JSON binary 和非有限浮点数。随后使用 nlohmann/json 的紧凑 serializer 向
+counting stream 输出，因此返回值与 `dump().size()` 精确一致：braces、brackets、
+comma、colon、键、引号、转义、数字文本和 UTF-8 实际字节全部计入。计数器不保存
+第二份完整文本，并通过流异常在首个超限字节中止序列化。Task 与 Plugin 边界仍各自
+执行，以保留两套安全策略。
+
+输入超出 bytes/depth/elements/string 返回 ResourceExhausted；discarded、non-JSON
+binary、非法 UTF-8 或非有限输入返回 InvalidArgument。插件成功输出必须在 Manager 返回以及 Repository
+写入前通过同一检查：容量错误返回 ResourceExhausted，插件产生的 discarded、非法
+UTF-8 或非有限输出视为 InternalError。任何失败都不产生半结果。
+
+## 10. TaskValidator
+
+Task Runtime 新增：
+
+```cpp
+using TaskValidator =
+    std::function<Result<void>(const TaskRequest&)>;
+```
+
+旧的 handler-only `TaskManager::create` 保留。新重载接受 validator + handler。
+
+submit 顺序：
+
+```text
+admission accepting check + in-flight increment
+  -> generic TaskLimits request validation
+  -> optional TaskValidator outside Manager/Repository locks
+  -> create_queued
+  -> non-blocking try_submit
+  -> rollback on queue/allocation failure
+  -> in-flight decrement on every return path
+```
+
+validator failure/exception 不分配 TaskId、不改变 Repository size、不占线程池队列。
+shutdown 关闭 admission 后等待正在执行的 validator 完成，再 drain/join。validator
+可以被多个 submitter 并发调用，必须线程安全、快速且无 I/O。
+
+## 11. PluginTaskAdapter
+
+Adapter 只从 Frozen Manager 创建，提供：
+
+- `validate_task(TaskRequest)`
+- `execute_task(TaskRequest)`
+- `make_validator()`
+- `make_handler()`
+
+`TaskRequest::operation` 直接作为 registry key。validator 在提交前调用 Manager
+validate；handler 在 worker 中对已拥有的 TaskRequest 快照再次执行插件契约校验后
+才 execute。若第二次校验失败，说明插件验证依赖可变状态或调用顺序，Adapter 返回
+固定 `InternalError("plugin validation changed before execution")`，且不调用 execute。
+
+成功 submit 返回前，Repository 与 worker closure 已各自拥有 operation/input；
+调用方随后修改或销毁原 TaskRequest、源 operation 字符串或 JSON 不影响已接收任务。
+
+closures 只捕获 `shared_ptr<const PluginManager>`，不捕获 Adapter、TaskManager、
+裸 `this` 或调用方 JSON 引用。释放 Adapter 后 weak_ptr 立即过期；有任务或闭包时
+Manager/Plugin 保持存活，TaskManager 析构释放最后闭包后正常销毁。Adapter 不创建
+线程，不访问 HTTP、Socket 或 EventLoop。
+
+## 12. EchoPlugin
+
+operation：`echo`，`mock=false`。
+
+严格输入：
+
+```json
+{"payload": null}
+```
+
+input 必须是 object，必须且只能有 `payload`。payload 可为 null、boolean、有符号/
+无符号整数、有限浮点数、string、array 或 object，包括 binary-safe string。成功输出
+是 payload 的独立副本，不添加 operation envelope；operation 已由 TaskSnapshot 保存。
+例如：
+
+```json
+null
+```
+
+插件不修改输入；返回后修改调用方 input 不影响结果。non-finite、discarded 和
+non-JSON binary 由 Manager 的统一输入校验拒绝。输出仍必须通过统一 output limits。
+插件不做 I/O、不访问网络/文件、不生成随机值或时间戳。
+
+## 13. MockVisionPlugin
+
+operation：`mock_vision.detect`，metadata `mock=true`，description 明确“no real
+inference”。
+
+输入：
 
 ```json
 {
-  "plugins": {
-    "echo": {
-      "enabled": true
-    },
-    "mock_vision": {
-      "enabled": true,
-      "mock_delay_ms": 200,
-      "default_weld_type": "straight"
-    }
-  }
+  "image_id": "demo-001",
+  "width": 640,
+  "height": 480,
+  "confidence_threshold": 0.5
 }
 ```
 
 规则：
 
-- `enabled` 由核心读取。
-- 其余对象原样交给对应插件，但插件必须进行类型、范围和未知字段校验。
-- `mock_delay_ms` 设置合理上限，不能用超大数占满 worker。
-- 客户端不能覆盖插件配置。
-- 配置对象在 initialize 后视为不可变。
+- object only，未知字段拒绝；
+- image_id 必填 string，1—128 bytes，无控制字符；
+- width/height 必填严格整数，不接受 bool/float/string/null，范围 1—16384；
+- threshold 可选，默认 0.5，必须为 finite number 且在 `[0,1]`；
+- 不接受 path 字段，不读取 image_id 指向的任何资源；
+- 不使用 OpenCV、PCL、TensorRT、CUDA、GPU、相机或模型。
 
-## 8. EchoPlugin
+固定 mock confidence 为 0.93；threshold ≤ 0.93 返回一个按 width/height 整数规则生成
+的 `weld_seam` bbox，否则 detections 为空。结果无随机数、时间戳或调用顺序依赖：
 
-目的：验证 Task → ThreadPool → Plugin → Result 全链路。
+```json
+{
+  "mock": true,
+  "operation": "mock_vision.detect",
+  "image_id": "demo-001",
+  "image_size": {"width": 640, "height": 480},
+  "detections": []
+}
+```
 
-设计：
+`mock: true` 不可关闭。该结果仅验证框架任务流、状态机和适配，不代表准确率、性能、
+production readiness 或真实检测，不应直接驱动机器人。
 
-- 名称：`echo`
-- task type：`echo`
-- 无外部依赖、无睡眠、无文件访问
-- 输入必须是 JSON object
-- 输出把输入置于 `echo` 字段，并加入 `plugin: "echo"`
-- 并发安全：无共享可变状态
+## 14. 并发契约
 
-它是框架测试插件，不是工业能力。
+- Frozen Manager、Adapter、Echo、MockVision 支持并发调用；
+- Manager 锁只保护 registry 状态和 handle copy，不覆盖 plugin validate/execute；
+- 内置插件无共享可变状态，validate/execute 同时运行仍保持确定性；
+- TaskManager 不串行 validator/handler；
+- 每个 TaskRequest 和结果独立，不依赖随机数、当前时间、线程局部状态或调用顺序；
+- 非协作未来插件仍可能延迟 TaskManager shutdown；本阶段没有强制终止。
 
-## 9. MockVisionPlugin
+## 15. 已验证测试
 
-目的：展示工业视觉任务的结构化契约，但不执行真实算法。
+Plugin System 共 92 项：
 
-设计：
+- PluginLimits 6
+- PluginMetadata 12
+- PluginManager 28
+- EchoPlugin 12
+- MockVisionPlugin 18
+- PluginTaskAdapter 16
 
-- 名称：`mock_vision`
-- task type：`weld_detect`
-- 输入字段：
-  - `point_cloud_path`：必填非空字符串，只作为模拟标识；
-  - `weld_type_hint`：可选受限枚举。
-- 不打开路径、不检查真实文件、不导入 PCL/TensorRT/CUDA。
-- 模拟延迟只来自服务端 `mock_delay_ms`，执行中分段检查 cancellation。
-- 输出固定包含：
-  - `"mock": true`
-  - `"plugin": "mock_vision"`
-  - 模拟 `detected/weld_type/start_point/end_point/confidence`
+Task Runtime 从 85 增至 97；除原 9 项 TaskValidator 回归外，新增 3 项通用 JSON
+结构边界测试。覆盖成功/错误、NotFound、
+标准/未知异常、通用校验顺序、ID/Repository/queue 不变、shutdown 屏障、并发 validator
+及锁边界，以及 bytes/depth/elements/string、discarded/non-finite。
 
-路径校验：
+Windows Debug/Release 都实际执行：
 
-- 限制 UTF-8 字节长度；
-- 拒绝 NUL、绝对路径、盘符、反斜杠和 `..` path segment；
-- 即使通过也不读取该路径；
-- 未来真实插件必须使用服务端对象 ID/受控数据目录，而不能直接信任客户端文件系统路径。
+```text
+Foundation       43
+HTTP Core        84
+Task Runtime     97
+Plugin System    92
+Total           316
+```
 
-真实性要求：
+并发用例使用 promise/future 屏障和有限 `wait_for`，没有 fixed sleep、detached
+thread、网络、文件读取、随机值或测试顺序依赖。当前还没有
+Phase 6 Linux PASS；workflow 已显式构建 plugin targets，必须在 commit/push 后用真实
+Ubuntu 24.04 Debug/Release 完整 CTest 和 smoke 封板。
 
-- `mock` 标志不能通过配置或输入关闭。
-- README、日志和 API 示例均称其为模拟结果。
-- 不报告精度、GPU 利用率或模型版本。
+## 16. 后续边界
 
-## 10. 错误分类
+未实现：
 
-| 插件错误 | 含义 | 任务状态 | HTTP 查询结果 |
-|---|---|---|---|
-| `PluginNotFound` | 未注册/disabled | 不创建任务 | 404 |
-| `PluginAlreadyRegistered` | 启动注册冲突 | 启动失败 | 不适用 |
-| `PluginInitializationFailed` | enabled 插件初始化失败 | 启动失败 | 不适用 |
-| `UnsupportedTaskType` | 插件不支持 task_type | 不创建任务 | 422 |
-| `PluginInputInvalid` | 快速 input schema 失败 | 不创建任务 | 422 |
-| `PluginExecutionFailed` | 插件显式失败/抛异常 | Failed | 结果接口返回失败 |
-| `PluginCancelled` | 协作取消 | Cancelled/Timeout，取决于先发生的状态 | 409/504 |
-| `PluginUnavailable` | 停止中或资源暂不可用 | 不创建任务/Failed | 503 |
+- 动态 `.so`/DLL、`dlopen`/`dlsym`/`LoadLibrary`
+- ABI 版本、目录发现、签名、热加载/卸载
+- HTTP Task/Plugin API 或 CLI 插件组合
+- timerfd、自动 timeout、取消/重试/优先级
+- 插件配置、initialize/shutdown
+- 真实图片/点云、TensorRT/PCL/GPU/机器人
 
-Phase 5 必须实现轻量 `validate_request(task_type, input)`，使确定性输入错误在排队前返回 422。只有依赖执行期资源才能发现的错误才会在任务被接受后转成 Failed。
-
-## 11. 日志与可观测性
-
-插件日志字段至少包含：
-
-- plugin name/version
-- task_id、request_id
-- task_type
-- lifecycle event（initialize/execute/shutdown）
-- duration（由框架测量）
-- outcome 和稳定 error code
-
-禁止记录：
-
-- 完整大输入/输出
-- 可能敏感的路径或凭据
-- 未清洗异常中包含的服务端目录
-
-未来 metrics 可按 plugin/task_type 统计队列、执行时间和错误，但 Phase 8 前不声称已有。
-
-## 12. 动态插件的未来方案
-
-动态加载不属于第一版。若将来启用：
-
-- 使用 `dlopen`/`dlsym` 的版本化 C ABI 工厂，例如 ABI version、create/destroy 函数。
-- 不把 nlohmann/json C++ 类型直接跨不受控编译器 ABI 边界；考虑序列化字符串或稳定 C 结构。
-- 校验插件 ABI、核心版本、名称和能力后再发布。
-- 处理库句柄生命周期：所有插件对象销毁后才能 `dlclose`。
-- 不支持服务运行中的热卸载，除非能证明没有 in-flight 调用。
-- 需要签名/来源/文件权限策略，不能扫描客户端可写目录。
-
-在这些能力实现并测试前，文档只能写“静态注册”。
-
-## 13. 真实工业插件预留
-
-未来候选：
-
-- PTV2 TensorRT VisionPlugin
-- PCL PostProcessPlugin
-- RobotControlPlugin
-- WeldWorkflowPlugin
-- AgentOrchestrationPlugin
-
-它们不得改变核心层依赖方向。尤其：
-
-- 模型和 GPU 上下文属于插件；
-- 机器人 SDK/网络协议属于 Robot 插件；
-- 工作流/Agent 只能通过 Task API 或插件服务接口组合，不进入 Reactor；
-- 高风险物理动作必须增加认证、授权、审计和安全状态机，不能复用当前 mock 安全假设。
+未来真实或不可信插件可能需要进程隔离、稳定 C ABI、资源配额和安全策略。当前
+C++ `try/catch` 只隔离语言异常，不隔离崩溃、死锁、无限循环或内存破坏。

@@ -3,7 +3,8 @@
 ## 1. 范围与状态
 
 Phase 4 HTTP 协议库状态保持 `PHASE_4_HTTP_PROTOCOL_COMPLETED`。Phase 5 总体状态为
-`PHASE_5_TASK_RUNTIME_COMPLETED`。可移植
+`PHASE_5_TASK_RUNTIME_COMPLETED`。Phase 6 当前为
+`PHASE_6_PLUGIN_SYSTEM_IMPLEMENTED_LINUX_VALIDATION_BLOCKED`。可移植
 `iaisf_http_core` 已在 Windows Debug/Release 各通过 84/84 HTTP Core 测试；
 最终 [Linux CI run 30539245789](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30539245789)
 的 Debug/Release 均为 239/239，其中 HTTP Core 84/84、Linux-only
@@ -13,8 +14,9 @@ HttpSession/HttpServer integration 16/16。Phase 5 最终
 端点集合。
 
 当前 CLI 不启动监听；`/health`、`/version` 是显式注册到 `HttpRouter` 后由
-`HttpServer` API 提供的能力。Phase 5 Task Runtime 不依赖 HTTP，后文任务 JSON API
-仍是 planned，不得当作当前端点；当前不存在 `/v1/tasks` 或 `/api/v1/tasks` 路由。
+`HttpServer` API 提供的能力。Task Runtime 和 Plugin System 不依赖 HTTP，后文任务
+JSON API 仍是 planned，不得当作当前端点；当前不存在 `/v1/tasks`、
+`/api/v1/tasks` 或 `/v1/plugins` 路由，CLI 也不加载插件。
 服务不提供 HTML、文件下载、任意路径读取、shell 或客户端代码执行。
 
 ## 2. HTTP 基线
@@ -350,52 +352,75 @@ Location: /api/v1/tasks/task_opaque
 
 ### 7.1 EchoPlugin
 
-支持 task type：`echo`。
+进程内 operation：`echo`。
 
-输入为任意 JSON object，输出：
+输入必须且只能包含 `payload`，payload 可为任意 JSON value：
 
 ```json
 {
-  "echo": {
+  "payload": {
     "message": "hello"
-  },
-  "plugin": "echo"
+  }
 }
 ```
 
-Echo 用于框架验证，不代表工业算法。
+输出：
+
+```json
+{
+  "message": "hello"
+}
+```
+
+Echo 直接返回 payload 的独立副本，不添加 operation 包装；operation 已在
+TaskSnapshot 中记录。Echo 仅用于框架验证，不代表工业算法。
 
 ### 7.2 MockVisionPlugin
 
-支持 task type：`weld_detect`。
+进程内 operation：`mock_vision.detect`。
 
 输入：
 
 ```json
 {
-  "point_cloud_path": "data/sample.pcd",
-  "weld_type_hint": "straight"
+  "image_id": "demo-001",
+  "width": 640,
+  "height": 480,
+  "confidence_threshold": 0.5
 }
 ```
 
-首版行为：
+Phase 6 行为：
 
-- `point_cloud_path` 只作为经过长度、NUL、绝对路径和 `..` 校验的模拟标识，不打开文件。
-- `weld_type_hint` 只允许文档列出的 mock 枚举。
-- 可根据服务端配置模拟有限延迟。
-- 输出始终包含 `mock: true` 和 `plugin: "mock_vision"`。
+- `image_id` 是受 byte limit 和控制字符约束的标识，不是路径；未知/path 字段拒绝。
+- width/height 是 1—16384 的严格整数；threshold 默认为 0.5，范围 `[0,1]`。
+- 固定 mock confidence 为 0.93，bbox 只按输入尺寸确定性生成。
+- 输出始终包含 `mock: true` 和 `operation: "mock_vision.detect"`。
+- 不读取图片/点云、不运行模型/GPU，不代表准确率或真实性能。
 
 输出：
 
 ```json
 {
   "mock": true,
-  "plugin": "mock_vision",
-  "detected": true,
-  "weld_type": "straight",
-  "start_point": [0.0, 0.0, 0.0],
-  "end_point": [100.0, 0.0, 0.0],
-  "confidence": 0.95
+  "operation": "mock_vision.detect",
+  "image_id": "demo-001",
+  "image_size": {
+    "width": 640,
+    "height": 480
+  },
+  "detections": [
+    {
+      "type": "weld_seam",
+      "confidence": 0.93,
+      "bbox": {
+        "x": 160,
+        "y": 160,
+        "width": 320,
+        "height": 48
+      }
+    }
+  ]
 }
 ```
 
@@ -476,3 +501,32 @@ Phase 5 只定义进程内 C++ API：
 
 第 6、7 节中的任务与插件 JSON 均继续属于 planned schema。只有后续阶段显式实现并
 测试 Router/TaskManager 适配后，才能把这些文档结构描述为可访问 API。
+
+## 12. Phase 6 进程内插件协议边界
+
+- `TaskRequest.operation` 是 canonical plugin operation；内置值为 `echo` 与
+  `mock_vision.detect`。
+- PluginManager 在 Configuring 时只允许 register/freeze；list、lookup、validate 和
+  execute 均返回 InvalidState 且不调用插件。freeze 幂等，Frozen 后目录稳定可并发读。
+- TaskManager 先执行通用 TaskLimits，再调用可选 TaskValidator；unknown operation、
+  schema error 或 validation exception 都在 TaskId 分配前失败。
+- Task/Plugin 输入分别受序列化 bytes、depth、elements 和 string/key bytes 限制；
+  discarded、nlohmann non-JSON binary、非法 UTF-8 与非有限浮点数 fail-closed。
+  null/array/string/number/bool 在通用层允许，具体 operation schema 再由插件决定。
+- 序列化 bytes 与 nlohmann/json 紧凑 `dump()` 精确一致，包括键、引号、转义、
+  braces/brackets、comma/colon、数字文本和 UTF-8 实际字节；计数不保存完整 dump，
+  首个超限字节会中止序列化。
+- PluginTaskAdapter handler 在 worker execute 前再次校验已拥有的 TaskRequest
+  快照；若同一插件的第二次校验结果变化，则固定 InternalError 且 execute 不会运行。
+- Adapter 生成的 validator/handler 只捕获 `shared_ptr<const PluginManager>`，不保活
+  Adapter 或 TaskManager；Manager 强持有 Plugin，整个所有权图无强引用环。
+- 成功 submit 后调用方修改或销毁原 operation/input 不影响 Repository 或 worker。
+- PluginManager 的 NotFound、InvalidArgument、ResourceExhausted 与泛化
+  InternalError 都是 C++ `ErrorCode`；所有消息受 PluginLimits byte limit，本阶段
+  未实现 HTTP 状态映射。
+- `PluginManager::execute` 对直接 C++ 调用也先验证输入。插件成功输出在返回或写入
+  Repository 前统一检查；超限输出为 ResourceExhausted，discarded/非法 UTF-8/
+  非有限输出为 InternalError，均使任务 Failed 且不保存半结果。
+- 插件异常、内部路径、errno、返回的内部 Error 文本和 `what()` 不进入 TaskSnapshot。
+- Plugin System API 可由 C++ 组合进 TaskManager，但当前 CLI、HttpRouter 和
+  HttpServer 都没有组合它；不得把第 6、7 节示例描述成已部署端点。

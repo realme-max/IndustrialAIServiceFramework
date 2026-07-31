@@ -24,9 +24,10 @@ class TaskManagerTestAccess;
  * queued repository record back. shutdown() closes admission, waits for all
  * admitted submissions, then drains accepted work and joins.
  *
- * The logger and handler dependencies must outlive this manager. A handler may
- * run concurrently on multiple workers, must be thread-safe, and must not
- * destroy this manager or request shutdown from a worker.
+ * The logger and externally referenced validator/handler dependencies must
+ * outlive this manager. Validators and handlers may run concurrently, must be
+ * thread-safe, and must not destroy this manager or request shutdown from a
+ * worker.
  */
 class TaskManager {
     struct ConstructionKey {
@@ -51,12 +52,19 @@ public:
         TaskLimits limits,
         ILogger& logger,
         TaskHandler handler);
+    [[nodiscard]] static Result<std::unique_ptr<TaskManager>> create(
+        ThreadPoolOptions pool_options,
+        TaskLimits limits,
+        ILogger& logger,
+        TaskValidator validator,
+        TaskHandler handler);
 
     TaskManager(
         ConstructionKey,
         std::unique_ptr<BoundedThreadPool> pool,
         TaskLimits limits,
         ILogger& logger,
+        TaskValidator validator,
         TaskHandler handler);
     ~TaskManager();
 
@@ -93,6 +101,7 @@ private:
     bool accepting_{true};
     std::size_t in_flight_submissions_{0};
 
+    TaskValidator validator_;
     TaskRepository repository_;
     TaskExecutor executor_;
     std::unique_ptr<BoundedThreadPool> pool_;

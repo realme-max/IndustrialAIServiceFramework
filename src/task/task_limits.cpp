@@ -9,6 +9,8 @@
 
 #include <nlohmann/json.hpp>
 
+#include "iaisf/core/json_value_limits.hpp"
+
 namespace iaisf::task {
 namespace {
 
@@ -16,6 +18,9 @@ constexpr std::int64_t kMaximumRepositoryCapacity = 1000000;
 constexpr std::int64_t kMaximumOperationBytes = 4096;
 constexpr std::int64_t kMaximumJsonBytes = 64 * 1024 * 1024;
 constexpr std::int64_t kMaximumErrorBytes = 64 * 1024;
+constexpr std::int64_t kMaximumJsonDepth = 256;
+constexpr std::int64_t kMaximumJsonElements = 1000000;
+constexpr std::int64_t kMaximumJsonStringBytes = 16 * 1024 * 1024;
 
 Result<std::size_t> checked_limit(
     const std::int64_t value,
@@ -29,24 +34,6 @@ Result<std::size_t> checked_limit(
     return Result<std::size_t>::success(static_cast<std::size_t>(value));
 }
 
-Result<std::size_t> serialized_size(const nlohmann::json& value) {
-    try {
-        return Result<std::size_t>::success(value.dump().size());
-    } catch (const nlohmann::json::exception&) {
-        return Result<std::size_t>::failure(make_error(
-            ErrorCode::InvalidArgument,
-            "JSON value cannot be serialized as valid UTF-8"));
-    } catch (const std::bad_alloc&) {
-        return Result<std::size_t>::failure(make_error(
-            ErrorCode::ResourceExhausted,
-            "unable to allocate JSON serialization storage"));
-    } catch (const std::length_error&) {
-        return Result<std::size_t>::failure(make_error(
-            ErrorCode::ResourceExhausted,
-            "JSON serialization exceeds the platform size limit"));
-    }
-}
-
 }  // namespace
 
 Result<TaskLimits> TaskLimits::create(
@@ -54,7 +41,10 @@ Result<TaskLimits> TaskLimits::create(
     const std::int64_t max_operation_bytes,
     const std::int64_t max_input_bytes,
     const std::int64_t max_result_bytes,
-    const std::int64_t max_error_bytes) {
+    const std::int64_t max_error_bytes,
+    const std::int64_t max_json_depth,
+    const std::int64_t max_json_elements,
+    const std::int64_t max_json_string_bytes) {
     const auto capacity = checked_limit(
         repository_capacity, kMaximumRepositoryCapacity, "repository capacity");
     if (!capacity) {
@@ -80,13 +70,35 @@ Result<TaskLimits> TaskLimits::create(
     if (!error) {
         return Result<TaskLimits>::failure(error.error());
     }
+    const auto depth =
+        checked_limit(max_json_depth, kMaximumJsonDepth, "JSON depth limit");
+    if (!depth) {
+        return Result<TaskLimits>::failure(depth.error());
+    }
+    const auto elements = checked_limit(
+        max_json_elements,
+        kMaximumJsonElements,
+        "JSON element limit");
+    if (!elements) {
+        return Result<TaskLimits>::failure(elements.error());
+    }
+    const auto string_bytes = checked_limit(
+        max_json_string_bytes,
+        kMaximumJsonStringBytes,
+        "JSON string limit");
+    if (!string_bytes) {
+        return Result<TaskLimits>::failure(string_bytes.error());
+    }
 
     return Result<TaskLimits>::success(TaskLimits{
         capacity.value(),
         operation.value(),
         input.value(),
         result.value(),
-        error.value()});
+        error.value(),
+        depth.value(),
+        elements.value(),
+        string_bytes.value()});
 }
 
 TaskLimits::TaskLimits(
@@ -94,12 +106,18 @@ TaskLimits::TaskLimits(
     const std::size_t max_operation_bytes,
     const std::size_t max_input_bytes,
     const std::size_t max_result_bytes,
-    const std::size_t max_error_bytes) noexcept
+    const std::size_t max_error_bytes,
+    const std::size_t max_json_depth,
+    const std::size_t max_json_elements,
+    const std::size_t max_json_string_bytes) noexcept
     : repository_capacity_(repository_capacity),
       max_operation_bytes_(max_operation_bytes),
       max_input_bytes_(max_input_bytes),
       max_result_bytes_(max_result_bytes),
-      max_error_bytes_(max_error_bytes) {}
+      max_error_bytes_(max_error_bytes),
+      max_json_depth_(max_json_depth),
+      max_json_elements_(max_json_elements),
+      max_json_string_bytes_(max_json_string_bytes) {}
 
 std::size_t TaskLimits::max_repository_tasks() const noexcept {
     return repository_capacity_;
@@ -119,6 +137,18 @@ std::size_t TaskLimits::max_result_bytes() const noexcept {
 
 std::size_t TaskLimits::max_error_message_bytes() const noexcept {
     return max_error_bytes_;
+}
+
+std::size_t TaskLimits::max_json_depth() const noexcept {
+    return max_json_depth_;
+}
+
+std::size_t TaskLimits::max_json_elements() const noexcept {
+    return max_json_elements_;
+}
+
+std::size_t TaskLimits::max_json_string_bytes() const noexcept {
+    return max_json_string_bytes_;
 }
 
 Result<void> TaskLimits::validate_request(const TaskRequest& request) const {
@@ -151,27 +181,33 @@ Result<void> TaskLimits::validate_request(const TaskRequest& request) const {
             "task operation contains invalid characters"));
     }
 
-    const auto input_size = serialized_size(request.input);
-    if (!input_size) {
-        return Result<void>::failure(input_size.error());
-    }
-    if (input_size.value() > max_input_bytes_) {
-        return Result<void>::failure(make_error(
-            ErrorCode::ResourceExhausted,
-            "task input exceeds the configured serialized byte limit"));
+    const auto input = validate_json_value(
+        request.input,
+        JsonValueLimits{
+            max_input_bytes_,
+            max_json_depth_,
+            max_json_elements_,
+            max_json_string_bytes_,
+        },
+        "task input");
+    if (!input) {
+        return Result<void>::failure(input.error());
     }
     return Result<void>::success();
 }
 
 Result<void> TaskLimits::validate_result(const nlohmann::json& result) const {
-    const auto result_size = serialized_size(result);
-    if (!result_size) {
-        return Result<void>::failure(result_size.error());
-    }
-    if (result_size.value() > max_result_bytes_) {
-        return Result<void>::failure(make_error(
-            ErrorCode::ResourceExhausted,
-            "task result exceeds the configured serialized byte limit"));
+    const auto valid = validate_json_value(
+        result,
+        JsonValueLimits{
+            max_result_bytes_,
+            max_json_depth_,
+            max_json_elements_,
+            max_json_string_bytes_,
+        },
+        "task result");
+    if (!valid) {
+        return Result<void>::failure(valid.error());
     }
     return Result<void>::success();
 }

@@ -12,6 +12,20 @@ Result<std::unique_ptr<TaskManager>> TaskManager::create(
     TaskLimits limits,
     ILogger& logger,
     TaskHandler handler) {
+    return create(
+        pool_options,
+        std::move(limits),
+        logger,
+        TaskValidator{},
+        std::move(handler));
+}
+
+Result<std::unique_ptr<TaskManager>> TaskManager::create(
+    const ThreadPoolOptions pool_options,
+    TaskLimits limits,
+    ILogger& logger,
+    TaskValidator validator,
+    TaskHandler handler) {
     if (!handler) {
         return Result<std::unique_ptr<TaskManager>>::failure(make_error(
             ErrorCode::InvalidArgument,
@@ -30,6 +44,7 @@ Result<std::unique_ptr<TaskManager>> TaskManager::create(
             std::move(pool).value(),
             std::move(limits),
             logger,
+            std::move(validator),
             std::move(handler));
         return Result<std::unique_ptr<TaskManager>>::success(std::move(manager));
     } catch (const std::bad_alloc&) {
@@ -48,8 +63,10 @@ TaskManager::TaskManager(
     std::unique_ptr<BoundedThreadPool> pool,
     TaskLimits limits,
     ILogger& logger,
+    TaskValidator validator,
     TaskHandler handler)
-    : repository_(std::move(limits)),
+    : validator_(std::move(validator)),
+      repository_(std::move(limits)),
       executor_(repository_, logger, std::move(handler)),
       pool_(std::move(pool)) {}
 
@@ -77,6 +94,28 @@ Result<TaskId> TaskManager::submit(const TaskRequest& request) {
 }
 
 Result<TaskId> TaskManager::submit_admitted(const TaskRequest& request) {
+    auto valid_request = repository_.limits().validate_request(request);
+    if (!valid_request) {
+        return Result<TaskId>::failure(std::move(valid_request).error());
+    }
+
+    if (validator_) {
+        try {
+            auto validated = validator_(request);
+            if (!validated) {
+                return Result<TaskId>::failure(std::move(validated).error());
+            }
+        } catch (const std::exception&) {
+            return Result<TaskId>::failure(make_error(
+                ErrorCode::InternalError,
+                "task validation failed"));
+        } catch (...) {
+            return Result<TaskId>::failure(make_error(
+                ErrorCode::InternalError,
+                "task validation failed"));
+        }
+    }
+
     auto created = repository_.create_queued(request);
     if (!created) {
         return created;
