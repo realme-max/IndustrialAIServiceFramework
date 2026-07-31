@@ -1,4 +1,5 @@
 #include <cstdint>
+#include <limits>
 #include <string>
 
 #include <gtest/gtest.h>
@@ -19,6 +20,9 @@ TEST(TaskLimitsTest, ProvidesValidatedDefaults) {
     EXPECT_EQ(limits.value().max_repository_tasks(), 100000U);
     EXPECT_EQ(limits.value().max_operation_bytes(), 256U);
     EXPECT_EQ(limits.value().max_input_bytes(), 1024U * 1024U);
+    EXPECT_EQ(limits.value().max_json_depth(), 64U);
+    EXPECT_EQ(limits.value().max_json_elements(), 100000U);
+    EXPECT_EQ(limits.value().max_json_string_bytes(), 1024U * 1024U);
 }
 
 TEST(TaskLimitsTest, RejectsZeroNegativeAndHardLimitValues) {
@@ -29,6 +33,10 @@ TEST(TaskLimitsTest, RejectsZeroNegativeAndHardLimitValues) {
     EXPECT_FALSE(TaskLimits::create(1, 1, 67108865));
     EXPECT_FALSE(TaskLimits::create(1, 1, 1, 67108865));
     EXPECT_FALSE(TaskLimits::create(1, 1, 1, 1, 65537));
+    EXPECT_FALSE(TaskLimits::create(1, 1, 1, 1, 1, 257));
+    EXPECT_FALSE(TaskLimits::create(1, 1, 1, 1, 1, 1, 1000001));
+    EXPECT_FALSE(
+        TaskLimits::create(1, 1, 1, 1, 1, 1, 1, 16777217));
 }
 
 TEST(TaskLimitsTest, RejectsEmptyWhitespaceAndControlOperations) {
@@ -104,6 +112,56 @@ TEST(TaskLimitsTest, BoundsExternalErrorMessagesWithoutLeakingPrefix) {
     ASSERT_TRUE(sanitized);
     EXPECT_EQ(sanitized.value().message, "####");
     EXPECT_EQ(original.message, "secret detail");
+}
+
+TEST(TaskLimitsTest, EnforcesJsonDepthElementAndStringLimits) {
+    const auto limits =
+        TaskLimits::create(8, 32, 1024, 1024, 32, 2, 3, 4).value();
+
+    EXPECT_TRUE(limits.validate_request(
+        TaskRequest{"op", {{"key", 1}, {"more", 2}}}));
+    EXPECT_FALSE(limits.validate_request(
+        TaskRequest{"op", {{"key", {{"nested", 1}}}}}));
+    EXPECT_FALSE(limits.validate_request(
+        TaskRequest{"op", nlohmann::json::array({1, 2, 3})}));
+    EXPECT_FALSE(limits.validate_request(
+        TaskRequest{"op", {{"key", "12345"}}}));
+    EXPECT_FALSE(limits.validate_result({{"12345", 1}}));
+}
+
+TEST(TaskLimitsTest, ExactStructuralLimitsAreInclusive) {
+    const auto limits =
+        TaskLimits::create(8, 32, 32, 32, 32, 2, 3, 4).value();
+    const nlohmann::json exact{{"key", "1234"}, {"more", 1}};
+
+    EXPECT_TRUE(limits.validate_request(TaskRequest{"op", exact}));
+    EXPECT_TRUE(limits.validate_result(exact));
+}
+
+TEST(TaskLimitsTest, RejectsDiscardedAndNonFiniteValues) {
+    const auto limits = TaskLimits::create().value();
+    const auto discarded = nlohmann::json::parse("not-json", nullptr, false);
+    const nlohmann::json infinity =
+        std::numeric_limits<double>::infinity();
+    const nlohmann::json binary =
+        nlohmann::json::binary({0x01U, 0x02U});
+
+    const auto discarded_input =
+        limits.validate_request(TaskRequest{"op", discarded});
+    const auto non_finite_input =
+        limits.validate_request(TaskRequest{"op", infinity});
+    const auto non_finite_result = limits.validate_result(infinity);
+    const auto binary_input =
+        limits.validate_request(TaskRequest{"op", binary});
+
+    ASSERT_FALSE(discarded_input);
+    ASSERT_FALSE(non_finite_input);
+    ASSERT_FALSE(non_finite_result);
+    ASSERT_FALSE(binary_input);
+    EXPECT_EQ(discarded_input.error().code, ErrorCode::InvalidArgument);
+    EXPECT_EQ(non_finite_input.error().code, ErrorCode::InvalidArgument);
+    EXPECT_EQ(non_finite_result.error().code, ErrorCode::InvalidArgument);
+    EXPECT_EQ(binary_input.error().code, ErrorCode::InvalidArgument);
 }
 
 }  // namespace

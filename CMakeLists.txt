@@ -51,6 +51,7 @@ add_library(
   src/app/application.cpp
   src/config/app_config.cpp
   src/core/error.cpp
+  src/core/json_value_limits.cpp
   src/logging/console_logger.cpp
   src/logging/log_level.cpp
 )
@@ -63,7 +64,7 @@ target_include_directories(
     "$<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>"
     "$<BUILD_INTERFACE:${IAISF_GENERATED_INCLUDE_DIR}>"
 )
-target_link_libraries(iaisf_core PRIVATE nlohmann_json::nlohmann_json)
+target_link_libraries(iaisf_core PUBLIC nlohmann_json::nlohmann_json)
 iaisf_enable_project_warnings(iaisf_core)
 
 add_library(
@@ -92,6 +93,33 @@ target_link_libraries(
     Threads::Threads
 )
 iaisf_enable_project_warnings(iaisf_task)
+
+add_library(
+  iaisf_plugin
+  STATIC
+  src/plugin/echo_plugin.cpp
+  src/plugin/mock_vision_plugin.cpp
+  src/plugin/plugin_limits.cpp
+  src/plugin/plugin_manager.cpp
+  src/plugin/plugin_metadata.cpp
+  src/plugin/plugin_task_adapter.cpp
+)
+add_library(iaisf::plugin ALIAS iaisf_plugin)
+target_compile_features(iaisf_plugin PUBLIC cxx_std_17)
+target_include_directories(
+  iaisf_plugin
+  PUBLIC
+    "$<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>"
+    "$<BUILD_INTERFACE:${IAISF_GENERATED_INCLUDE_DIR}>"
+)
+target_link_libraries(
+  iaisf_plugin
+  PUBLIC
+    iaisf::task
+    iaisf::core
+    nlohmann_json::nlohmann_json
+)
+iaisf_enable_project_warnings(iaisf_plugin)
 
 add_library(
   iaisf_http_core

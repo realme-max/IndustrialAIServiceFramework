@@ -3,7 +3,7 @@
 ## 1. 当前状态
 
 - 项目：IndustrialAIServiceFramework
-- 当前分支：`phase/5-task-runtime`
+- 当前分支：`phase/6-plugin-system`
 - Phase 0 提交：`5fbcec0 docs: complete phase 0 architecture design`
 - Phase 1 最终实现提交：`63b30cffcbe3e621af33664721b3675a647bd1a1`
 - Phase 2 起始 HEAD / main / origin/main：`6065d91b277c07ed04e64b3f08034788965e6ac1`
@@ -16,9 +16,10 @@
 - Phase 4 测试修复 / 最终验证提交：`0818ebf4f71366cc3cd2fe4e36e95fe667b687a5`
 - Phase 4 文档封板 / Phase 5 基线 / main / origin/main：`fe5b58446a14ebedf13978b0339f3ad0171f0ffa`
 - Phase 5 实现 / 最终验证提交：`79d3d4e89feb71595dc67d820f9a5398dcc814d4`
-- 当前阶段：Phase 5 Bounded Thread Pool and Task Runtime
-- 状态：`PHASE_5_TASK_RUNTIME_COMPLETED`
-- 日期：2026-07-30
+- Phase 5 文档封板 / Phase 6 基线 / main / origin/main：`b8e7ded21ce9b78d0d59e18785a4912356eb5e15`
+- 当前阶段：Phase 6 Static Algorithm Plugin System
+- 状态：`PHASE_6_PLUGIN_SYSTEM_IMPLEMENTED_LINUX_VALIDATION_BLOCKED`
+- 日期：2026-07-31
 - Phase 1 GitHub Actions run：[30508113122](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30508113122)
 - Phase 2 首次功能 GitHub Actions run：[30514521602](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30514521602)
 - Phase 2 最终零 warning GitHub Actions run：[30516007475](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30516007475)
@@ -28,15 +29,14 @@
 - Phase 5 最终 GitHub Actions run：[30547126540](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30547126540)
 - Phase 2 实现、warning 修复和文档封板：已合并 main
 - Phase 4 实现、修复与文档：已合并 main
-- Phase 5 实现提交已 commit/push；当前分支跟踪 `origin/phase/5-task-runtime`
-- 当前 HEAD / upstream：`79d3d4e89feb71595dc67d820f9a5398dcc814d4`
-- Phase 5C 本轮只更新八份文档，不 commit/push
+- Phase 5 已合并 main；当前 Phase 6 分支无 upstream
+- 当前 HEAD：`b8e7ded21ce9b78d0d59e18785a4912356eb5e15`
+- Phase 6 本轮实现/测试/文档均未 commit/push
 
-Phase 5B Windows Debug/Release 均为 212/212：Foundation 43、HTTP Core 84、
-Task Runtime 85。Release version/config smoke exit 0，项目编译 warning 为 0。
-最终 Linux CI Debug/Release 均为 324/324：Foundation 43、Reactor 45、TCP 51、
-HTTP Core 84、HTTP Integration 16、Task Runtime 85；task targets 实际构建，
-Release smoke 成功，项目源码和测试 warning 为 0。当前宿主没有 bash/WSL/Linux。
+Phase 6C 审计后 Windows Debug/Release 均为 316/316：Foundation 43、HTTP Core 84、
+Task Runtime 97、Plugin System 92。Release version/config smoke exit 0，项目
+源码和测试编译 warning 为 0。当前宿主没有 bash/WSL/Linux；最近真实 Linux CI
+仍是 Phase 5 的 324/324，不能验证当前未提交 Phase 6 改动。
 
 ## 2. Phase 1 文件
 
@@ -282,6 +282,60 @@ docs/linux_build.md
 没有修改 Reactor/TCP/HTTP 生产代码、AppConfig schema、Application CLI 或 Linux
 scripts；没有创建 HTTP task route、Plugin、timerfd/signalfd、异步日志或 AI 空壳。
 
+## 4.3 Phase 6 文件
+
+### 新建
+
+```text
+include/iaisf/core/json_value_limits.hpp
+include/iaisf/plugin/algorithm_plugin.hpp
+include/iaisf/plugin/echo_plugin.hpp
+include/iaisf/plugin/mock_vision_plugin.hpp
+include/iaisf/plugin/plugin_limits.hpp
+include/iaisf/plugin/plugin_manager.hpp
+include/iaisf/plugin/plugin_metadata.hpp
+include/iaisf/plugin/plugin_task_adapter.hpp
+src/plugin/echo_plugin.cpp
+src/plugin/mock_vision_plugin.cpp
+src/plugin/plugin_limits.cpp
+src/plugin/plugin_manager.cpp
+src/plugin/plugin_metadata.cpp
+src/plugin/plugin_task_adapter.cpp
+src/core/json_value_limits.cpp
+tests/plugin/test_echo_plugin.cpp
+tests/plugin/test_mock_vision_plugin.cpp
+tests/plugin/test_plugin_limits.cpp
+tests/plugin/test_plugin_manager.cpp
+tests/plugin/test_plugin_metadata.cpp
+tests/plugin/test_plugin_task_adapter.cpp
+```
+
+### 修改
+
+```text
+CMakeLists.txt
+tests/CMakeLists.txt
+.github/workflows/linux-ci.yml
+include/iaisf/task/task_types.hpp
+include/iaisf/task/task_limits.hpp
+include/iaisf/task/task_manager.hpp
+src/task/task_limits.cpp
+src/task/task_manager.cpp
+tests/task/test_task_manager.cpp
+README.md
+docs/architecture.md
+docs/development_plan.md
+docs/plugin_design.md
+docs/protocol.md
+docs/test_plan.md
+docs/stage_status.md
+docs/context_handoff.md
+docs/linux_build.md
+```
+
+没有修改 Reactor/TCP/HTTP 生产代码、AppConfig、Application CLI 或 Linux scripts；
+没有创建 HTTP Task API、动态加载、timerfd/signalfd、异步日志或真实 AI 代码。
+
 ## 5. CMake
 
 版本和标准：
@@ -314,6 +368,15 @@ iaisf_task (STATIC, portable)
 
 iaisf_task_tests (portable)
   PRIVATE -> iaisf::task
+  PRIVATE -> GTest::gtest / GTest::gtest_main / Threads::Threads
+
+iaisf_plugin (STATIC, portable)
+  PUBLIC -> iaisf::task
+  PUBLIC -> iaisf::core
+  PUBLIC -> nlohmann_json::nlohmann_json
+
+iaisf_plugin_tests (portable)
+  PRIVATE -> iaisf::plugin
   PRIVATE -> GTest::gtest / GTest::gtest_main / Threads::Threads
 
 iaisf_net (STATIC, Linux only)
@@ -1095,7 +1158,7 @@ aggregate sha256:
 Phase 4 开始、实现交付和 Phase 4C 封板前复核结果完全一致；Phase 5 开始、交付前
 和 Phase 5C 封板前再次复核为 62 个文件、59,240,225 字节，聚合 SHA-256 仍为
 `83AE7E469DEA30C860DEFD4D26CB313B7B3C87EFCD9387414741E152EE46CF27`。
-参考目录被 `.gitignore` 排除。
+Phase 6 开始与交付前复核也完全一致；参考目录被 `.gitignore` 排除。
 
 ## 17. Phase 5 Task Runtime 契约
 
@@ -1108,7 +1171,9 @@ Phase 4 开始、实现交付和 Phase 4C 封板前复核结果完全一致；Ph
 - `TaskId` 在线程安全 Repository 内单调生成；rollback/erase 后不复用，分配到
   `uint64_t` 最大值后永久返回 ResourceExhausted，不回绕。
 - TaskSnapshot 是独立副本；时间满足 created ≤ started ≤ finished。
-- TaskLimits 的 JSON 长度按 `dump()` 序列化 UTF-8 bytes；error 超限使用 `#` 泛化。
+- TaskLimits 校验 JSON depth/elements/string 与紧凑 UTF-8 serialized bytes；计数
+  stream 不保留整份 dump，discarded/non-finite/非法 UTF-8 fail-closed；error
+  超限使用 `#` 泛化。
 - TaskRepository 是 Succeeded/Failed/TimedOut 竞争的唯一裁决者，首个终态获胜。
 - TimedOut 后晚到 success/failure 返回 AlreadyTerminal，不覆盖 result/error；
   TimedOut 被 erase 后晚到完成返回 NotFound，同样计数并丢弃。
@@ -1136,10 +1201,71 @@ Phase 4 开始、实现交付和 Phase 4C 封板前复核结果完全一致；Ph
 - Phase 5 worker 不捕获或操作 TcpConnection、HttpSession、Channel、Socket、
   EventLoop 或 epoll；HTTP/Task completion adapter 尚未实现。
 
+## 17.1 Phase 6 Plugin System 契约
+
+- `PluginLimits` 使用有符号 factory，所有值 > 0、有硬上限、不 clamp；覆盖 registry、
+  metadata/error、input/output serialized bytes、JSON depth/elements/string 以及
+  capability count/name bytes。
+- `PluginMetadata` 是独立副本；operation/capability 只接受 lowercase ASCII
+  `a-z0-9._-`，不允许首尾点/连续点；capabilities 唯一，文本拒绝控制字符和非法 UTF-8。
+- `IAlgorithmPlugin` 只有 metadata/validate/execute；validate 必须快速、确定、重复、
+  无 I/O/外部副作用；同一实例 validate/execute 可同时运行，插件作者负责线程安全，
+  接口无网络/HTTP/Repository/文件/GPU 类型。
+- PluginManager 强持有 `shared_ptr<const IAlgorithmPlugin>`，禁止 copy/move；
+  注册只调用一次 metadata 并保存副本，operation 唯一。
+- Registry 为 Configuring→Frozen；register/freeze 在同一 mutex 线性化，freeze 幂等
+  不可逆。Configuring 只允许 register/freeze，find/list/validate/execute 均返回
+  InvalidState 且不调用插件；Frozen 后注册在 metadata 前快速拒绝，并发
+  lookup/list/validate/execute，调用插件前复制 handle 并释放 mutex。
+- 注册的 null/duplicate/capacity/invalid metadata/exception 都不改变 size；map
+  insertion 失败不留下半项。注册键必须在移动 metadata 前复制，避免参数求值顺序缺陷。
+- Unknown operation 使用 ErrorCode::NotFound；不通过 message 判断。
+- validation exception 固定为 `plugin validation failed`；execution exception 和
+  execute 返回的任意插件 Error 固定为 `plugin execution failed`，不泄露
+  `what()`/路径；全部对外 message 受 PluginLimits 限制。
+- `validate_json_value` 先有界遍历 JSON 结构，再用 counting stream 精确计算
+  nlohmann compact dump 的 UTF-8 输出 bytes，不生成 `dump()` 整文档副本；引号、
+  反斜杠、控制字符、UTF-8、object key 的转义均计入，首次超过上限立即中止。输入
+  discarded/non-JSON binary/非法 UTF-8/non-finite 为 InvalidArgument；容量为
+  ResourceExhausted；插件非法输出为 InternalError。
+- 公共 `PluginManager::execute` 不能绕过输入/plugin validation，成功输出在 Manager
+  返回和 Repository 写入前统一检查；失败不保存半结果。
+- TaskManager 旧 handler-only create 保留；新重载增加 TaskValidator。submit 顺序是
+  admission/in-flight → TaskLimits → validator → create_queued → try_submit/rollback。
+- validator 在 admission/Repository mutex 外运行，failure 不分配 ID/record/queue；
+  shutdown 等待 in-flight validator 完成，validator 可由多个 submitter 并发调用。
+- PluginTaskAdapter 只接受 Frozen Manager；validator 提交前校验，handler 对
+  worker-owned TaskRequest 再次校验。结果变化固定为 InternalError 且不调用 execute。
+  Adapter 强持有只读 Manager；生成的 validator/handler closure 也只强持有该
+  Manager，不持有 Adapter、TaskManager 或裸 `this`。TaskManager 保存 validator，
+  TaskExecutor 保存 handler，worker queue closure 只持非 owning Executor 指针、
+  TaskId 和请求副本；所有 worker join 并释放两个 closure 后 Manager/Plugin 可析构，
+  所有权图无回边、无 shared ownership cycle。
+- 成功 submit 前 Repository/closure 已拥有 operation/input snapshot；调用方修改或
+  销毁原 request、源字符串和 JSON 不影响已接收任务。
+- Echo operation=`echo`、mock=false，严格接收 `{"payload": value}` 并把 payload
+  的任意 JSON kind 原值复制为结果，不增加 `echo`/`operation` wrapper；MockVision
+  operation=`mock_vision.detect`、mock=true，严格 image_id/width/height/threshold。
+- MockVision 不接受路径字段、不读取图片/点云、不运行 OpenCV/PCL/TensorRT/GPU，
+  固定 confidence 0.93 和确定性 bbox 只用于框架验证，不代表准确率/性能。
+
+Windows Phase 6 实际结果：
+
+```text
+Debug:   Foundation 43 + HTTP Core 84 + Task Runtime 97 + Plugin System 92 = 316/316
+Release: Foundation 43 + HTTP Core 84 + Task Runtime 97 + Plugin System 92 = 316/316
+Release version/config smoke: exit 0
+project source/test compiler warnings: 0
+```
+
+Linux workflow 已显式加入 `iaisf_plugin`/`iaisf_plugin_tests`，但当前未提交改动没有
+真实 run，状态保持 validation blocked。未来完整 Linux 定义矩阵为 428 项
+（43+45+51+84+16+97+92），不能在 CI 前写 PASS。
+
 ## 18. 未实现
 
 - HTTP Task API、`/v1/tasks` 或 `/api/v1/tasks` 路由
-- PluginManager/Registry/Echo/MockVision
+- 动态 `.so`/DLL、插件发现、热加载/卸载、配置生命周期和进程隔离
 - timerfd/signalfd、自动 timeout、取消/重试/优先级
 - 异步日志、文件日志、轮转
 - 数据库、登录、HTML、TLS
@@ -1151,7 +1277,7 @@ Task Runtime API 已实现，但禁止把现有 AppConfig 字段解释为 CLI �
 
 ## 19. 当前阻塞和遗留
 
-1. Phase 1—5 无剩余验收阻塞；Phase 6 尚未开始。
+1. Phase 1—5 无剩余验收阻塞；Phase 6 只阻塞于当前 commit/push 后的真实 Linux CI。
 2. 默认 FetchContent 的首次 Linux 配置需要 GitHub 网络和 CA。
 3. 系统依赖模式尚未在 Linux 系统包环境验证。
 4. 本机没有 bash/WSL/Linux，不能执行 `bash -n` 或本地 Linux build/CTest。
@@ -1162,28 +1288,23 @@ Task Runtime API 已实现，但禁止把现有 AppConfig 字段解释为 CLI �
 8. 非协作 TaskHandler 会阻塞 worker 并延迟 TaskManager shutdown；没有安全强杀。
 9. Repository 终态不会自动清理；调用者必须显式 `erase_terminal`。
 
-## 20. Phase 6 入口
+## 20. Phase 7 入口
 
-Phase 6 尚未开始。Phase 5 Linux 封板后建议只包含：
+Phase 7 只能在 Phase 6 Linux 封板后开始，建议只包含：
 
 ```text
-IAlgorithmPlugin or equivalent static interface
-PluginMetadata / PluginManager
-explicit static registration
-fast validation before task submission
-EchoPlugin
-MockVisionPlugin with mandatory mock: true
-plugin exception isolation
-TaskHandler adapter
-plugin and Task Runtime unit tests
+TimerId / TimerQueue
+minimum heap
+timerfd EventLoop integration
+connection idle timeout
+task deadline and terminal race tests
 ```
 
-Phase 6 暂不包含：
+Phase 7 暂不包含：
 
 ```text
-dynamic .so
 HTTP Task API
-timerfd automatic timeout
+dynamic .so
 async logging
 real TensorRT/PCL/point-cloud/GPU/robot
 database
@@ -1192,12 +1313,12 @@ benchmark
 
 ## 21. Git 约束
 
-- 当前分支必须保持 `phase/5-task-runtime`。
+- 当前分支必须保持 `phase/6-plugin-system`。
 - 不 amend 或重写已有提交。
 - 本轮不 commit、push、创建 PR 或 merge。
 - build、FetchContent、compile_commands 和日志不能进入 Git。
 - 本轮不 commit/push；建议 commit：
 
 ```text
-docs: complete phase 5 validation record
+feat: implement static plugin system
 ```

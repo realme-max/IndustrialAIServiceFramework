@@ -318,31 +318,53 @@ feat: implement bounded task runtime
 
 ## 9. Phase 6：插件系统
 
-状态：**planned，未开始**。
+状态：**implemented + Phase 6C 契约/冻结/所有权终检完成；Linux validation blocked（2026-07-31）**。
 
 目标：通过静态注册插件把业务执行边界适配到现有 Task Runtime；本阶段不接入 HTTP。
 
 交付：
 
-- `IAlgorithmPlugin` 或等价静态接口、`PluginMetadata`、`PluginManager`
-- 显式静态注册、提交前快速无 I/O 校验、重复名/未知名/初始化失败处理
-- `EchoPlugin`
+- `iaisf_plugin` / `iaisf::plugin`、`PluginLimits`、`PluginMetadata`、`IAlgorithmPlugin`
+- `PluginManager` 显式静态注册、Configuring→Frozen、稳定排序 metadata 查询
+- 输入/输出 JSON bytes/depth/elements/string 统一容量审计和有界 metadata capabilities
+- TaskManager 可选 `TaskValidator`、提交前快速无 I/O 校验与 in-flight shutdown 屏障
+- `PluginTaskAdapter` 闭包只捕获只读 Manager，不保活 Adapter/TaskManager；
+  request snapshot、提交前校验和 execute 前防御性二次校验
+- `EchoPlugin` 严格接收单个 payload 并直接返回其独立副本
 - `MockVisionPlugin`，所有结果带 `mock: true`
-- 插件异常隔离、配置传递和既有 `TaskHandler` 适配
-- 插件与 Task Runtime 单元测试
+- metadata/validation/execution 标准和未知异常隔离、内部错误脱敏
+- 插件输出进入 Repository 前的统一校验、插件与 Task Runtime 并发/边界单元测试
 
 验收：
 
-- 可通过进程内 API 选择插件并适配为 TaskHandler。
-- 未知插件、错误 operation 和插件异常返回稳定错误。
-- MockVision 不读取点云、不依赖 GPU/PCL/TensorRT。
-- 核心 target 不链接具体插件依赖。
+- 已通过进程内 API 选择插件并适配为 TaskValidator/TaskHandler。
+- 未知 operation 在 TaskId 分配前返回 NotFound；错误输入和插件异常返回稳定错误。
+- register/freeze 使用同一线性化边界，Frozen 查找并发安全且不持锁调用插件。
+- Configuring 时 list/lookup/validate/execute 均稳定返回 InvalidState 且不调用插件。
+- JSON 精确按紧凑 `dump()` 字节计数；转义、键、UTF-8 和标点均计入，超限早停。
+- JSON discarded、非法 UTF-8、非有限数、超深/超多/超长和输出超限均有明确失败。
+- MockVision 不读取图片/点云、不依赖 OpenCV/GPU/PCL/TensorRT，输出确定性 mock。
+- task/core target 不反向依赖 plugin；plugin target 不依赖网络层。
 - 不实现 HTTP Task API、动态 `.so`、timerfd 自动超时、数据库或异步日志。
+
+当前验证：
+
+- Windows VS2022 x64 Debug/Release clean build 均成功，完整 CTest 均为 316/316：
+  Foundation 43、HTTP Core 84、Task Runtime 97、Plugin System 92。
+- Release `--version` 输出 `IndustrialAIServiceFramework 0.1.0`；示例配置 smoke
+  输出 `configuration validated for service IndustrialAIServiceFramework`，均 exit 0。
+- 项目源码与测试 MSVC warning 为 0；既有 vcpkg applocal 缺少 `pwsh.exe` 是非致命
+  环境诊断，不是编译 warning。
+- workflow 已显式构建 `iaisf_plugin`/`iaisf_plugin_tests`，但当前改动未 commit/push，
+  尚无对应真实 Linux Debug/Release CI，因此 Phase 6 不得标记 completed。
+
+Phase 7 状态：**未开始**；只有 Phase 6 对应提交完成真实 Linux Debug/Release CI
+后才允许进入。
 
 建议 commit message：
 
 ```text
-feat(plugin): complete phase 6 static plugin execution
+feat: implement static plugin system
 ```
 
 ## 10. Phase 7：定时器和任务超时

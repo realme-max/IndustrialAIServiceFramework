@@ -53,11 +53,13 @@ enum class TaskState {
 [[nodiscard]] bool is_terminal(TaskState state) noexcept;
 
 struct TaskRequest {
+    // TaskManager copies both fields before returning a successful submit().
     std::string operation;
     nlohmann::json input{nlohmann::json::object()};
 };
 
 using TaskHandler = std::function<Result<nlohmann::json>(const TaskRequest&)>;
+using TaskValidator = std::function<Result<void>(const TaskRequest&)>;
 
 struct TaskSnapshot {
     TaskId id;

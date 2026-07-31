@@ -3,9 +3,9 @@
 ## 1. 为什么必须使用 Linux
 
 IndustrialAIServiceFramework 的 Phase 2 Reactor、Phase 3 TCP Transport 和 Phase 4
-HTTP adapter 直接使用 epoll、eventfd、accept4 和 POSIX Socket；HTTP Core 与
-Phase 5 Task Runtime 本身可移植。Phase 5 已在 Windows 验证，并由包含 task targets
-的真实 Linux Debug/Release CI 完成封板。timerfd 与 signalfd 仍是后续计划。
+HTTP adapter 直接使用 epoll、eventfd、accept4 和 POSIX Socket；HTTP Core、
+Task Runtime 与 Phase 6 Plugin System 本身可移植。Phase 6 已在 Windows 验证，
+但当前改动还没有对应真实 Linux CI。timerfd 与 signalfd 仍是后续计划。
 Windows MinGW 或 MSVC 可以帮助发现一部分可移植 C++ 问题，但不能替代真实 Linux
 构建、测试和运行验证。
 
@@ -56,6 +56,8 @@ IAISF_BUILD_LINUX_NETWORK=ON  # Linux 默认；其他平台默认 OFF
 `IAISF_BUILD_LINUX_NETWORK=ON` 创建 Linux-only `iaisf_net` / `iaisf::net`、
 `iaisf_tcp` / `iaisf::tcp`、`iaisf_http` / `iaisf::http` 和对应测试。
 `iaisf_http_core` / `iaisf::http_core` 不依赖该选项，在 Windows/Linux 都构建。
+`iaisf_task` / `iaisf::task` 与 `iaisf_plugin` / `iaisf::plugin` 同样跨平台，
+不受该选项控制。
 该选项在非 Linux 平台显式开启会直接
 configure 失败，不提供空实现或静默关闭。
 
@@ -188,9 +190,8 @@ rm -rf -- build/linux-system-deps
 
 - `linux-debug`：记录环境，执行 Debug configure/build/CTest；
 - `linux-release`：执行 Release configure/build/CTest 和 CLI smoke；
-- Phase 4 workflow 在两个 job 的普通 build 后显式构建 `iaisf_http_core`、
-  `iaisf_http_core_tests`、`iaisf_http` 和 `iaisf_http_tests`，使 portable core 和
-  Linux adapter 参与情况都在日志中可见；
+- workflow 在两个 job 的普通 build 后显式构建全部 HTTP、Task 与 Plugin targets，
+  包括 `iaisf_plugin` 和 `iaisf_plugin_tests`，使跨平台插件层参与情况可见；
 - 两个 job 都通过构建脚本显式设置 `IAISF_BUILD_LINUX_NETWORK=ON`，并设置 15 分钟 job timeout；
 - 两个 job 都使用固定版本 FetchContent，不启用系统依赖模式；
 - 不使用 `continue-on-error`，不发布制品或部署。
@@ -441,4 +442,47 @@ timeout 或 `continue-on-error`。Debug/Release 项目源码和测试编译 warn
 
 ```text
 PHASE_5_TASK_RUNTIME_COMPLETED
+```
+
+## 15. Phase 6 Linux 验证入口
+
+Phase 6 新增跨平台 targets：
+
+```text
+iaisf_plugin
+iaisf_plugin_tests
+```
+
+Linux CI 的 Debug/Release 显式 target 列表已经加入二者，并继续构建 HTTP、Task
+及 Linux network targets，运行完整 CTest；Release 继续执行 version/config smoke。
+预期模块定义数来自当前源码：
+
+```text
+Foundation          43
+Reactor             45
+TCP                 51
+HTTP Core           84
+HTTP Integration    16
+Task Runtime        97
+Plugin System       92
+Total              428
+```
+
+这些定义数不能替代真实 Linux 结果。当前改动未 commit/push，没有 run URL、run ID、
+head/checkout SHA 或 Ubuntu 编译日志，故不得写 Linux PASS。Windows 实际结果是
+Debug/Release 316/316；最近可追溯 Linux run `30547126540` 仍只验证 Phase 5。
+
+Phase 6B/6C 增加并审计的 `validate_json_value` 是跨平台 core source；Task Runtime
+与 Plugin targets 均实际链接它。JSON byte 校验用 counting stream 精确匹配 nlohmann
+compact dump 的 UTF-8 输出（包含引号、反斜杠、控制字符和 key 转义），首次超限即
+中止，不保存额外整份 dump 文本。Adapter 生成的 validator/handler closure 只持有
+只读 PluginManager，不持有 Adapter 或 TaskManager；释放 runtime closure 后 Manager
+与 Plugin 可析构，不存在 shared ownership cycle。Linux CI 必须实际执行 Task
+Runtime 97 和 Plugin System 92，并确认项目源码/测试 warning 为 0；不能只根据上述
+定义数或 workflow target 列表推断。
+
+当前 Phase 6 状态：
+
+```text
+PHASE_6_PLUGIN_SYSTEM_IMPLEMENTED_LINUX_VALIDATION_BLOCKED
 ```

@@ -67,6 +67,22 @@ std::unique_ptr<TaskManager> make_manager(
     return created ? std::move(created).value() : nullptr;
 }
 
+std::unique_ptr<TaskManager> make_validating_manager(
+    QuietLogger& logger,
+    iaisf::task::TaskValidator validator,
+    iaisf::task::TaskHandler handler,
+    const ThreadPoolOptions pool = ThreadPoolOptions{2, 16},
+    TaskLimits limits = TaskLimits::create().value()) {
+    auto created = TaskManager::create(
+        pool,
+        std::move(limits),
+        logger,
+        std::move(validator),
+        std::move(handler));
+    EXPECT_TRUE(created);
+    return created ? std::move(created).value() : nullptr;
+}
+
 TEST(TaskManagerTest, RejectsEmptyHandler) {
     QuietLogger logger;
     auto created = TaskManager::create(
@@ -789,6 +805,269 @@ TEST(TaskManagerTest, DestructorWaitsForMultipleRunningHandlers) {
     destroyer.join();
 
     EXPECT_EQ(completed_count.load(std::memory_order_relaxed), 2);
+}
+
+TEST(TaskManagerValidatorTest, SuccessRunsBeforeTaskCreationAndExecution) {
+    QuietLogger logger;
+    std::atomic<int> validations{0};
+    std::atomic<int> executions{0};
+    auto manager = make_validating_manager(
+        logger,
+        [&validations](const TaskRequest&) {
+            validations.fetch_add(1, std::memory_order_relaxed);
+            return Result<void>::success();
+        },
+        [&executions](const TaskRequest&) {
+            executions.fetch_add(1, std::memory_order_relaxed);
+            return Result<nlohmann::json>::success({{"ok", true}});
+        });
+    ASSERT_NE(manager, nullptr);
+
+    const auto submitted = manager->submit(TaskRequest{"validated", {}});
+    ASSERT_TRUE(submitted);
+    ASSERT_TRUE(manager->shutdown());
+
+    EXPECT_EQ(validations.load(std::memory_order_relaxed), 1);
+    EXPECT_EQ(executions.load(std::memory_order_relaxed), 1);
+    EXPECT_EQ(
+        manager->get_snapshot(submitted.value()).value().state,
+        TaskState::Succeeded);
+}
+
+TEST(TaskManagerValidatorTest, FailurePreservesIdRepositoryAndQueueCapacity) {
+    QuietLogger logger;
+    auto manager = make_validating_manager(
+        logger,
+        [](const TaskRequest& request) {
+            if (request.operation == "reject") {
+                return Result<void>::failure(make_error(
+                    ErrorCode::InvalidArgument,
+                    "request rejected"));
+            }
+            return Result<void>::success();
+        },
+        [](const TaskRequest&) {
+            return Result<nlohmann::json>::success({});
+        },
+        ThreadPoolOptions{1, 1},
+        TaskLimits::create(1).value());
+    ASSERT_NE(manager, nullptr);
+
+    const auto rejected = manager->submit(TaskRequest{"reject", {}});
+    ASSERT_FALSE(rejected);
+    EXPECT_EQ(rejected.error().code, ErrorCode::InvalidArgument);
+    EXPECT_EQ(manager->repository_size(), 0U);
+    EXPECT_EQ(manager->pending_count(), 0U);
+
+    const auto accepted = manager->submit(TaskRequest{"accept", {}});
+    ASSERT_TRUE(accepted);
+    EXPECT_EQ(accepted.value().value(), 1U);
+    EXPECT_TRUE(manager->shutdown());
+}
+
+TEST(TaskManagerValidatorTest, PropagatesStructuredNotFoundWithoutTask) {
+    QuietLogger logger;
+    auto manager = make_validating_manager(
+        logger,
+        [](const TaskRequest&) {
+            return Result<void>::failure(make_error(
+                ErrorCode::NotFound,
+                "operation was not found"));
+        },
+        [](const TaskRequest&) {
+            return Result<nlohmann::json>::success({});
+        });
+    ASSERT_NE(manager, nullptr);
+
+    const auto rejected = manager->submit(TaskRequest{"missing", {}});
+
+    ASSERT_FALSE(rejected);
+    EXPECT_EQ(rejected.error().code, ErrorCode::NotFound);
+    EXPECT_EQ(manager->repository_size(), 0U);
+    EXPECT_EQ(manager->pending_count(), 0U);
+    EXPECT_TRUE(manager->shutdown());
+}
+
+TEST(TaskManagerValidatorTest, StandardExceptionUsesFixedInternalError) {
+    QuietLogger logger;
+    auto manager = make_validating_manager(
+        logger,
+        [](const TaskRequest&) -> Result<void> {
+            throw std::runtime_error("validator secret");
+        },
+        [](const TaskRequest&) {
+            return Result<nlohmann::json>::success({});
+        });
+    ASSERT_NE(manager, nullptr);
+
+    const auto rejected = manager->submit(TaskRequest{"throwing", {}});
+
+    ASSERT_FALSE(rejected);
+    EXPECT_EQ(rejected.error().code, ErrorCode::InternalError);
+    EXPECT_EQ(rejected.error().message, "task validation failed");
+    EXPECT_EQ(rejected.error().message.find("secret"), std::string::npos);
+    EXPECT_EQ(manager->repository_size(), 0U);
+    EXPECT_TRUE(manager->shutdown());
+}
+
+TEST(TaskManagerValidatorTest, UnknownExceptionUsesFixedInternalError) {
+    QuietLogger logger;
+    auto manager = make_validating_manager(
+        logger,
+        [](const TaskRequest&) -> Result<void> { throw 42; },
+        [](const TaskRequest&) {
+            return Result<nlohmann::json>::success({});
+        });
+    ASSERT_NE(manager, nullptr);
+
+    const auto rejected = manager->submit(TaskRequest{"throwing", {}});
+
+    ASSERT_FALSE(rejected);
+    EXPECT_EQ(rejected.error().code, ErrorCode::InternalError);
+    EXPECT_EQ(rejected.error().message, "task validation failed");
+    EXPECT_EQ(manager->repository_size(), 0U);
+    EXPECT_TRUE(manager->shutdown());
+}
+
+TEST(TaskManagerValidatorTest, GenericValidationRunsBeforeCustomValidator) {
+    QuietLogger logger;
+    std::atomic<int> validator_calls{0};
+    auto manager = make_validating_manager(
+        logger,
+        [&validator_calls](const TaskRequest&) {
+            validator_calls.fetch_add(1, std::memory_order_relaxed);
+            return Result<void>::success();
+        },
+        [](const TaskRequest&) {
+            return Result<nlohmann::json>::success({});
+        });
+    ASSERT_NE(manager, nullptr);
+
+    const auto rejected = manager->submit(TaskRequest{"   ", {}});
+
+    ASSERT_FALSE(rejected);
+    EXPECT_EQ(rejected.error().code, ErrorCode::InvalidArgument);
+    EXPECT_EQ(validator_calls.load(std::memory_order_relaxed), 0);
+    EXPECT_EQ(manager->repository_size(), 0U);
+    EXPECT_TRUE(manager->shutdown());
+}
+
+TEST(TaskManagerValidatorTest, ShutdownWaitsForInflightValidator) {
+    QuietLogger logger;
+    std::promise<void> validator_entered;
+    auto validator_entered_future = validator_entered.get_future();
+    std::promise<void> release_validator;
+    auto release_validator_future = release_validator.get_future().share();
+    auto manager = make_validating_manager(
+        logger,
+        [&validator_entered, release_validator_future](const TaskRequest&) {
+            validator_entered.set_value();
+            release_validator_future.wait();
+            return Result<void>::success();
+        },
+        [](const TaskRequest&) {
+            return Result<nlohmann::json>::success({});
+        });
+    ASSERT_NE(manager, nullptr);
+
+    auto submission = std::async(
+        std::launch::async,
+        [&manager] { return manager->submit(TaskRequest{"blocked", {}}); });
+    ASSERT_EQ(
+        validator_entered_future.wait_for(2s),
+        std::future_status::ready);
+    auto shutdown = std::async(
+        std::launch::async,
+        [&manager] { return manager->shutdown(); });
+    iaisf::task::TaskManagerTestAccess::wait_until_admission_closes(*manager);
+    EXPECT_EQ(shutdown.wait_for(0ms), std::future_status::timeout);
+
+    release_validator.set_value();
+    ASSERT_TRUE(submission.get());
+    EXPECT_TRUE(shutdown.get());
+}
+
+TEST(TaskManagerValidatorTest, ConcurrentSubmissionsRunValidatorConcurrently) {
+    QuietLogger logger;
+    std::atomic<int> active{0};
+    std::atomic<int> maximum_active{0};
+    std::promise<void> all_entered;
+    auto all_entered_future = all_entered.get_future();
+    std::promise<void> release;
+    auto release_future = release.get_future().share();
+    auto manager = make_validating_manager(
+        logger,
+        [&active, &maximum_active, &all_entered, release_future](
+            const TaskRequest&) {
+            const int current =
+                active.fetch_add(1, std::memory_order_relaxed) + 1;
+            int observed = maximum_active.load(std::memory_order_relaxed);
+            while (current > observed &&
+                   !maximum_active.compare_exchange_weak(
+                       observed,
+                       current,
+                       std::memory_order_relaxed)) {
+            }
+            if (current == 3) {
+                all_entered.set_value();
+            }
+            release_future.wait();
+            active.fetch_sub(1, std::memory_order_relaxed);
+            return Result<void>::success();
+        },
+        [](const TaskRequest&) {
+            return Result<nlohmann::json>::success({});
+        },
+        ThreadPoolOptions{3, 3});
+    ASSERT_NE(manager, nullptr);
+
+    std::array<std::future<Result<iaisf::task::TaskId>>, 3> submissions{
+        std::async(
+            std::launch::async,
+            [&manager] { return manager->submit(TaskRequest{"one", {}}); }),
+        std::async(
+            std::launch::async,
+            [&manager] { return manager->submit(TaskRequest{"two", {}}); }),
+        std::async(
+            std::launch::async,
+            [&manager] { return manager->submit(TaskRequest{"three", {}}); }),
+    };
+    ASSERT_EQ(all_entered_future.wait_for(2s), std::future_status::ready);
+    EXPECT_EQ(maximum_active.load(std::memory_order_relaxed), 3);
+    release.set_value();
+    for (auto& submission : submissions) {
+        EXPECT_TRUE(submission.get());
+    }
+    EXPECT_TRUE(manager->shutdown());
+}
+
+TEST(TaskManagerValidatorTest, ValidatorRunsOutsideManagerAndRepositoryLocks) {
+    QuietLogger logger;
+    TaskManager* observed_manager = nullptr;
+    std::atomic<bool> inspected{false};
+    auto manager = make_validating_manager(
+        logger,
+        [&observed_manager, &inspected](const TaskRequest&) {
+            const bool accepting = observed_manager->accepting();
+            const auto repository_size = observed_manager->repository_size();
+            inspected.store(
+                accepting && repository_size == 0U,
+                std::memory_order_relaxed);
+            return Result<void>::success();
+        },
+        [](const TaskRequest&) {
+            return Result<nlohmann::json>::success({});
+        });
+    ASSERT_NE(manager, nullptr);
+    observed_manager = manager.get();
+
+    auto submission = std::async(
+        std::launch::async,
+        [&manager] { return manager->submit(TaskRequest{"inspect", {}}); });
+    ASSERT_EQ(submission.wait_for(2s), std::future_status::ready);
+    EXPECT_TRUE(submission.get());
+    EXPECT_TRUE(inspected.load(std::memory_order_relaxed));
+    EXPECT_TRUE(manager->shutdown());
 }
 
 }  // namespace

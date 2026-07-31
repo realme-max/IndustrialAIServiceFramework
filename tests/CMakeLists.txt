@@ -81,6 +81,34 @@ set_tests_properties(
     TIMEOUT 10
 )
 
+add_executable(
+  iaisf_plugin_tests
+  plugin/test_echo_plugin.cpp
+  plugin/test_mock_vision_plugin.cpp
+  plugin/test_plugin_limits.cpp
+  plugin/test_plugin_manager.cpp
+  plugin/test_plugin_metadata.cpp
+  plugin/test_plugin_task_adapter.cpp
+)
+target_compile_features(iaisf_plugin_tests PRIVATE cxx_std_17)
+target_link_libraries(
+  iaisf_plugin_tests
+  PRIVATE
+    iaisf::plugin
+    GTest::gtest
+    GTest::gtest_main
+    Threads::Threads
+)
+iaisf_enable_project_warnings(iaisf_plugin_tests)
+
+gtest_add_tests(TARGET iaisf_plugin_tests TEST_LIST IAISF_PLUGIN_TESTS)
+set_tests_properties(
+  ${IAISF_PLUGIN_TESTS}
+  PROPERTIES
+    LABELS "unit;plugin"
+    TIMEOUT 10
+)
+
 if(TARGET iaisf_net)
   add_executable(
     iaisf_net_tests

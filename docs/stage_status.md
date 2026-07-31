@@ -3,25 +3,25 @@
 ## 当前结论
 
 ```text
-PHASE_5_TASK_RUNTIME_COMPLETED
+PHASE_6_PLUGIN_SYSTEM_IMPLEMENTED_LINUX_VALIDATION_BLOCKED
 ```
 
-- 当前阶段：Phase 5 Bounded Thread Pool and Task Runtime
-- 实现状态：跨平台 Task Runtime 已实现、提交并完成最终 Linux 验证
-- Windows 验证：Visual Studio 2022 x64 Debug/Release 均为 212/212（Foundation 43 + HTTP Core 84 + Task Runtime 85）
-- Linux CI 验证：Debug/Release 均为 324/324（Task Runtime 85/85），项目源码和测试 warning 为 0
-- 日期：2026-07-30（Asia/Shanghai）
-- 下一阶段：Phase 6 插件系统；尚未开始
+- 当前阶段：Phase 6 Static Algorithm Plugin System
+- 实现状态：静态插件系统、TaskValidator/Task Runtime 适配和 Phase 6C 最终契约审计已完成，尚未 commit/push
+- Windows 验证：Visual Studio 2022 x64 Debug/Release 均为 316/316（Foundation 43 + HTTP Core 84 + Task Runtime 97 + Plugin System 92）
+- Linux CI 验证：当前改动没有对应真实 run；最近 Phase 5 CI 324/324 不能替代 Phase 6 验证
+- 日期：2026-07-31（Asia/Shanghai）
+- 下一阶段：Phase 7 定时器与任务超时；必须先完成 Phase 6 Linux CI 封板
 
-Phase 5 已实现固定有界线程池、Task 值类型与限制、线程安全 Repository、Executor 和
-Manager；`iaisf_server` 仍不启动监听，也没有 Task HTTP API。插件、自动超时、
-定时器和异步日志未实现。
+Phase 6 已实现显式静态注册、Frozen 并发 registry、Echo/MockVision、异常隔离及
+TaskValidator/PluginTaskAdapter；`iaisf_server` 仍不启动监听、不加载插件，也没有
+Task HTTP API。动态插件、自动超时、定时器和异步日志未实现。
 
 ## Git 状态
 
 | 项目 | 结果 |
 |---|---|
-| 当前分支 | `phase/5-task-runtime` |
+| 当前分支 | `phase/6-plugin-system` |
 | Phase 0 提交 | `5fbcec0 docs: complete phase 0 architecture design` |
 | Phase 1 最终实现提交 | `63b30cffcbe3e621af33664721b3675a647bd1a1` |
 | Phase 2 起始 HEAD / main / origin/main | `6065d91b277c07ed04e64b3f08034788965e6ac1` |
@@ -34,11 +34,13 @@ Manager；`iaisf_server` 仍不启动监听，也没有 Task HTTP API。插件�
 | Phase 4 HTTP 实现提交 | `9b87fdb8804ee37a8cf3b87a7b9193a3130b85d3` |
 | Phase 4 测试修复 / 最终验证提交 | `0818ebf4f71366cc3cd2fe4e36e95fe667b687a5` |
 | Phase 4 文档封板 / Phase 5 基线 / main / origin/main | `fe5b58446a14ebedf13978b0339f3ad0171f0ffa` |
-| Phase 5 实现 / 最终验证提交 / 当前 HEAD / upstream | `79d3d4e89feb71595dc67d820f9a5398dcc814d4` |
+| Phase 5 实现 / 最终验证提交 | `79d3d4e89feb71595dc67d820f9a5398dcc814d4` |
 | Phase 5 最终 Linux CI | [run 30547126540](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30547126540) |
+| Phase 5 文档封板 / Phase 6 基线 / main / origin/main / 当前 HEAD | `b8e7ded21ce9b78d0d59e18785a4912356eb5e15` |
+| Phase 6 upstream | 当前分支未配置 upstream |
 | origin | `https://github.com/realme-max/IndustrialAIServiceFramework.git` |
 | Phase 3 开始时工作区 | clean |
-| Phase 5C 本轮 Git 操作 | 仅产生八份文档 diff；未 commit/push |
+| Phase 6 本轮 Git 操作 | 产生实现、测试、构建和九份文档 diff；未 commit/push |
 
 本阶段没有 amend、reset、stash、rebase、merge、commit、push 或修改 origin。
 
@@ -52,7 +54,7 @@ Manager；`iaisf_server` 仍不启动监听，也没有 Task HTTP API。插件�
 | 3 | TCP Transport Layer | completed | Debug/Release 138/138；Foundation 43、Reactor 45、TCP 50 |
 | 4 | HTTP 协议与健康路由 | completed | Windows 127/127；Linux Debug/Release 239/239 |
 | 5 | 线程池与任务系统 | completed | Windows Debug/Release 212/212；Linux Debug/Release 324/324，Task Runtime 85/85 |
-| 6 | 插件系统 | planned | 未开始 |
+| 6 | 插件系统 | implemented / Linux validation blocked | Windows Debug/Release 316/316；Phase 6C 审计完成，尚无当前提交 Linux CI |
 | 7 | 定时器与任务超时 | planned | 未开始 |
 | 8 | 异步日志与配置扩展 | planned | 未开始 |
 | 9 | 压力测试与工程完善 | planned | 未开始 |
@@ -674,6 +676,77 @@ IndustrialAIServiceFramework 0.1.0
 timeout 或 `continue-on-error`。当前宿主仍没有本地 Linux/WSL；上述结论来自可追溯
 CI，不宣称本机执行了 Linux build。
 
+## Phase 6 Static Plugin System 实现与验证
+
+### Targets 与边界
+
+- `iaisf_plugin` / `iaisf::plugin` 是跨平台静态库，PUBLIC 依赖 task/core/json，
+  不依赖 net/tcp/http。
+- `iaisf_plugin_tests` 是跨平台 `unit;plugin` target，共 92 项。
+- Task Runtime 新增可选 TaskValidator 与通用 JSON 结构边界，Task tests 由 85 增至 97。
+- Linux workflow Debug/Release 均显式构建 `iaisf_plugin` 和 `iaisf_plugin_tests`，
+  保留完整 CTest 与 Release smoke。
+
+### 实现契约
+
+- PluginLimits 对 registry/metadata/error、input/output bytes、JSON depth/elements/string
+  和 capabilities 设经 factory 验证的硬上限，不 clamp。
+- PluginMetadata 是独立值，operation/capability 使用 canonical lowercase ASCII，
+  capability 列表有数量、字节和去重约束。
+- PluginManager 强持有 const plugin shared handle，Configuring 阶段只允许注册和
+  freeze；find/list/validate/execute 均返回 InvalidState 且不调用插件。
+  register/freeze 在同一 mutex 上线性化，Frozen 后永久只读；不持 registry mutex
+  调用 plugin。
+- 注册只调用一次 metadata；null、duplicate、capacity、非法 metadata 或异常失败
+  不改变 registry。list 返回稳定排序副本。
+- TaskManager 在 in-flight submission 内、TaskId 分配前执行通用校验和可选 validator；
+  validator 在 Manager/Repository mutex 外运行，shutdown 等待其完成。
+- 通用 JSON 审计有界遍历结构，并以 nlohmann compact dump 的精确 UTF-8 输出字节
+  计数；引号、反斜杠、控制字符和 object key 转义均计入，超过上限立即中止且不创建
+  `dump()` 整文档副本。discarded、非法 UTF-8、non-finite 和全部容量边界有测试。
+- `PluginManager::execute` 的直接调用也不能绕过输入/plugin validation；成功输出在
+  Repository 前统一校验，超限不会留下半结果。
+- Adapter 只接受 Frozen Manager；validator/handler closure 只强持有只读 Manager，
+  不持有 Adapter 或 TaskManager。worker 对 owned request snapshot 再次校验；结果
+  变化固定 InternalError 且不调用 execute。TaskManager/TaskExecutor 释放 closure 后，
+  Manager 与插件可析构，不存在 shared ownership cycle。
+- unknown operation 返回 NotFound 且不创建 TaskId/record/queue entry。
+- validation/execution 异常和内部错误固定泛化，不把 `what()`、路径或原始输入写入
+  TaskSnapshot；TaskLimits 继续控制 result/error。
+- Echo 对合法请求返回 `payload` 的原值独立副本，不增加 wrapper 字段；Echo 和
+  MockVision 无共享可变状态。MockVision 永远 `mock: true`，不读取文件、
+  不运行模型或 GPU，结果不代表准确率、性能或 production readiness。
+
+### Windows 实际结果
+
+| 配置 | Foundation | HTTP Core | Task Runtime | Plugin System | CTest | 失败 |
+|---|---:|---:|---:|---:|---:|---:|
+| VS2022 x64 Debug | 43 | 84 | 97 | 92 | 316/316 | 0 |
+| VS2022 x64 Release | 43 | 84 | 97 | 92 | 316/316 | 0 |
+
+Release smoke：
+
+```text
+IndustrialAIServiceFramework 0.1.0
+2026-07-31T03:29:24.782Z [INFO] [Application] configuration validated for service IndustrialAIServiceFramework
+```
+
+Debug/Release clean build 均成功，项目源码和测试编译 warning 为 0。Visual Studio
+环境的既有 vcpkg applocal `pwsh.exe` 缺失诊断非致命且不是编译器 warning。
+新增并发测试使用 promise/future 屏障和有限 wait_for；没有 fixed sleep 或 detached
+thread。按当前定义，未来 Linux 完整矩阵应为 Foundation 43 + Reactor 45 + TCP 51 +
+HTTP Core 84 + HTTP Integration 16 + Task Runtime 97 + Plugin System 92 = 428，
+但必须以真实 CI 日志为准。
+
+### 当前 Linux 结论
+
+没有当前未提交 Phase 6 改动对应的真实 Linux CI。最近 run `30547126540` 只验证
+Phase 5 提交，不能推断 plugin targets、92 项测试或当前 warning 状态。因此保持：
+
+```text
+PHASE_6_PLUGIN_SYSTEM_IMPLEMENTED_LINUX_VALIDATION_BLOCKED
+```
+
 ## 参考工程保护
 
 任务开始基线：
@@ -682,13 +755,13 @@ CI，不宣称本机执行了 Linux build。
 |---:|---:|---|
 | 62 | 59,240,225 | `83AE7E469DEA30C860DEFD4D26CB313B7B3C87EFCD9387414741E152EE46CF27` |
 
-Phase 5 开始、交付前和 Phase 5C 封板前均复核为 62 个文件、59,240,225 字节和相同聚合 SHA-256。
+Phase 5 开始、交付前和 Phase 5C 封板前均复核为相同值；Phase 6 开始与交付前也再次一致。
 参考工程未被构建、格式化或添加到 Git。
 
 ## 未实现
 
 - Task HTTP API、`/v1/tasks` 或 `/api/v1/tasks` 实际路由
-- PluginManager、EchoPlugin、MockVisionPlugin
+- 动态 `.so`/DLL、插件发现、热加载/卸载和进程隔离
 - timerfd/signalfd、自动任务/连接超时和取消
 - 异步日志、文件日志和轮转
 - 数据库、用户、HTML、TLS、Docker、部署和 Release 发布
@@ -696,33 +769,30 @@ Phase 5 开始、交付前和 Phase 5C 封板前均复核为 62 个文件、59,2
 - sanitizer 和 `/proc` fd 长时间稳定性结果
 
 `worker_threads` 和 `task_queue_capacity` 仍只是 CLI/AppConfig 中经过校验的配置
-字段；Phase 5 TaskManager 由显式 C++ options 创建，当前 CLI 不创建 worker 或队列。
+字段；TaskManager/PluginManager 只由显式 C++ API 组合，当前 CLI 不创建 worker、
+队列或插件 registry。
 
 ## 当前阻塞与风险
 
 - Phase 1 没有剩余验收阻塞。
 - Phase 2 没有剩余验收阻塞。
 - Phase 3 没有剩余封板阻塞；本机仍无 Linux/WSL，当前 Linux 结论来自可追溯的 GitHub Actions run。
-- Phase 4 和 Phase 5 均已完成最终 Linux 封板。
+- Phase 4 和 Phase 5 均已完成最终 Linux 封板；Phase 6 等待当前提交的真实 Linux CI。
 - 默认 FetchContent 首次 Linux 配置需要 GitHub 网络和有效 CA 证书。
 - 系统依赖模式已设计但未在已安装 Linux 包环境验证。
 - Windows/NTFS 工作区不能可靠表达新 shell 脚本的 POSIX executable bit；workflow 会在运行时执行 `chmod +x scripts/*.sh`，人工 Linux 使用前仍应确认权限。
 - Visual Studio 本机 vcpkg applocal 集成的非致命 `pwsh.exe` 诊断不影响当前测试，但应与 Linux 结果分开记录。
 
-## Phase 6 建议入口
+## Phase 7 建议入口
 
-Phase 6 尚未开始。建议只实现 `IAlgorithmPlugin` 或等价静态接口、PluginMetadata、
-PluginManager 静态注册、提交前快速校验、EchoPlugin、明确 `mock: true` 的
-MockVisionPlugin、插件异常隔离、既有 TaskHandler 适配及单元测试。
-
-Phase 6 暂不包含动态 `.so`、HTTP Task API、timerfd 自动超时、异步日志、真实
-TensorRT/PCL/GPU、真实点云、机器人、Agent、数据库或 benchmark，也不允许插件
-操作网络对象。
+Phase 7 只建议实现最小堆 TimerQueue、timerfd、连接 idle timeout、任务 deadline
+与终态竞态测试；不得同时加入 HTTP Task API、动态插件、异步日志、真实
+TensorRT/PCL/GPU、机器人、Agent、数据库或 benchmark。
 
 ## 建议 commit
 
 本轮未执行 commit。建议：
 
 ```text
-docs: complete phase 5 validation record
+feat: implement static plugin system
 ```
