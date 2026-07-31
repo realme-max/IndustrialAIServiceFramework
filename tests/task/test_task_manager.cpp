@@ -241,6 +241,12 @@ TEST(TaskManagerTest, QueueRejectionRollsBackRepositoryRecord) {
 
     ASSERT_FALSE(rejected);
     EXPECT_EQ(rejected.error().code, ErrorCode::ResourceExhausted);
+    const auto typed_rejection =
+        manager->submit_with_outcome(TaskRequest{"fourth", {}});
+    EXPECT_FALSE(typed_rejection.result);
+    EXPECT_EQ(
+        typed_rejection.failure,
+        iaisf::task::TaskSubmitFailure::QueueCapacity);
     EXPECT_EQ(manager->repository_size(), 2U);
     EXPECT_EQ(
         manager->get_snapshot(iaisf::task::TaskId{3}).error().code,
@@ -269,10 +275,13 @@ TEST(TaskManagerTest, RepositoryCapacityRejectsWithoutEviction) {
     ASSERT_TRUE(first);
     ASSERT_EQ(started_future.wait_for(2s), std::future_status::ready);
 
-    auto second = manager->submit(TaskRequest{"second", {}});
+    auto second = manager->submit_with_outcome(TaskRequest{"second", {}});
 
-    ASSERT_FALSE(second);
-    EXPECT_EQ(second.error().code, ErrorCode::ResourceExhausted);
+    ASSERT_FALSE(second.result);
+    EXPECT_EQ(second.result.error().code, ErrorCode::ResourceExhausted);
+    EXPECT_EQ(
+        second.failure,
+        iaisf::task::TaskSubmitFailure::RepositoryCapacity);
     EXPECT_EQ(manager->repository_size(), 1U);
     release.set_value();
     EXPECT_TRUE(manager->shutdown());

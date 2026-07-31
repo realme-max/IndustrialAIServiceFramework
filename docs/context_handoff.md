@@ -3,7 +3,7 @@
 ## 1. 当前状态
 
 - 项目：IndustrialAIServiceFramework
-- 当前分支：`phase/6-plugin-system`
+- 当前分支：`phase/7-service-integration`
 - Phase 0 提交：`5fbcec0 docs: complete phase 0 architecture design`
 - Phase 1 最终实现提交：`63b30cffcbe3e621af33664721b3675a647bd1a1`
 - Phase 2 起始 HEAD / main / origin/main：`6065d91b277c07ed04e64b3f08034788965e6ac1`
@@ -19,8 +19,8 @@
 - Phase 5 文档封板 / Phase 6 基线 / main / origin/main：`b8e7ded21ce9b78d0d59e18785a4912356eb5e15`
 - Phase 6 功能提交：`66a606bb53bf8ed80b8efd6faf7c6529b5cd22d1`
 - Phase 6 warning 修复 / 最终验证提交：`853ccccca80cdc042b3d51eae52fe45566aa2b22`
-- 当前阶段：Phase 6 Static Algorithm Plugin System
-- 状态：`PHASE_6_PLUGIN_SYSTEM_COMPLETED`
+- 当前阶段：Phase 7 Service Integration and Task HTTP API
+- 状态：`PHASE_7_SERVICE_INTEGRATION_IMPLEMENTED_LINUX_VALIDATION_BLOCKED`
 - 日期：2026-07-31
 - Phase 1 GitHub Actions run：[30508113122](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30508113122)
 - Phase 2 首次功能 GitHub Actions run：[30514521602](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30514521602)
@@ -33,8 +33,10 @@
 - Phase 6 最终零 warning GitHub Actions run：[30604428624](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30604428624)
 - Phase 2 实现、warning 修复和文档封板：已合并 main
 - Phase 4 实现、修复与文档：已合并 main
-- Phase 5 已合并 main；当前 Phase 6 分支跟踪 `origin/phase/6-plugin-system`
-- 当前 HEAD / upstream：`853ccccca80cdc042b3d51eae52fe45566aa2b22`
+- Phase 6 已合并 main；当前 Phase 7 分支尚未 commit/push
+- 当前 Phase 7 基线 HEAD / main / origin/main：
+  `9f88e0726a5db1abfe2ebe999de68aef41f317fb`；当前分支未配置 upstream，Phase 7
+  工作区尚未 commit/push
 - Phase 6 实现与 warning 修复已 commit/push；Phase 6F 只产生九份文档 diff
 
 Phase 6C 审计后 Windows Debug/Release 均为 316/316：Foundation 43、HTTP Core 84、
@@ -44,6 +46,44 @@ Debug/Release 均为 428/428，但两个配置各有 3 条项目源码 warning �
 warning，因此只作为功能通过记录。warning 修复后的最终 push run `30604428624`
 同样完成 Debug/Release 428/428、Plugin System 92/92、Task Runtime 97/97 和 Release
 smoke，且项目源码和测试 warning 均为 0，Phase 6 已完成封板。
+
+## Phase 7 交接（当前工作区）
+
+- 基线 main/origin/main：`9f88e0726a5db1abfe2ebe999de68aef41f317fb`
+- 当前分支：`phase/7-service-integration`
+- 当前状态：`PHASE_7_SERVICE_INTEGRATION_IMPLEMENTED_LINUX_VALIDATION_BLOCKED`
+- 新目标：跨平台 `iaisf_task_api` / `iaisf::task_api`；Linux-only
+  `iaisf_service` / `iaisf::service`
+- Task API：`POST /v1/tasks`、`GET /v1/tasks/{id}`，加既有 `/health`、`/version`
+- TaskId：统一 `TaskId::parse/to_string`；`task-` + 最少 16 位十进制，完整
+  `uint64_t` 范围最长 20 位数字，字符串传输并严格 round-trip
+- Router：exact 优先；只支持一个不解码、不规范化的末段参数；统一 route hard limit
+- POST：严格 JSON，两字段 schema，提交前 Task/Plugin 校验，202 只表示 accepted
+- GET：只序列化安全 Snapshot；不返回 input、时间戳、线程或异常原文
+- 错误：400/404/405/413/415/422/500/503 稳定 JSON；405 保留 Allow
+- admission：TaskHttpApi atomic gate；TaskManager 自身 in-flight submission 屏障仍是
+  最终线性化边界
+- typed submit：`submit_with_outcome()` 与原 submit 共用同一事务，只增加
+  TaskSubmitFailure；HTTP 禁止按 message 分类
+- Service 所有权：PluginManager → Adapter → TaskManager → TaskApi → HttpServer；
+  销毁反向
+- start：静态插件注册/freeze、adapter、task runtime、route freeze、HTTP start
+- stop：`StoppingHttp -> StoppingTasks -> Stopped`；关闭 POST 后等待 HTTP stopped
+  及 Session/connection 清空，再阻塞 drain/join tasks；不停止外部 EventLoop
+- 202：只包含 task_id/status_url，不声称 queued
+- Failed GET：HTTP 200 + 安全固定 error；不返回 result 或插件/异常原文
+- 容量：ServiceOptions 在任何 worker/listener/Channel/route 前验证 pool、Task/Plugin
+  JSON、request/snapshot envelope、HTTP header/body/target 与 TCP hard maximum
+- 所有权：Router handler weak-own TaskHttpApi；TaskHttpApi 借用 Manager；Adapter
+  closure 只持有 PluginManager；无 Service 回环
+- Windows Debug/Release：370/370；Task API 46/46；Release smoke exit 0
+- Linux：Service 15 个 CTest 定义（参数展开 37 个 GoogleTest case）未执行；预计完整
+  CTest 497，但只能以真实 CI 为准；当前无 Phase 7 CI run
+- CLI：仍不启动线程池、插件 registry 或常驻 listener
+- 未实现：timerfd/signalfd、自动 timeout、cancel/retry/list、动态插件、真实 AI/GPU、
+  DB、异步日志和 benchmark
+- 下一步人工操作：审阅 diff，commit/push 后等待 exact commit 的 Linux Debug/Release
+  完整 CTest 与 Release smoke；通过前不得开始 Phase 8
 
 ## 2. Phase 1 文件
 
@@ -1326,15 +1366,15 @@ neutral、timeout、`continue-on-error` 或被隐藏的失败步骤。
 - benchmark、性能测试、真实 AI
 - sanitizer、benchmark 和 `/proc` fd 长时间稳定性统计
 
-Task Runtime API 已实现，但禁止把现有 AppConfig 字段解释为 CLI 已启动线程池，
-也禁止声称 Task API 可通过网络访问。
+Task Runtime 与可组合 Task HTTP API 已实现，但禁止把现有 AppConfig 字段解释为
+CLI 已启动线程池或 listener；网络访问只存在于显式构造 Linux Service 的调用方。
 
 ## 19. 当前阻塞和遗留
 
-1. Phase 1—6 无剩余验收阻塞；Phase 7 尚未开始。
+1. Phase 1—6 无剩余验收阻塞；Phase 7 等待 exact commit 的 Linux CI。
 2. 默认 FetchContent 的首次 Linux 配置需要 GitHub 网络和 CA。
 3. 系统依赖模式尚未在 Linux 系统包环境验证。
-4. 本机没有 bash/WSL/Linux，不能执行 `bash -n` 或本地 Linux build/CTest。
+4. 本机没有可用 WSL/Linux，不能执行本地 Linux build/CTest；只做 shell 静态检查。
 5. Windows/NTFS 不可靠保存 shell executable bit；workflow 会执行 `chmod +x scripts/*.sh`。
 6. 本机 Visual Studio vcpkg applocal 集成的非致命 `pwsh.exe` 诊断与代码无关。
 7. graceful shutdown 没有 timerfd deadline，非协作 peer 可能长期 Disconnecting；
@@ -1342,29 +1382,22 @@ Task Runtime API 已实现，但禁止把现有 AppConfig 字段解释为 CLI �
 8. 非协作 TaskHandler 会阻塞 worker 并延迟 TaskManager shutdown；没有安全强杀。
 9. Repository 终态不会自动清理；调用者必须显式 `erase_terminal`。
 
-## 20. Phase 7 入口
+## 20. Phase 8 入口
 
-Phase 6 已完成零 warning Linux 封板。Phase 7 尚未开始，建议只包含：
+Phase 7 只有在真实 Linux CI 对当前提交完成 Debug/Release 全量 CTest、Service
+loopback tests、Release smoke 和零项目 warning 后才能封板。之后 Phase 8 可规划：
 
 ```text
-Application composition of HttpServer / TaskManager / PluginManager
-static EchoPlugin and MockVisionPlugin registration
-POST /v1/tasks
-GET /v1/tasks/{id}
-GET /health
-GET /version
-stable queue-full / unknown-operation / validation mappings
-safe TaskSnapshot query
-testable startup and shutdown order
+timerfd connection idle timeout
+automatic task timeout arbitration
+signalfd-driven process shutdown integration
+bounded asynchronous logger and validated service configuration
 ```
 
-Phase 7 暂不包含：
+Phase 8 仍暂不包含：
 
 ```text
-timerfd / automatic task timeout / signalfd
-production CLI resident mode
 dynamic .so
-async logging
 real TensorRT/PCL/point-cloud/GPU/robot
 database
 benchmark
@@ -1372,12 +1405,12 @@ benchmark
 
 ## 21. Git 约束
 
-- 当前分支必须保持 `phase/6-plugin-system`。
+- 当前分支必须保持 `phase/7-service-integration`。
 - 不 amend 或重写已有提交。
 - 本轮不 commit、push、创建 PR 或 merge。
 - build、FetchContent、compile_commands 和日志不能进入 Git。
 - 本轮不 commit/push；建议 commit：
 
 ```text
-docs: complete phase 6 validation record
+feat: integrate task HTTP service
 ```

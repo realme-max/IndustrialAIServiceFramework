@@ -109,6 +109,32 @@ set_tests_properties(
     TIMEOUT 10
 )
 
+add_executable(
+  iaisf_task_api_tests
+  api/test_task_http_api.cpp
+)
+target_compile_features(iaisf_task_api_tests PRIVATE cxx_std_17)
+target_link_libraries(
+  iaisf_task_api_tests
+  PRIVATE
+    iaisf::task_api
+    GTest::gtest
+    GTest::gtest_main
+    Threads::Threads
+)
+iaisf_enable_project_warnings(iaisf_task_api_tests)
+
+gtest_add_tests(
+  TARGET iaisf_task_api_tests
+  TEST_LIST IAISF_TASK_API_TESTS
+)
+set_tests_properties(
+  ${IAISF_TASK_API_TESTS}
+  PROPERTIES
+    LABELS "unit;task_api"
+    TIMEOUT 10
+)
+
 if(TARGET iaisf_net)
   add_executable(
     iaisf_net_tests
@@ -188,6 +214,34 @@ if(TARGET iaisf_http)
     ${IAISF_HTTP_TESTS}
     PROPERTIES
       LABELS "integration;linux;http"
+      TIMEOUT 20
+  )
+endif()
+
+if(TARGET iaisf_service)
+  add_executable(
+    iaisf_service_tests
+    service/test_industrial_ai_service.cpp
+  )
+  target_compile_features(iaisf_service_tests PRIVATE cxx_std_17)
+  target_link_libraries(
+    iaisf_service_tests
+    PRIVATE
+      iaisf::service
+      GTest::gtest
+      GTest::gtest_main
+      Threads::Threads
+  )
+  iaisf_enable_project_warnings(iaisf_service_tests)
+
+  gtest_add_tests(
+    TARGET iaisf_service_tests
+    TEST_LIST IAISF_SERVICE_TESTS
+  )
+  set_tests_properties(
+    ${IAISF_SERVICE_TESTS}
+    PROPERTIES
+      LABELS "integration;linux;service"
       TIMEOUT 20
   )
 endif()

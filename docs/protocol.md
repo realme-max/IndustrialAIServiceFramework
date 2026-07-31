@@ -4,7 +4,7 @@
 
 Phase 4 HTTP 协议库状态保持 `PHASE_4_HTTP_PROTOCOL_COMPLETED`。Phase 5 总体状态为
 `PHASE_5_TASK_RUNTIME_COMPLETED`。Phase 6 当前为
-`PHASE_6_PLUGIN_SYSTEM_COMPLETED`。可移植
+`PHASE_7_SERVICE_INTEGRATION_IMPLEMENTED_LINUX_VALIDATION_BLOCKED`。可移植
 `iaisf_http_core` 已在 Windows Debug/Release 各通过 84/84 HTTP Core 测试；
 最终 [Linux CI run 30539245789](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30539245789)
 的 Debug/Release 均为 239/239，其中 HTTP Core 84/84、Linux-only
@@ -23,7 +23,7 @@ Release smoke 成功，但每个配置各有 3 条项目源码和 3 条项目测
 
 当前 CLI 不启动监听；`/health`、`/version` 是显式注册到 `HttpRouter` 后由
 `HttpServer` API 提供的能力。Task Runtime 和 Plugin System 不依赖 HTTP，后文任务
-JSON API 仍是 planned，不得当作当前端点；当前不存在 `/v1/tasks`、
+Phase 7 已提供可组合的 C++ Task HTTP API；当前 CLI 仍不启动 `/v1/tasks`、
 `/api/v1/tasks` 或 `/v1/plugins` 路由，CLI 也不加载插件。
 服务不提供 HTML、文件下载、任意路径读取、shell 或客户端代码执行。
 
@@ -223,7 +223,7 @@ Content-Type: application/json
 
 首版不在 health 中执行插件推理或阻塞式依赖探测。
 
-### 6.2 POST /api/v1/tasks
+### 6.2 POST /api/v1/tasks（未来规划，Phase 7 未实现此路径）
 
 提交异步任务。
 
@@ -259,7 +259,7 @@ Location: /api/v1/tasks/task_opaque
 ```json
 {
   "task_id": "task_opaque",
-  "status": "queued"
+  "status_url": "/api/v1/tasks/task_opaque"
 }
 ```
 
@@ -539,18 +539,41 @@ Phase 5 只定义进程内 C++ API：
 - Plugin System API 可由 C++ 组合进 TaskManager，但当前 CLI、HttpRouter 和
   HttpServer 都没有组合它；不得把第 6、7 节示例描述成已部署端点。
 
-## 13. Phase 7 协议建议（未实现）
+## 13. Phase 7 Task HTTP API（已实现，等待 Linux CI）
 
-Phase 7 只建议把现有组件组合为最小服务路径：
+已实现的组合服务路径：
 
 - `POST /v1/tasks`
 - `GET /v1/tasks/{id}`
 - `GET /health`
 - `GET /version`
 
-提交端点应把请求 JSON、plugin operation 和 `TaskManager::submit` 接通，queue full
-稳定映射为 503，unknown operation 与 validation error 返回安全、稳定响应；查询只
-序列化 `TaskSnapshot`。这仍是 planned，不是当前可访问 API。
+`POST /v1/tasks` 只接受根对象且只允许 `operation` 与 `input`；Content-Type 必须是
+`application/json` 或唯一的 UTF-8 charset 参数。成功返回 202，TaskId 始终是字符串。
+`GET /v1/tasks/{id}` 只接受 `task-` 加 16 位规范十进制形式，不接受符号、短形式、
+前导格式变体、溢出或额外路径段。查询只返回 id、operation、state，以及终态对应的
+result 或安全 error；input、时间戳、线程和异常原文不会出现在响应。
+
+稳定映射：语法/schema/TaskId 为 400，unknown operation/task 为 404，Content-Type
+为 415，插件输入校验为 422，输入超限为 413，queue/repository capacity 或停止中为
+503，未分类内部失败为泛化 500。Router 404/405 在该组合中也使用 JSON，405 保留
+`Allow`。所有 JSON 响应先完整序列化和容量验证，再交给 HTTP 层。
 
 该建议不包含 timerfd、自动任务超时、signalfd、生产 CLI 常驻模式、动态插件、
 GPU/真实 AI、数据库、异步日志或 benchmark。
+
+### 13.1 Phase 7B 最终协议约束
+
+- 202 body 仅为 `{"task_id":"...","status_url":"..."}`，不含 `state:"queued"`；
+  accepted 与 TaskState 是不同概念。
+- Failed task 是已存在资源的安全快照，因此 GET 返回 200 + `state:"failed"` + 固定
+  `internal_error`，不含 result 或插件原始文本。
+- stop 开始后 POST 为稳定 503 `service_stopping`；在 HttpServer 真正停止前，既有任务
+  GET 继续允许。queue/repository capacity 分别为 503 `queue_full` /
+  `repository_full`，均来自 typed submit outcome。
+- TaskId 使用统一 canonical parser/formatter：`task-` 前缀、最少 16 位十进制，完整
+  `uint64_t` 范围最长 20 位数字；符号、空白、大小写、非唯一前导零和溢出拒绝。
+- terminal parameter route 只消费一个非空末段；query 不参与 path 匹配，额外 segment
+  为 404，POST 到 status resource 为 405 并携带 `Allow: GET`。
+- `/health` 保持 `{"status":"ok"}`，只说明当前 HTTP/EventLoop 路径响应，不表示
+  GPU、模型、数据库、动态插件或 task capacity ready。

@@ -3,9 +3,9 @@
 ## 1. 文档状态
 
 - 项目：IndustrialAIServiceFramework
-- 阶段：Phase 6 Static Algorithm Plugin System
+- 阶段：Phase 7 Service Integration and Task HTTP API
 - 日期：2026-07-31
-- 状态：`PHASE_6_PLUGIN_SYSTEM_COMPLETED`；Windows Debug/Release 316/316，最终 Linux Debug/Release 428/428、Release smoke 与项目源码/测试零 warning 验证完成
+- 状态：`PHASE_7_SERVICE_INTEGRATION_IMPLEMENTED_LINUX_VALIDATION_BLOCKED`；跨平台 API 已通过 Windows 回归，Linux-only Service 仍等待真实 Linux CI
 - 目标平台：Linux x86_64，C++17
 
 本文同时记录已实现的 Phase 1 基础设施、Phase 2 Reactor、Phase 3 TCP、Phase 4 HTTP、Phase 5 Task Runtime 与 Phase 6 静态插件系统，以及后续目标边界。只有明确列入已实现边界的类才是当前能力。
@@ -670,10 +670,10 @@ flowchart LR
 
 ## 10. 请求数据流
 
-### 10.1 提交任务（planned HTTP adapter）
+### 10.1 提交任务（Phase 7 已实现的可组合 adapter）
 
-Phase 6 仍未实现本节 HTTP 路由。下图是未来网络组合方式，不是当前可调用路径；
-当前 C++ 组合可由 `PluginTaskAdapter` 为 `TaskManager` 提供 validator/handler。
+`TaskHttpApi` 已把 HttpRouter 与 TaskManager/PluginManager 接通；CLI 仍不自动构造
+该路径。`PluginTaskAdapter` 为 TaskManager 提供 validator/handler。
 
 ```mermaid
 sequenceDiagram
@@ -685,7 +685,7 @@ sequenceDiagram
     participant P as PluginManager/IPlugin
     participant R as TaskRepository
 
-    C->>L: POST /api/v1/tasks
+    C->>L: POST /v1/tasks
     L->>H: readable bytes
     H->>H: incremental parse + JSON validation
     H->>M: submit(plugin, task_type, input, timeout)
@@ -693,7 +693,7 @@ sequenceDiagram
     M->>R: insert Queued task
     M->>Q: bounded submit
     alt accepted
-        M-->>H: task_id + queued
+        M-->>H: task_id + status_url
         H-->>C: HTTP 202
         Q->>R: Queued -> Running
         Q->>P: revalidate + execute immutable TaskRequest
@@ -917,15 +917,63 @@ Phase 1 的 `Error` 保留公开字段以维持轻量值语义，因此调用者
 - 持久任务：以 `ITaskRepository` 抽象替换内存实现，但首版不引入数据库。
 - 可观测性：后续增加 metrics/tracing，不在当前阶段宣称已有。
 
-## 19. Phase 7 建议边界
+## 19. Phase 7 已实现边界
 
-Phase 6 已完成零 warning Linux 封板。Phase 7 尚未开始，建议只把现有
-`HttpServer`、`TaskManager` 和 `PluginManager` 组合进 Application，
-静态注册 Echo/MockVision，并实现最小 `POST /v1/tasks`、`GET /v1/tasks/{id}`、
-`GET /health`、`GET /version`。提交、查询、queue-full 503、unknown operation、
-validation error 及启动/停止顺序都必须有集成测试。
+跨平台 `iaisf_task_api` 依赖 `http_core`、`task` 与 `plugin`，负责严格 JSON/
+Content-Type 校验、`POST /v1/tasks`、末段参数形式的 `GET /v1/tasks/{id}`、
+稳定 JSON 错误和安全 `TaskSnapshot` 序列化。Router 仍不是通用动态路由器：只增加
+一个不解码、不规范化、只匹配一个非空末段的参数形式；exact route 始终优先。
 
-Phase 7 暂不包含 timerfd、自动任务超时、signalfd、生产 CLI 常驻模式、动态插件、
-GPU/真实 AI、数据库、异步日志或 benchmark。插件仍不能直接操作 TcpConnection、
-HttpSession、Channel、Socket 或 epoll；未来高风险或不可信真实插件应评估独立进程
-隔离，而不是假设 C++ 异常边界等同故障隔离。
+Linux-only `iaisf_service` 是显式组合根。所有权从长到短依次为
+`PluginManager -> PluginTaskAdapter -> TaskManager -> TaskHttpApi -> HttpServer`，
+销毁顺序相反。PluginManager 在暴露服务前完成 Echo/MockVision 静态注册和 freeze；
+TaskManager worker 不接触 EventLoop。停止顺序是关闭 Task API admission、停止 HTTP
+accept/session，再 drain/join TaskManager；外部 EventLoop 与 ILogger 不归 Service
+所有，也不会被 Service 停止。
+
+`ServiceOptions` 在启动线程和监听前校验 HTTP/TCP/Task/Plugin/API 跨容量关系，不做
+静默 clamp。`Created -> Running -> StoppingHttp -> StoppingTasks -> Stopped` 不允许 restart；start/stop
+必须在 EventLoop owner thread。CLI 仍不默认启动该服务。
+
+Phase 7 不包含 timerfd、自动 timeout、signalfd、取消/重试/列表/长轮询、生产 CLI
+常驻模式、动态插件、GPU/真实 AI、数据库、异步日志或 benchmark。
+
+HTTP adapter 不解析 Error message。TaskManager 的兼容 `submit()` 继续返回原
+Result；`submit_with_outcome()` 在同一线性化事务外附带 TaskSubmitFailure，使
+queue capacity、repository capacity、admission、validation 和 internal failure
+可被稳定映射。
+
+### 19.1 Phase 7B 停止与所有权终检
+
+原实现可能在 `HttpServer::stop()` 仅安排 active-batch 延迟清理时立刻调用阻塞式
+`TaskManager::shutdown()`，使 EventLoop 无法执行清空 Channel/Session 所必需的
+continuation。最终状态机为：
+
+```text
+Created/Running
+  -> StoppingHttp   (close POST admission; stop HTTP)
+  -> StoppingTasks  (HttpServer stopped + session/connection tables empty)
+  -> Stopped        (TaskManager drained and every worker joined)
+```
+
+`StoppingHttp` 使用 Service 自身内嵌、allocation-free 且幂等的 `DeferredCleanup`
+节点；TcpServer/Acceptor 的清理节点先执行，Service continuation 再检查完成屏障。
+只有 HTTP/TCP 已完全停止才允许阻塞 join。Service 不创建控制线程，不自动停止外部
+EventLoop。已知边界是非协作插件会在最后阶段阻塞 owner 线程和 Service stop。
+
+所有权为 Service 强持有 PluginManager、Adapter、TaskManager、TaskHttpApi 和
+HttpServer；HttpServer 持有 frozen Router，Router handler 只弱持有 TaskHttpApi；
+Adapter 生成的 validator/handler 只持有 PluginManager，不持有 Adapter、TaskManager
+或 Service。成员逆序销毁先移除 HttpServer/Router，再释放 API、runtime、adapter 和
+registry，不存在回到 Service 的强引用边。
+
+跨层容量验证在任何 worker/listener/Channel/route 创建前完成。输入 envelope 使用
+Plugin 的紧凑 JSON 最大 bytes 与规范 operation；输出 envelope 使用最大合法 plugin
+result、最大 25-byte TaskId、operation/state/error 和全部 JSON 标点；同时校验 response
+status/header line/count/total、status URL/target 以及 TCP input/output hard maximum。
+所有加法均检查溢出，非法组合为 `InvalidArgument`，恰好边界接受，少 1 byte 拒绝。
+
+TaskId 的 canonical formatter/parser 位于 task value 层且由 POST status URL、GET 和
+Snapshot 共用。前缀固定为 `task-`，最少 16 位十进制；为保持 Phase 5 的完整
+`uint64_t` ID 空间，17–20 位值采用无额外前导零的唯一文本，解析后必须逐字节重格式化
+一致。

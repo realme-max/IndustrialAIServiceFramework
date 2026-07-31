@@ -32,7 +32,11 @@ class BoundedThreadPool {
 
 public:
     using WorkItem = std::function<void()>;
+    static constexpr std::size_t kMaximumWorkerCount = 256U;
+    static constexpr std::size_t kMaximumQueueCapacity = 1'000'000U;
 
+    [[nodiscard]] static Result<void> validate_options(
+        ThreadPoolOptions options);
     [[nodiscard]] static Result<std::unique_ptr<BoundedThreadPool>> create(
         ThreadPoolOptions options);
 

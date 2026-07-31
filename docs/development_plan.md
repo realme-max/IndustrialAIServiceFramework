@@ -367,7 +367,9 @@ feat: implement bounded task runtime
   Reactor 45、TCP 51、HTTP Core 84、HTTP Integration 16、Task Runtime 97、
   Plugin System 92。Release smoke 成功，项目源码与测试 warning 均为 0。
 
-Phase 7 状态：**未开始**；本次仅记录建议，没有创建 Phase 7 代码。
+Phase 7 状态：**实现完成，Linux 验证阻塞**。跨平台 Task API 已通过 Windows
+Debug 回归；Linux Service 和 loopback 测试必须由当前代码提交对应的真实 Linux CI
+验证后才能封板。
 
 建议 commit message：
 
@@ -377,8 +379,7 @@ feat: implement static plugin system
 
 ## 10. Phase 7：Application 组合与最小 HTTP Task API
 
-目标：把现有 HTTP、Task Runtime 和静态插件系统组合为可测试的服务路径；当前只记录
-建议，不实现。
+目标：把现有 HTTP、Task Runtime 和静态插件系统组合为可测试的服务路径。
 
 交付：
 
@@ -402,10 +403,13 @@ feat: implement static plugin system
 暂不包含 timerfd、自动任务超时、signalfd、生产 CLI 常驻模式、动态插件、GPU/真实
 AI、数据库、异步日志或 benchmark。
 
+实现状态：已完成代码、CMake、CI 定义和测试；Phase 8 未开始。当前不含生产 CLI
+常驻模式、自动 timeout、动态插件、真实模型或异步日志。
+
 建议 commit message：
 
 ```text
-feat: compose HTTP task service
+feat: integrate task HTTP service
 ```
 
 ## 11. Phase 8：异步日志与配置完善
@@ -498,3 +502,14 @@ docs(vision): define phase 10 production vision plugin boundary
 | 内存任务仓储不持久 | 重启丢任务 | 首版明确限制；未来通过仓储接口替换 |
 | C++ 动态 ABI 不稳定 | `.so` 扩展兼容性 | 首版静态注册；未来版本化 C ABI |
 | mock 被误认为真实算法 | 项目真实性受损 | schema 强制 `mock: true`，文档反复标注 |
+
+## 15. Phase 7B 审计状态
+
+Phase 7 实现已完成专项修复和 Windows 回归，但 Linux 验证仍阻塞。stop 已锁定为
+`StoppingHttp -> StoppingTasks -> Stopped`，202 只表达 accepted，ServiceOptions
+使用精确、溢出安全的跨层容量验证，Failed GET 和 typed 503 映射均已补测。
+
+Windows Debug/Release 实际均为 370/370：Foundation+smoke 43、HTTP Core 90、
+Task Runtime 99、Plugin System 92、Task API 46。Linux-only Service 当前为 15 个
+CTest 定义（参数展开 37 个 GoogleTest case），尚未执行，不得把 Phase 7 标为
+completed，也不得开始 Phase 8。

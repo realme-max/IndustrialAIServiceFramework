@@ -143,6 +143,30 @@ target_include_directories(
 target_link_libraries(iaisf_http_core PUBLIC iaisf::core)
 iaisf_enable_project_warnings(iaisf_http_core)
 
+add_library(
+  iaisf_task_api
+  STATIC
+  src/api/task_api_limits.cpp
+  src/api/task_http_api.cpp
+  src/api/task_snapshot_json.cpp
+)
+add_library(iaisf::task_api ALIAS iaisf_task_api)
+target_compile_features(iaisf_task_api PUBLIC cxx_std_17)
+target_include_directories(
+  iaisf_task_api
+  PUBLIC
+    "$<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>"
+    "$<BUILD_INTERFACE:${IAISF_GENERATED_INCLUDE_DIR}>"
+)
+target_link_libraries(
+  iaisf_task_api
+  PUBLIC
+    iaisf::http_core
+    iaisf::task
+    iaisf::plugin
+)
+iaisf_enable_project_warnings(iaisf_task_api)
+
 if(IAISF_BUILD_LINUX_NETWORK)
   add_library(
     iaisf_net
@@ -213,6 +237,30 @@ if(IAISF_BUILD_LINUX_NETWORK)
       iaisf::tcp
   )
   iaisf_enable_project_warnings(iaisf_http)
+
+  add_library(
+    iaisf_service
+    STATIC
+    src/service/industrial_ai_service.cpp
+    src/service/service_options.cpp
+  )
+  add_library(iaisf::service ALIAS iaisf_service)
+  target_compile_features(iaisf_service PUBLIC cxx_std_17)
+  target_include_directories(
+    iaisf_service
+    PUBLIC
+      "$<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>"
+      "$<BUILD_INTERFACE:${IAISF_GENERATED_INCLUDE_DIR}>"
+  )
+  target_link_libraries(
+    iaisf_service
+    PUBLIC
+      iaisf::http
+      iaisf::task_api
+      iaisf::task
+      iaisf::plugin
+  )
+  iaisf_enable_project_warnings(iaisf_service)
 endif()
 
 add_executable(iaisf_server src/main.cpp)

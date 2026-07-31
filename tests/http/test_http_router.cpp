@@ -222,6 +222,129 @@ TEST(HttpRouterTest, RejectsEmptyHandlerAndNonExactPathSyntax) {
     EXPECT_FALSE(router.add_route("GET", "/x?query", ok_handler));
 }
 
+TEST(HttpRouterTest, TerminalParameterRouteMatchesExactlyOneSegment) {
+    HttpRouter router;
+    ASSERT_TRUE(router.add_terminal_parameter_route(
+        "GET",
+        "/v1/tasks/",
+        [](const HttpRequest&, const std::string& id) {
+            HttpResponse response;
+            response.set_body(id);
+            return Result<HttpResponse>::success(std::move(response));
+        }));
+    ASSERT_TRUE(router.freeze());
+
+    auto matched = router.dispatch(request("GET", "/v1/tasks/12"));
+    ASSERT_TRUE(matched);
+    EXPECT_EQ(matched.value().body(), "12");
+    EXPECT_EQ(
+        router.dispatch(request("GET", "/v1/tasks/")).value().status(),
+        HttpStatus::NotFound);
+    EXPECT_EQ(
+        router.dispatch(request("GET", "/v1/tasks/12/x")).value().status(),
+        HttpStatus::NotFound);
+    auto queried = router.dispatch(request("GET", "/v1/tasks/12?view=brief"));
+    ASSERT_TRUE(queried);
+    EXPECT_EQ(queried.value().body(), "12");
+}
+
+TEST(HttpRouterTest, ExactRouteTakesPriorityOverParameterRoute) {
+    HttpRouter router;
+    ASSERT_TRUE(router.add_terminal_parameter_route(
+        "GET",
+        "/items/",
+        [](const HttpRequest&, const std::string&) {
+            return Result<HttpResponse>::success(
+                HttpResponse{HttpStatus::Accepted});
+        }));
+    ASSERT_TRUE(router.add_route("GET", "/items/special", ok_handler));
+    ASSERT_TRUE(router.freeze());
+    EXPECT_EQ(
+        router.dispatch(request("GET", "/items/special")).value().status(),
+        HttpStatus::Ok);
+}
+
+TEST(HttpRouterTest, DuplicateTerminalParameterShapeIsRejected) {
+    HttpRouter router;
+    const auto handler = [](const HttpRequest&, const std::string&) {
+        return Result<HttpResponse>::success(HttpResponse{});
+    };
+    ASSERT_TRUE(router.add_terminal_parameter_route(
+        "GET",
+        "/items/",
+        handler));
+    EXPECT_FALSE(router.add_terminal_parameter_route(
+        "GET",
+        "/items/",
+        handler));
+}
+
+TEST(HttpRouterTest, TerminalParameterMethodMismatchReturns405) {
+    HttpRouter router;
+    ASSERT_TRUE(router.add_terminal_parameter_route(
+        "GET",
+        "/items/",
+        [](const HttpRequest&, const std::string&) {
+            return Result<HttpResponse>::success(HttpResponse{});
+        }));
+    ASSERT_TRUE(router.freeze());
+    const auto response = router.dispatch(request("POST", "/items/1"));
+    ASSERT_TRUE(response);
+    EXPECT_EQ(response.value().status(), HttpStatus::MethodNotAllowed);
+    const auto serialized = response.value().serialize(HttpLimits::defaults());
+    ASSERT_TRUE(serialized);
+    EXPECT_NE(
+        serialized.value().find("Allow: GET\r\n"),
+        std::string::npos);
+}
+
+TEST(HttpRouterTest, TerminalParameterRegistrationHonorsFreezeAndCapacity) {
+    auto limits =
+        HttpLimits::create(128, 16, 64, 64, 256, 8, 64, 64, 1, 2);
+    ASSERT_TRUE(limits);
+    HttpRouter router{std::move(limits).value()};
+    ASSERT_TRUE(router.add_terminal_parameter_route(
+        "GET",
+        "/items/",
+        [](const HttpRequest&, const std::string&) {
+            return Result<HttpResponse>::success(HttpResponse{});
+        }));
+    EXPECT_FALSE(router.add_route("GET", "/x", ok_handler));
+    ASSERT_TRUE(router.freeze());
+    EXPECT_FALSE(router.add_terminal_parameter_route(
+        "GET",
+        "/other/",
+        [](const HttpRequest&, const std::string&) {
+            return Result<HttpResponse>::success(HttpResponse{});
+        }));
+}
+
+TEST(HttpRouterTest, CustomRoutingErrorsPreserveStatusAndAllow) {
+    HttpRouter router;
+    ASSERT_TRUE(router.add_route("GET", "/x", ok_handler));
+    ASSERT_TRUE(router.set_routing_error_handler(
+        [](const HttpStatus status, const HttpRequest&) {
+            HttpResponse response{status};
+            response.set_body("custom");
+            return Result<HttpResponse>::success(std::move(response));
+        }));
+    EXPECT_FALSE(router.set_routing_error_handler(
+        [](const HttpStatus, const HttpRequest&) {
+            return Result<HttpResponse>::success(HttpResponse{});
+        }));
+    ASSERT_TRUE(router.freeze());
+
+    const auto missing = router.dispatch(request("GET", "/missing"));
+    ASSERT_TRUE(missing);
+    EXPECT_EQ(missing.value().status(), HttpStatus::NotFound);
+    EXPECT_EQ(missing.value().body(), "custom");
+    const auto method = router.dispatch(request("POST", "/x"));
+    ASSERT_TRUE(method);
+    EXPECT_EQ(method.value().status(), HttpStatus::MethodNotAllowed);
+    ASSERT_EQ(method.value().headers().size(), 1U);
+    EXPECT_EQ(method.value().headers().front().value, "GET");
+}
+
 TEST(HttpRouterTest, BuiltinHealthReturnsStableJson) {
     HttpRouter router;
     ASSERT_TRUE(register_builtin_routes(router));
