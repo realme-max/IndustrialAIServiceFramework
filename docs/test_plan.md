@@ -2,7 +2,7 @@
 
 ## 1. 状态与原则
 
-Phase 1 已实现基础单元测试和 CLI smoke，并在 Phase 1B 加强 Error 边界、Result 引用类别、配置数值类型和 UTF-8 字节限制覆盖。Phase 2 Reactor 最终 [GitHub Actions Linux CI run 30516007475](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30516007475) 已完成 Debug、Release、87/87 CTest 和 Release smoke 零 warning 验证。Phase 3 最终 [Linux CI run 30524686201](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30524686201) 已完成 Debug/Release 138/138 CTest，其中 Foundation 43、Reactor 45、TCP 50。Phase 4 状态为 `PHASE_4_HTTP_PROTOCOL_COMPLETED`：最终 [Linux CI run 30539245789](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30539245789) Debug/Release 239/239。Phase 5 状态为 `PHASE_5_TASK_RUNTIME_COMPLETED`：最终 [Linux CI run 30547126540](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30547126540) Debug/Release 324/324。Phase 6 当前为 `PHASE_6_PLUGIN_SYSTEM_IMPLEMENTED_LINUX_VALIDATION_BLOCKED`：Phase 6C 审计后 Windows Debug/Release 已各通过 316/316，当前未提交改动尚无真实 Linux CI。
+Phase 1 已实现基础单元测试和 CLI smoke，并在 Phase 1B 加强 Error 边界、Result 引用类别、配置数值类型和 UTF-8 字节限制覆盖。Phase 2 Reactor 最终 [GitHub Actions Linux CI run 30516007475](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30516007475) 已完成 Debug、Release、87/87 CTest 和 Release smoke 零 warning 验证。Phase 3 最终 [Linux CI run 30524686201](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30524686201) 已完成 Debug/Release 138/138 CTest，其中 Foundation 43、Reactor 45、TCP 50。Phase 4 状态为 `PHASE_4_HTTP_PROTOCOL_COMPLETED`：最终 [Linux CI run 30539245789](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30539245789) Debug/Release 239/239。Phase 5 状态为 `PHASE_5_TASK_RUNTIME_COMPLETED`：最终 [Linux CI run 30547126540](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30547126540) Debug/Release 324/324。Phase 6 状态为 `PHASE_6_PLUGIN_SYSTEM_COMPLETED`：Windows Debug/Release 各 316/316，最终 Linux Debug/Release 各 428/428，项目源码和测试 warning 均为 0。
 
 测试原则：
 
@@ -576,13 +576,82 @@ IndustrialAIServiceFramework 0.1.0
 ```
 
 MSVC 项目源码和测试 warning 为 0；既有 vcpkg applocal 缺少 `pwsh.exe` 是非致命
-环境诊断。当前 Linux 真实结果仍停留在 Phase 5 324/324；workflow 已显式加入
-plugin targets，但不能在 commit/push 和真实 CI 前把 Phase 6 描述为 Linux PASS。
+环境诊断。
 
-Linux CI 应实际执行 Foundation 43 + Reactor 45 + TCP 51 + HTTP Core 84 +
-HTTP Integration 16 + Task Runtime 97 + Plugin System 92 = 428 项；该数字目前只是
-当前源码定义矩阵，不能替代真实 Linux CTest。并发用例使用 promise/shared_future
-屏障和有限 `wait_for`，不使用 fixed sleep 或 detached thread。
+### 10.4 Phase 6 首次 Linux 功能 CI
+
+证据：[Linux CI run 30602538268](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30602538268)，
+run ID `30602538268`，attempt 1，push event，提交及两个 checkout 均为
+`66a606bb53bf8ed80b8efd6faf7c6529b5cd22d1`。环境为 `ubuntu-24.04`、
+Ubuntu 24.04.4 LTS、kernel `6.17.0-1020-azure`、GCC 13.3.0、CMake 3.31.6。
+
+| Job | Configure | Build | Foundation | Reactor | TCP | HTTP Core | HTTP Integration | Task | Plugin | CTest |
+|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| Linux Debug | pass | pass | 43 | 45 | 51 | 84 | 16 | 97 | 92 | 428/428 |
+| Linux Release | pass | pass | 43 | 45 | 51 | 84 | 16 | 97 | 92 | 428/428 |
+
+两个配置都实际构建 `iaisf_plugin` 与 `iaisf_plugin_tests`。以下专项测试在 Debug 和
+Release 均实际通过：
+
+- 插件并发：Echo、MockVision、Frozen Manager 和多 worker Adapter；
+- `PluginManagerTest.RegisterFreezeExecuteRaceUsesRegistryLinearization`；
+- `PluginTaskAdapterTest.AcceptedTaskOwnsInputSnapshotAfterCallerMutation`；
+- 转义后输出字节限制与 Echo/MockVision exact compact output limit；
+- `EchoPluginTest.AcceptsEveryJsonPayloadKind`；
+- MockVision metadata/output 的 `mock: true` 契约。
+
+Release smoke 实际输出：
+
+```text
+IndustrialAIServiceFramework 0.1.0
+2026-07-31T03:51:18.122Z [INFO] [Application] configuration validated for service IndustrialAIServiceFramework
+```
+
+run 和两个 job 均为 completed/success，所有列出的步骤均为 success；没有 failed、
+cancelled、skipped、neutral、timeout 或 `continue-on-error`。但 Debug 与 Release
+各出现 6 条项目编译 warning：
+
+- 项目源码 3 条：`plugin_metadata.cpp` 两条 `-Wsign-conversion`，
+  `mock_vision_plugin.cpp` 一条 `-Wsign-conversion`；
+- 项目测试 3 条：三个 PluginMetadata 聚合初始化处的
+  `-Wmissing-field-initializers`。
+
+因此该 run 证明功能与测试通过，但不满足项目源码/测试 warning 为 0 的封板条件。
+并发用例使用 promise/shared_future 屏障和有限 `wait_for`，不使用 fixed sleep 或
+detached thread。
+
+### 10.5 Phase 6 最终零 warning Linux CI
+
+最终证据：[Linux CI run 30604428624](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30604428624)，
+run ID `30604428624`，attempt 1，push event，head、Debug checkout、Release checkout、
+本地 HEAD 与 upstream 均为 warning 修复提交
+`853ccccca80cdc042b3d51eae52fe45566aa2b22`。workflow、Linux Debug、Linux Release
+均为 completed/success。
+
+环境为 runner `ubuntu-24.04`、Ubuntu 24.04.4 LTS、kernel
+`6.17.0-1020-azure`、GCC 13.3.0、CMake 3.31.6。
+
+| Job | Configure | Build | Foundation | Reactor | TCP | HTTP Core | HTTP Integration | Task | Plugin | CTest |
+|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| Linux Debug | pass | pass | 43 | 45 | 51 | 84 | 16 | 97 | 92 | 428/428 |
+| Linux Release | pass | pass | 43 | 45 | 51 | 84 | 16 | 97 | 92 | 428/428 |
+
+两个配置均实际构建 `iaisf_plugin` 和 `iaisf_plugin_tests`，完整 CTest 日志实际列出
+Task Runtime 97 项和 Plugin System 92 项；全部专项并发、freeze/register 竞态、
+输入快照、转义后真实 JSON 字节限制、Echo 任意 JSON 原值与 MockVision
+`mock: true` 契约测试均通过。
+
+Release smoke 实际输出：
+
+```text
+IndustrialAIServiceFramework 0.1.0
+2026-07-31T04:35:15.664Z [INFO] [Application] configuration validated for service IndustrialAIServiceFramework
+```
+
+完整 Debug/Release 日志中项目源码 warning 0、项目测试 warning 0，也没有
+failed、cancelled、skipped、neutral、timeout、`continue-on-error` 或被隐藏的失败
+步骤。该 run 是 Phase 6 最终封板证据；首次 run `30602538268` 仍保留为“功能通过但
+存在六个唯一 warning”的历史记录。
 
 ## 11. Timer 测试
 
@@ -662,7 +731,7 @@ TimerQueue 通过可注入单调时钟或纯堆核心测试，避免真实等待
 ## 15. 安全回归
 
 - 超大 Content-Length 不导致预分配。
-- 慢速分段请求受 idle/header deadline 限制（Phase 7 后）。
+- 慢速分段请求受 idle/header deadline 限制（未来定时器阶段后）。
 - 多个 Content-Length 请求走固定拒绝路径，防请求走私。
 - `../`、绝对路径、反斜杠、百分号编码绕过。
 - 客户端 JSON 中的 `"command"` 只被视为普通/未知字段，绝不执行。

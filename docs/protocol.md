@@ -4,14 +4,22 @@
 
 Phase 4 HTTP 协议库状态保持 `PHASE_4_HTTP_PROTOCOL_COMPLETED`。Phase 5 总体状态为
 `PHASE_5_TASK_RUNTIME_COMPLETED`。Phase 6 当前为
-`PHASE_6_PLUGIN_SYSTEM_IMPLEMENTED_LINUX_VALIDATION_BLOCKED`。可移植
+`PHASE_6_PLUGIN_SYSTEM_COMPLETED`。可移植
 `iaisf_http_core` 已在 Windows Debug/Release 各通过 84/84 HTTP Core 测试；
 最终 [Linux CI run 30539245789](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30539245789)
 的 Debug/Release 均为 239/239，其中 HTTP Core 84/84、Linux-only
 HttpSession/HttpServer integration 16/16。Phase 5 最终
 [Linux CI run 30547126540](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30547126540)
 的 Debug/Release 均为 324/324，其中 Task Runtime 85/85；该结果不改变当前 HTTP
-端点集合。
+端点集合。Phase 6 功能提交 `66a606bb53bf8ed80b8efd6faf7c6529b5cd22d1` 的首次
+[Linux CI run 30602538268](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30602538268)
+Debug/Release 均为 428/428，其中 Task Runtime 97/97、Plugin System 92/92；
+Release smoke 成功，但每个配置各有 3 条项目源码和 3 条项目测试 warning，因此
+不是最终封板证据。warning 修复提交
+`853ccccca80cdc042b3d51eae52fe45566aa2b22` 的最终
+[Linux CI run 30604428624](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30604428624)
+在 Debug/Release 各通过 428/428，项目源码和测试 warning 均为 0，完成 Phase 6
+封板。
 
 当前 CLI 不启动监听；`/health`、`/version` 是显式注册到 `HttpRouter` 后由
 `HttpServer` API 提供的能力。Task Runtime 和 Plugin System 不依赖 HTTP，后文任务
@@ -530,3 +538,19 @@ Phase 5 只定义进程内 C++ API：
 - 插件异常、内部路径、errno、返回的内部 Error 文本和 `what()` 不进入 TaskSnapshot。
 - Plugin System API 可由 C++ 组合进 TaskManager，但当前 CLI、HttpRouter 和
   HttpServer 都没有组合它；不得把第 6、7 节示例描述成已部署端点。
+
+## 13. Phase 7 协议建议（未实现）
+
+Phase 7 只建议把现有组件组合为最小服务路径：
+
+- `POST /v1/tasks`
+- `GET /v1/tasks/{id}`
+- `GET /health`
+- `GET /version`
+
+提交端点应把请求 JSON、plugin operation 和 `TaskManager::submit` 接通，queue full
+稳定映射为 503，unknown operation 与 validation error 返回安全、稳定响应；查询只
+序列化 `TaskSnapshot`。这仍是 planned，不是当前可访问 API。
+
+该建议不包含 timerfd、自动任务超时、signalfd、生产 CLI 常驻模式、动态插件、
+GPU/真实 AI、数据库、异步日志或 benchmark。

@@ -318,7 +318,7 @@ feat: implement bounded task runtime
 
 ## 9. Phase 6：插件系统
 
-状态：**implemented + Phase 6C 契约/冻结/所有权终检完成；Linux validation blocked（2026-07-31）**。
+状态：**completed；实现、契约终检、Windows 回归与最终零 warning Linux CI 均完成（2026-07-31）**。
 
 目标：通过静态注册插件把业务执行边界适配到现有 Task Runtime；本阶段不接入 HTTP。
 
@@ -355,11 +355,19 @@ feat: implement bounded task runtime
   输出 `configuration validated for service IndustrialAIServiceFramework`，均 exit 0。
 - 项目源码与测试 MSVC warning 为 0；既有 vcpkg applocal 缺少 `pwsh.exe` 是非致命
   环境诊断，不是编译 warning。
-- workflow 已显式构建 `iaisf_plugin`/`iaisf_plugin_tests`，但当前改动未 commit/push，
-  尚无对应真实 Linux Debug/Release CI，因此 Phase 6 不得标记 completed。
+- 功能提交 `66a606bb53bf8ed80b8efd6faf7c6529b5cd22d1` 的首次
+  [Linux CI run 30602538268](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30602538268)
+  已实际构建 `iaisf_plugin`/`iaisf_plugin_tests`；Debug/Release 均为 428/428，
+  Plugin System 92/92、Task Runtime 97/97，Release smoke 成功。
+- 该 run 的 Debug/Release 各出现 3 条项目源码 warning 与 3 条项目测试 warning；
+  功能验证通过但未达到零 warning 门槛，不作为最终封板证据。
+- warning 修复提交 `853ccccca80cdc042b3d51eae52fe45566aa2b22` 的最终
+  [Linux CI run 30604428624](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30604428624)
+  完成 Debug/Release configure/build 和 428/428 CTest；分项为 Foundation 43、
+  Reactor 45、TCP 51、HTTP Core 84、HTTP Integration 16、Task Runtime 97、
+  Plugin System 92。Release smoke 成功，项目源码与测试 warning 均为 0。
 
-Phase 7 状态：**未开始**；只有 Phase 6 对应提交完成真实 Linux Debug/Release CI
-后才允许进入。
+Phase 7 状态：**未开始**；本次仅记录建议，没有创建 Phase 7 代码。
 
 建议 commit message：
 
@@ -367,29 +375,37 @@ Phase 7 状态：**未开始**；只有 Phase 6 对应提交完成真实 Linux D
 feat: implement static plugin system
 ```
 
-## 10. Phase 7：定时器和任务超时
+## 10. Phase 7：Application 组合与最小 HTTP Task API
 
-目标：实现 EventLoop 内统一超时调度。
+目标：把现有 HTTP、Task Runtime 和静态插件系统组合为可测试的服务路径；当前只记录
+建议，不实现。
 
 交付：
 
-- `TimerId`、`TimerQueue`、最小堆、`timerfd`
-- add/cancel/update/next-expiry/run-expired
-- 连接 idle timeout
-- 任务 deadline、CancellationToken、晚到结果丢弃
-- 终态任务保留期清理
+- 将 `HttpServer`、`TaskManager` 和 `PluginManager` 组合到 Application
+- 静态注册 EchoPlugin 和 MockVisionPlugin
+- `POST /v1/tasks`
+- `GET /v1/tasks/{id}`
+- `GET /health` 与 `GET /version`
+- 请求 JSON、plugin operation 与 `TaskManager::submit` 的稳定映射
+- queue full → 503；unknown operation 和 validation error 使用稳定响应
+- 查询只序列化安全 `TaskSnapshot`
+- 可测试的启动与停止顺序
 
 验收：
 
-- 已取消 timer 不执行，更新 timer 只执行新 generation。
-- 空闲连接关闭，活动连接续期。
-- 超时与成功竞争只有一个终态。
-- 非协作插件的限制在文档和测试中明确。
+- 提交与查询通过 loopback 集成测试。
+- 网络/EventLoop 线程不执行插件耗时工作。
+- 队列满、未知 operation、非法输入和安全错误响应可重复。
+- Application 启动失败回滚和停止顺序可测试。
+
+暂不包含 timerfd、自动任务超时、signalfd、生产 CLI 常驻模式、动态插件、GPU/真实
+AI、数据库、异步日志或 benchmark。
 
 建议 commit message：
 
 ```text
-feat(timer): complete phase 7 connection and task timeouts
+feat: compose HTTP task service
 ```
 
 ## 11. Phase 8：异步日志与配置完善
