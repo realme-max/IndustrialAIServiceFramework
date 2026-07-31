@@ -17,6 +17,22 @@ namespace iaisf::task {
 
 class TaskManagerTestAccess;
 
+enum class TaskSubmitFailure {
+    None,
+    InvalidRequest,
+    ValidationRejected,
+    RepositoryCapacity,
+    QueueCapacity,
+    NotAccepting,
+    ResourceFailure,
+    InternalFailure,
+};
+
+struct TaskSubmitOutcome {
+    Result<TaskId> result;
+    TaskSubmitFailure failure{TaskSubmitFailure::None};
+};
+
 /**
  * Transactional facade for admission, execution, query, timeout, and cleanup.
  *
@@ -74,6 +90,12 @@ public:
     TaskManager& operator=(TaskManager&&) = delete;
 
     [[nodiscard]] Result<TaskId> submit(const TaskRequest& request);
+    /**
+     * Same transaction as submit(), with a stable task-domain rejection
+     * reason for adapters that must not classify by Error.message.
+     */
+    [[nodiscard]] TaskSubmitOutcome submit_with_outcome(
+        const TaskRequest& request);
     [[nodiscard]] Result<TaskSnapshot> get_snapshot(TaskId id) const;
     [[nodiscard]] Result<TransitionOutcome> mark_timed_out(
         TaskId id,
@@ -82,6 +104,7 @@ public:
     [[nodiscard]] Result<void> shutdown();
 
     [[nodiscard]] bool accepting() const;
+    [[nodiscard]] bool stopped() const;
     [[nodiscard]] std::size_t repository_size() const;
     [[nodiscard]] std::size_t pending_count() const;
     [[nodiscard]] std::size_t task_exception_count() const noexcept;
@@ -94,7 +117,8 @@ private:
 
     [[nodiscard]] Result<void> begin_submission();
     void finish_submission() noexcept;
-    [[nodiscard]] Result<TaskId> submit_admitted(const TaskRequest& request);
+    [[nodiscard]] TaskSubmitOutcome submit_admitted(
+        const TaskRequest& request);
 
     mutable std::mutex admission_mutex_;
     std::condition_variable submissions_finished_;

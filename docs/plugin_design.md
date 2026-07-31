@@ -5,7 +5,7 @@
 Phase 6 跨平台静态插件系统已完成，当前状态：
 
 ```text
-PHASE_6_PLUGIN_SYSTEM_COMPLETED
+PHASE_7_SERVICE_INTEGRATION_IMPLEMENTED_LINUX_VALIDATION_BLOCKED
 ```
 
 Windows VS2022 Debug/Release 已各通过 316/316 CTest，其中 Task Runtime 97、
@@ -370,8 +370,8 @@ Total           316
 并发用例使用 promise/future 屏障和有限 `wait_for`，没有 fixed sleep、detached
 thread、网络、文件读取、随机值或测试顺序依赖。Linux Debug/Release 已实际执行全部
 92 项 Plugin 测试，包括并发、register/freeze 竞态、输入快照、转义后字节边界、
-Echo 任意 JSON 原值和 MockVision mock 契约；功能测试全部通过。当前唯一 Phase 6
-封板阻塞是项目 warning 不为 0，必须修复后重新运行完整 Linux CI。
+Echo 任意 JSON 原值和 MockVision mock 契约；功能测试全部通过。Phase 6 后续零
+warning CI 已完成，相关历史证据见 stage_status。
 
 ## 16. 后续边界
 
@@ -379,7 +379,7 @@ Echo 任意 JSON 原值和 MockVision mock 契约；功能测试全部通过。�
 
 - 动态 `.so`/DLL、`dlopen`/`dlsym`/`LoadLibrary`
 - ABI 版本、目录发现、签名、热加载/卸载
-- HTTP Task/Plugin API 或 CLI 插件组合
+- CLI 插件组合或通用 Plugin 管理 API
 - timerfd、自动 timeout、取消/重试/优先级
 - 插件配置、initialize/shutdown
 - 真实图片/点云、TensorRT/PCL/GPU/机器人
@@ -387,6 +387,26 @@ Echo 任意 JSON 原值和 MockVision mock 契约；功能测试全部通过。�
 未来真实或不可信插件可能需要进程隔离、稳定 C ABI、资源配额和安全策略。当前
 C++ `try/catch` 只隔离语言异常，不隔离崩溃、死锁、无限循环或内存破坏。
 
-Phase 7 只建议组合现有 HttpServer、TaskManager、PluginManager，静态注册内置插件并
-增加最小 `/v1/tasks` 提交/查询 API；timerfd、自动超时、signalfd、生产 CLI 常驻、
-动态插件、GPU/真实 AI、数据库、异步日志和 benchmark 均不在该建议范围。
+Phase 7 已由 `IndustrialAiService` 组合现有 HttpServer、TaskManager、PluginManager，
+静态注册内置插件并增加最小 `/v1/tasks` 提交/查询 API。HTTP owner thread 只调用
+快速、纯、确定性且可重入的 validate；execute 始终在 worker。TaskRequest 在 submit
+时形成独立快照，Adapter closure 只捕获 Manager，route closure 只捕获 TaskHttpApi
+weak token，组件间无强引用环。
+
+同一插件实例仍可能被多个 worker 并发调用；`const` 不等于线程安全。EchoPlugin
+仍原样返回 payload；MockVisionPlugin 始终输出 `mock:true`，不读文件、不运行真实
+推理。注册仍是进程内静态注册，不支持动态 `.so`。timerfd、自动超时、signalfd、
+生产 CLI 常驻、GPU/真实 AI、数据库、异步日志和 benchmark 均不在 Phase 7 范围。
+
+## 17. Phase 7B 插件生命周期边界
+
+- Service 停止开始即关闭 Task API admission；validate 返回后还会再次检查 admission，
+  因而插件同步触发 stop 也不会把新任务提交到 runtime。
+- 已接受任务仍由 worker 调用同一只读插件实例；HTTP/TCP 全部清理完成后才 drain/join，
+  join 完成前 Adapter、PluginManager 和 plugin 都保持存活。
+- Router handler 只弱持有 TaskHttpApi；TaskHttpApi 借用 TaskManager/PluginManager；
+  TaskManager closure 只强持有 PluginManager，不反向持有 API 或 Service。
+- 插件返回错误、标准异常和未知异常最终都成为 Failed task；GET 只公开固定泛化 error，
+  不把 plugin error、`what()`、路径、errno 或输入回显到 HTTP。
+- 当前仍是静态注册；重复 operation 在 worker/listener 创建前失败并释放注册对象。
+  不存在动态 `.so`、initialize/shutdown hook、GPU context 或真实模型生命周期。

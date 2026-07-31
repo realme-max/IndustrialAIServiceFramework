@@ -250,6 +250,13 @@ TEST(HttpResponseTest, ErrorResponseIsPlainTextAndClosedByDefault) {
 
 TEST(HttpStatusTest, ProvidesStableReasonPhrases) {
     EXPECT_EQ(reason_phrase(HttpStatus::Ok), "OK");
+    EXPECT_EQ(reason_phrase(HttpStatus::Accepted), "Accepted");
+    EXPECT_EQ(
+        reason_phrase(HttpStatus::UnsupportedMediaType),
+        "Unsupported Media Type");
+    EXPECT_EQ(
+        reason_phrase(HttpStatus::UnprocessableContent),
+        "Unprocessable Content");
     EXPECT_EQ(
         reason_phrase(HttpStatus::HttpVersionNotSupported),
         "HTTP Version Not Supported");

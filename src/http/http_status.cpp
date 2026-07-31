@@ -6,6 +6,8 @@ std::string_view reason_phrase(HttpStatus status) noexcept {
     switch (status) {
         case HttpStatus::Ok:
             return "OK";
+        case HttpStatus::Accepted:
+            return "Accepted";
         case HttpStatus::BadRequest:
             return "Bad Request";
         case HttpStatus::NotFound:
@@ -16,8 +18,12 @@ std::string_view reason_phrase(HttpStatus status) noexcept {
             return "Payload Too Large";
         case HttpStatus::UriTooLong:
             return "URI Too Long";
+        case HttpStatus::UnsupportedMediaType:
+            return "Unsupported Media Type";
         case HttpStatus::ExpectationFailed:
             return "Expectation Failed";
+        case HttpStatus::UnprocessableContent:
+            return "Unprocessable Content";
         case HttpStatus::RequestHeaderFieldsTooLarge:
             return "Request Header Fields Too Large";
         case HttpStatus::InternalServerError:

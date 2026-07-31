@@ -159,6 +159,10 @@ std::size_t HttpServer::session_count() const noexcept {
     return sessions_.size();
 }
 
+std::size_t HttpServer::connection_count() const noexcept {
+    return tcp_server_->connection_count();
+}
+
 const net::tcp::Ipv4Endpoint& HttpServer::local_endpoint() const noexcept {
     return tcp_server_->local_endpoint();
 }

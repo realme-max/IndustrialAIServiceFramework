@@ -1,6 +1,7 @@
 #pragma once
 
 #include <chrono>
+#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <optional>
@@ -16,6 +17,12 @@ namespace iaisf::task {
 
 class TaskId {
 public:
+    static constexpr std::string_view kTextPrefix{"task-"};
+    static constexpr std::size_t kMinimumDecimalDigits = 16U;
+    static constexpr std::size_t kMaximumDecimalDigits = 20U;
+    static constexpr std::size_t kMaximumTextBytes =
+        kTextPrefix.size() + kMaximumDecimalDigits;
+
     constexpr TaskId() noexcept = default;
     explicit constexpr TaskId(const std::uint64_t value) noexcept : value_(value) {}
 
@@ -28,6 +35,7 @@ public:
     }
 
     [[nodiscard]] std::string to_string() const;
+    [[nodiscard]] static Result<TaskId> parse(std::string_view text);
 
     friend constexpr bool operator==(const TaskId lhs, const TaskId rhs) noexcept {
         return lhs.value_ == rhs.value_;

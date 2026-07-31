@@ -5,28 +5,31 @@
 #include <utility>
 
 namespace iaisf::task {
-namespace {
-
-constexpr std::size_t kMaximumWorkerCount = 256;
-constexpr std::size_t kMaximumQueueCapacity = 1000000;
-
-}  // namespace
-
 thread_local const BoundedThreadPool* BoundedThreadPool::current_worker_pool_ = nullptr;
 
-Result<std::unique_ptr<BoundedThreadPool>> BoundedThreadPool::create(
+Result<void> BoundedThreadPool::validate_options(
     const ThreadPoolOptions options) {
     if (options.worker_threads == 0 ||
         options.worker_threads > kMaximumWorkerCount) {
-        return Result<std::unique_ptr<BoundedThreadPool>>::failure(make_error(
+        return Result<void>::failure(make_error(
             ErrorCode::InvalidArgument,
             "thread pool worker count is outside the supported range"));
     }
     if (options.queue_capacity == 0 ||
         options.queue_capacity > kMaximumQueueCapacity) {
-        return Result<std::unique_ptr<BoundedThreadPool>>::failure(make_error(
+        return Result<void>::failure(make_error(
             ErrorCode::InvalidArgument,
             "thread pool queue capacity is outside the supported range"));
+    }
+    return Result<void>::success();
+}
+
+Result<std::unique_ptr<BoundedThreadPool>> BoundedThreadPool::create(
+    const ThreadPoolOptions options) {
+    auto valid = validate_options(options);
+    if (!valid) {
+        return Result<std::unique_ptr<BoundedThreadPool>>::failure(
+            std::move(valid).error());
     }
 
     try {

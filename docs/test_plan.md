@@ -2,7 +2,40 @@
 
 ## 1. 状态与原则
 
-Phase 1 已实现基础单元测试和 CLI smoke，并在 Phase 1B 加强 Error 边界、Result 引用类别、配置数值类型和 UTF-8 字节限制覆盖。Phase 2 Reactor 最终 [GitHub Actions Linux CI run 30516007475](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30516007475) 已完成 Debug、Release、87/87 CTest 和 Release smoke 零 warning 验证。Phase 3 最终 [Linux CI run 30524686201](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30524686201) 已完成 Debug/Release 138/138 CTest，其中 Foundation 43、Reactor 45、TCP 50。Phase 4 状态为 `PHASE_4_HTTP_PROTOCOL_COMPLETED`：最终 [Linux CI run 30539245789](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30539245789) Debug/Release 239/239。Phase 5 状态为 `PHASE_5_TASK_RUNTIME_COMPLETED`：最终 [Linux CI run 30547126540](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30547126540) Debug/Release 324/324。Phase 6 状态为 `PHASE_6_PLUGIN_SYSTEM_COMPLETED`：Windows Debug/Release 各 316/316，最终 Linux Debug/Release 各 428/428，项目源码和测试 warning 均为 0。
+Phase 1 已实现基础单元测试和 CLI smoke，并在 Phase 1B 加强 Error 边界、Result 引用类别、配置数值类型和 UTF-8 字节限制覆盖。Phase 2 Reactor 最终 [GitHub Actions Linux CI run 30516007475](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30516007475) 已完成 Debug、Release、87/87 CTest 和 Release smoke 零 warning 验证。Phase 3 最终 [Linux CI run 30524686201](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30524686201) 已完成 Debug/Release 138/138 CTest，其中 Foundation 43、Reactor 45、TCP 50。Phase 4 最终 [Linux CI run 30539245789](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30539245789) Debug/Release 239/239。Phase 5 最终 [Linux CI run 30547126540](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30547126540) Debug/Release 324/324。Phase 6 最终 Linux Debug/Release 各 428/428。Phase 7 当前为 `PHASE_7_SERVICE_INTEGRATION_IMPLEMENTED_LINUX_VALIDATION_BLOCKED`：Windows Debug/Release 已实际 370/370，Linux-only Service 测试尚未在真实 Linux CI 执行。
+
+## Phase 7 本地验证矩阵
+
+| 平台/配置 | Configure | Build | CTest | Task API | Service |
+|---|---|---|---:|---:|---:|
+| Windows VS2022 Debug | pass | pass | 370/370 | 46/46 | 不构建 |
+| Windows VS2022 Release | pass | pass | 370/370 | 46/46 | 不构建 |
+| Linux Debug | 未执行 | 未执行 | 未执行 | 46 个 CTest 定义 | 15 个 CTest 定义，未执行 |
+| Linux Release | 未执行 | 未执行 | 未执行 | 46 个 CTest 定义 | 15 个 CTest 定义，未执行 |
+
+Windows 分项为 Foundation 41、HTTP Core 90、Task Runtime 99、Plugin System 92、
+Task API 46 和 smoke 2，共 370。Release `--version` 与示例配置 smoke 均 exit 0。
+MSVC 项目源码和测试 warning 为 0；vcpkg applocal 对缺少 `pwsh.exe` 的提示不是
+C++ 编译 warning。
+
+Task API 覆盖 Content-Type、严格 JSON、UTF-8、schema、unknown operation、422、
+停止 admission、规范 TaskId、404/405、无 input 泄露、Echo completion 和安全
+Snapshot。Linux Service 测试使用 127.0.0.1、port 0、socket deadline、RAII fd 和
+promise/future；test-only 静态 blocking plugin 确定性制造 queue full，不使用
+fixed sleep。没有固定端口、外部服务或 GPU。
+
+Phase 7B 新增/修改覆盖：并发 stop 的 active Channel continuation、blocking plugin 与
+worker join、Stopping POST 503、重复 stop/禁止 restart、Session/connection 清空；
+202 不承诺 queued；queue/repository/shutdown typed 503；Failed return/std/unknown
+exception 的安全 200 Snapshot；最大 canonical TaskId；parameter route 405/Allow 与
+query/extra segment；exact cross-layer envelope 边界和少 1 byte；重复插件、占用端口和
+start failure 回滚。所有同步使用 promise/future、condition variable 或 socket deadline，
+无 fixed sleep、detached thread 或无限轮询。
+
+当前源代码推导的 Linux CTest 总数预计为 497（Windows 370 + Reactor 45 + TCP 51 +
+HTTP Integration 16 + Service 15），但这不是 PASS 证据；必须以当前提交的真实 Ubuntu
+24.04 CTest 日志为准。Service 的参数化错误矩阵在 15 个 CTest 定义内展开为 37 个
+GoogleTest case。
 
 测试原则：
 

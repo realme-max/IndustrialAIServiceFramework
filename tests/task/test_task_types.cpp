@@ -1,3 +1,5 @@
+#include <cstdint>
+#include <limits>
 #include <string>
 
 #include <gtest/gtest.h>
@@ -21,6 +23,34 @@ TEST(TaskIdTest, SupportsEqualityAndHashing) {
     EXPECT_EQ(TaskId{7}, TaskId{7});
     EXPECT_NE(TaskId{7}, TaskId{8});
     EXPECT_EQ(hash(TaskId{7}), hash(TaskId{7}));
+}
+
+TEST(TaskIdTest, CanonicalParserUsesTheSingleFormatterContract) {
+    const std::string ordinary{"task-0000000000000001"};
+    const auto parsed = TaskId::parse(ordinary);
+    ASSERT_TRUE(parsed);
+    EXPECT_EQ(parsed.value(), TaskId{1U});
+    EXPECT_EQ(parsed.value().to_string(), ordinary);
+
+    const auto maximum =
+        TaskId{std::numeric_limits<std::uint64_t>::max()}.to_string();
+    EXPECT_EQ(maximum, "task-18446744073709551615");
+    const auto parsed_maximum = TaskId::parse(maximum);
+    ASSERT_TRUE(parsed_maximum);
+    EXPECT_EQ(
+        parsed_maximum.value().value(),
+        std::numeric_limits<std::uint64_t>::max());
+}
+
+TEST(TaskIdTest, CanonicalParserRejectsEveryTextualVariant) {
+    EXPECT_FALSE(TaskId::parse(""));
+    EXPECT_FALSE(TaskId::parse("TASK-0000000000000001"));
+    EXPECT_FALSE(TaskId::parse("task-0000000000000000"));
+    EXPECT_FALSE(TaskId::parse("task-000000000000001"));
+    EXPECT_FALSE(TaskId::parse("task-00000000000000001"));
+    EXPECT_FALSE(TaskId::parse("task-+000000000000001"));
+    EXPECT_FALSE(TaskId::parse("task- 000000000000001"));
+    EXPECT_FALSE(TaskId::parse("task-18446744073709551616"));
 }
 
 TEST(TaskStateTest, ExposesStableNamesAndTerminalClassification) {

@@ -4,8 +4,9 @@
 
 IndustrialAIServiceFramework 的 Phase 2 Reactor、Phase 3 TCP Transport 和 Phase 4
 HTTP adapter 直接使用 epoll、eventfd、accept4 和 POSIX Socket；HTTP Core、
-Task Runtime 与 Phase 6 Plugin System 本身可移植。Phase 6 已完成 Windows 验证和
-最终 Linux Debug/Release 428/428、Release smoke、项目源码/测试零 warning 封板。
+Task Runtime、Plugin System 与 `iaisf_task_api` 本身可移植。Phase 7 新增的
+`iaisf_service` 和 loopback 集成测试依赖 Linux Reactor/TCP/HTTP adapter；当前仅
+完成 Windows API 回归，尚无与当前 Phase 7 代码对应的真实 Linux CI。
 timerfd 与 signalfd 仍是后续计划。
 Windows MinGW 或 MSVC 可以帮助发现一部分可移植 C++ 问题，但不能替代真实 Linux
 构建、测试和运行验证。
@@ -59,8 +60,23 @@ IAISF_BUILD_LINUX_NETWORK=ON  # Linux 默认；其他平台默认 OFF
 `iaisf_http_core` / `iaisf::http_core` 不依赖该选项，在 Windows/Linux 都构建。
 `iaisf_task` / `iaisf::task` 与 `iaisf_plugin` / `iaisf::plugin` 同样跨平台，
 不受该选项控制。
+`iaisf_task_api` / `iaisf::task_api` 同样跨平台；`iaisf_service` /
+`iaisf::service` 只在 Linux network 目标存在时创建。
 该选项在非 Linux 平台显式开启会直接
 configure 失败，不提供空实现或静默关闭。
+
+Phase 7 CI 还必须显式构建：
+
+```text
+iaisf_task_api
+iaisf_task_api_tests
+iaisf_service
+iaisf_service_tests
+```
+
+随后运行完整 CTest。`iaisf_service_tests` 使用 loopback 和 port 0，不依赖固定端口、
+数据库、GPU 或外部进程。当前工作区没有本地 Linux/WSL PASS 证据，不能把 Windows
+370/370 或 workflow YAML 当成 Linux 结果。
 
 CMake FetchContent 使用固定 tag：
 
@@ -525,3 +541,26 @@ warning 0、项目测试 warning 0。Release smoke 输出版本
 ```text
 PHASE_6_PLUGIN_SYSTEM_COMPLETED
 ```
+
+## 16. Phase 7B Linux 验证入口
+
+Phase 7B 当前只完成 Windows 与静态审计，没有本机 Linux/WSL/bash 结果。Windows
+Debug/Release 均为 370/370，不能替代 Linux。当前 Linux build 必须显式构建：
+
+```text
+iaisf_task_api
+iaisf_task_api_tests
+iaisf_service
+iaisf_service_tests
+```
+
+当前源代码注册的跨平台 CTest 为 370；Linux 还增加 Reactor 45、TCP 51、HTTP
+Integration 16 和 Service 15，故预计完整 CTest 为 497。该数字只是 CI 前清单，不是
+PASS：最终必须以 exact commit 对应的 Ubuntu 24.04 Debug/Release configure、build、
+CTest 和 Release smoke 原始日志为准。
+
+Service 15 个 CTest 定义中的参数化错误矩阵实际展开 37 个 GoogleTest case；应重点
+确认 active HTTP Channel 内触发 stop、blocking plugin、Stopping POST 503、
+Session/connection 清空、worker join、重复 stop、occupied port/duplicate plugin/start
+failure 回滚全部实际执行。workflow 不使用 `continue-on-error`、warning suppression、
+部署或制品上传；项目源码和测试 warning 必须为 0 才能封板。

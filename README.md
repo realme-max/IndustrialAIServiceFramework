@@ -2,7 +2,7 @@
 
 面向工业 AI 应用的 C++ 高性能任务服务框架。
 
-> 当前状态：`PHASE_6_PLUGIN_SYSTEM_COMPLETED`。warning 修复提交 `853ccccca80cdc042b3d51eae52fe45566aa2b22` 已由最终 [Linux CI run 30604428624](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30604428624) 完成 Ubuntu 24.04 Debug/Release 428/428 CTest、Release smoke 和项目源码/测试零 warning 验证。Windows Visual Studio 2022 Debug/Release 均为 316/316。
+> 当前状态：`PHASE_7_SERVICE_INTEGRATION_IMPLEMENTED_LINUX_VALIDATION_BLOCKED`。跨平台 Task HTTP API、Linux-only 服务组合根和专项审计已实现；Windows Visual Studio 2022 Debug/Release 均完成 370/370。Linux-only Service 与停止状态机尚未经过当前实现对应的真实 Linux CI，不能宣称 Phase 7 完成。
 
 ## 项目定位
 
@@ -10,7 +10,9 @@
 
 框架层只负责网络、协议、路由、任务调度、插件管理、状态、日志、配置和错误处理。焊缝、点云、机器人等领域语义只能进入插件层。
 
-当前 `iaisf_server` 仍只验证 CLI 和配置后退出；Phase 4 已提供可组合的 HTTP Server API，Phase 5 已提供独立 Task Runtime API，Phase 6 已提供可通过 C++ 组合进 TaskManager 的静态 Plugin System API，但这些模块尚未在常驻服务组合根中连接，也没有 `--serve`、任务 HTTP 路由或 CLI 插件加载。
+当前 `iaisf_server` 仍只验证 CLI 和配置后退出。Phase 7 已提供可组合的跨平台
+Task HTTP API 和 Linux-only `IndustrialAiService` 组合根，但没有 `--serve` 或 CLI
+插件加载；调用方必须显式拥有 EventLoop/Logger 并构造 Service。
 
 ## Phase 1 已实现
 
@@ -137,9 +139,21 @@ Windows Debug/Release clean build 与完整 CTest 均为 316/316：Foundation 43
 
 warning 修复提交 `853ccccca80cdc042b3d51eae52fe45566aa2b22` 的最终 push run `30604428624` 在 Ubuntu 24.04.4 LTS、kernel `6.17.0-1020-azure`、GCC 13.3.0、CMake 3.31.6 上完成真实验证：Debug/Release 均为 Foundation 43、Reactor 45、TCP 51、HTTP Core 84、HTTP Integration 16、Task Runtime 97、Plugin System 92，共 428/428；`iaisf_plugin`、`iaisf_plugin_tests` 和全部专项测试实际构建/执行，Release version/config smoke 成功，项目源码 warning 0、项目测试 warning 0。两个 job 及所有步骤均为 success，无被隐藏的失败。
 
+## Phase 7B 专项审计结果
+
+- `IndustrialAiService::stop()` 采用 `StoppingHttp -> StoppingTasks -> Stopped` 多阶段状态机。先关闭 POST admission，再等待 `HttpServer::stopped()`、Session 表和 TCP 连接表清空，最后才阻塞 drain/join `TaskManager`；active Channel 批次中通过内嵌 `DeferredCleanup` continuation 推进，不创建控制线程，也不停止外部 EventLoop。
+- 当前已知边界是：HTTP/TCP 清理完成后，EventLoop owner 线程会在 `TaskManager::shutdown()` 中等待非协作插件返回。此前不会阻塞 owner 线程所需的 Channel/Session 清理。
+- `POST /v1/tasks` 的 202 body 只包含 `task_id` 与 `status_url`；它只表示任务已被接受，不再虚假承诺 `queued`、开始时间或终态。
+- `ServiceOptions` 在 worker、listener、Channel 和 route 创建前完成 pool、repository、Task/Plugin JSON、TaskRequest/TaskSnapshot envelope、HTTP body/header/target 与 TCP buffer 的溢出安全交叉校验；非法组合返回 `InvalidArgument`，不 clamp。
+- `TaskHttpApi` router handler 只捕获 `weak_ptr`。Service 的逆成员销毁顺序是 `HttpServer -> TaskHttpApi -> TaskManager -> PluginTaskAdapter -> PluginManager`；TaskManager 和 PluginManager 都不反向持有 API/Service，不存在强引用环。
+- Failed task 的 GET 返回 HTTP 200、`state:"failed"` 和固定安全 error，不含 result、input、插件原始错误或异常文本。queue full、repository full 和 shutdown 使用 typed `TaskSubmitFailure` 分别映射稳定 503，不解析 `Error.message`。
+- TaskId 统一由 `TaskId::to_string/parse` 处理：固定 `task-` 前缀，通常为 16 位十进制；为覆盖完整 `uint64_t` 范围，超过 16 位时使用唯一的无前导零表示，最长 25 bytes。正负号、空白、大小写变体、溢出及非 canonical 形式均拒绝。
+- `/health` 仍只表示 HTTP/EventLoop 可响应，不声称 GPU、模型、数据库或动态插件 ready。
+- Windows Debug/Release 当前均为 370/370：Foundation+smoke 43、HTTP Core 90、Task Runtime 99、Plugin System 92、Task API 46；源码和测试未出现 MSVC compiler warning。Release version/config smoke 均 exit 0。
+
 ## 尚未实现
 
-- Task HTTP API、`/v1/tasks` 与 HTTP/Task Runtime 组合根
+- 生产 CLI 常驻模式与外部配置驱动的服务启动
 - 动态 `.so`/DLL、插件发现、热加载、热卸载或进程隔离
 - timerfd、自动任务超时扫描和连接超时
 - 异步日志、文件日志和日志轮转
@@ -167,8 +181,8 @@ Phase 5 (completed)
 Phase 6 (completed)
   explicit static plugins / frozen registry / validator + handler adapter / Echo / MockVision
 
-Phase 7 (planned; not started)
-  Application composition / static plugin registration / minimal HTTP task API
+Phase 7 (implemented; Linux validation blocked)
+  bounded Task HTTP API / static plugin composition / Linux service lifecycle
 
 Later phases (planned)
   timers / async logging
@@ -178,6 +192,7 @@ Phase 9—10 (planned)
 ```
 
 目标架构和阶段边界见 [architecture.md](docs/architecture.md) 与 [development_plan.md](docs/development_plan.md)。
+Phase 7 协议与生命周期细节见 [task_api.md](docs/task_api.md)。
 
 ## 依赖
 

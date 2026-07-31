@@ -3,25 +3,45 @@
 ## 当前结论
 
 ```text
-PHASE_6_PLUGIN_SYSTEM_COMPLETED
+PHASE_7_SERVICE_INTEGRATION_IMPLEMENTED_LINUX_VALIDATION_BLOCKED
 ```
 
-- 当前阶段：Phase 6 Static Algorithm Plugin System
-- 实现状态：静态插件系统、TaskValidator/Task Runtime 适配、契约审计及最终零 warning Linux 验证全部完成
-- Windows 验证：Visual Studio 2022 x64 Debug/Release 均为 316/316（Foundation 43 + HTTP Core 84 + Task Runtime 97 + Plugin System 92）
-- Linux CI 验证：最终 push run `30604428624` Debug/Release 均 428/428、smoke 成功，项目源码和测试 warning 均为 0
+- 当前阶段：Phase 7 Service Integration and Task HTTP API
+- 实现状态：跨平台 Task API、末段参数路由、静态插件组合和 Linux Service 生命周期已实现
+- Windows 验证：Visual Studio 2022 x64 Debug/Release 均为 370/370
+- Linux CI 验证：当前 Phase 7 未提交、未 push，尚无与当前代码对应的真实 Linux CI；不得沿用 Phase 6 run
 - 日期：2026-07-31（Asia/Shanghai）
-- 下一阶段：Phase 7 Application 组合与最小 HTTP Task API；尚未开始
+- 下一阶段：Phase 8；在 Phase 7 Linux CI 封板前不得开始
 
 Phase 6 已实现显式静态注册、Frozen 并发 registry、Echo/MockVision、异常隔离及
-TaskValidator/PluginTaskAdapter；`iaisf_server` 仍不启动监听、不加载插件，也没有
-Task HTTP API。动态插件、自动超时、定时器和异步日志未实现。
+TaskValidator/PluginTaskAdapter；Phase 7 已在可组合 C++ 库中增加 Task HTTP API。
+`iaisf_server` 仍不启动监听或加载插件。动态插件、自动超时、定时器和异步日志未实现。
+
+Phase 7 新增 `iaisf_task_api`（跨平台）和 `iaisf_service`（Linux-only）。
+Windows Debug/Release 均为 370/370，Task API 46/46；Linux Service 15 个 CTest
+定义（参数展开 37 个 GoogleTest case）已定义
+但尚未在真实 Linux 执行。CLI 仍不启动常驻服务。当前没有 commit、push 或 Phase 7
+CI run，因此状态必须保持 validation blocked。
+
+### Phase 7B 专项审计
+
+- 原 stop 在 HttpServer active-batch stop 尚未真正完成时可能阻塞 join TaskManager；
+  现改为 `StoppingHttp -> StoppingTasks -> Stopped`，由内嵌 DeferredCleanup 推进。
+- `stopped()` 只在 HTTP stopped、Session/connection 表为空且 TaskManager worker
+  全部 join 后为 true；重复 stop 幂等，Stopped 后不能 restart。
+- 202 仅返回 task_id/status_url，不承诺 queued。
+- ServiceOptions 在创建 worker/listener/Channel/route 前做精确跨层容量和 pool hard
+  limit 校验；非法组合不产生运行时资源。
+- Failed GET 返回安全 200；queue/repository/shutdown 使用 typed 503；TaskId 统一
+  parser/formatter；router handler weak-own API，无强引用环。
+- Windows Debug/Release 370/370，Release version/config smoke exit 0，项目 MSVC
+  compiler warning 0。当前机器没有 bash/Linux，Linux scripts 未在本机执行。
 
 ## Git 状态
 
 | 项目 | 结果 |
 |---|---|
-| 当前分支 | `phase/6-plugin-system` |
+| 当前分支 | `phase/7-service-integration` |
 | Phase 0 提交 | `5fbcec0 docs: complete phase 0 architecture design` |
 | Phase 1 最终实现提交 | `63b30cffcbe3e621af33664721b3675a647bd1a1` |
 | Phase 2 起始 HEAD / main / origin/main | `6065d91b277c07ed04e64b3f08034788965e6ac1` |
@@ -38,7 +58,9 @@ Task HTTP API。动态插件、自动超时、定时器和异步日志未实现�
 | Phase 5 最终 Linux CI | [run 30547126540](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30547126540) |
 | Phase 5 文档封板 / Phase 6 基线 / main / origin/main | `b8e7ded21ce9b78d0d59e18785a4912356eb5e15` |
 | Phase 6 功能提交 | `66a606bb53bf8ed80b8efd6faf7c6529b5cd22d1` |
-| Phase 6 warning 修复 / 当前 HEAD / upstream | `853ccccca80cdc042b3d51eae52fe45566aa2b22` |
+| Phase 6 warning 修复提交 | `853ccccca80cdc042b3d51eae52fe45566aa2b22` |
+| Phase 7 基线 HEAD / main / origin/main | `9f88e0726a5db1abfe2ebe999de68aef41f317fb` |
+| 当前分支 upstream | 未配置；Phase 7 尚未 commit/push |
 | Phase 6 Linux 功能 CI | [run 30602538268](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30602538268) |
 | Phase 6 最终零 warning Linux CI | [run 30604428624](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30604428624) |
 | origin | `https://github.com/realme-max/IndustrialAIServiceFramework.git` |
@@ -58,7 +80,7 @@ Task HTTP API。动态插件、自动超时、定时器和异步日志未实现�
 | 4 | HTTP 协议与健康路由 | completed | Windows 127/127；Linux Debug/Release 239/239 |
 | 5 | 线程池与任务系统 | completed | Windows Debug/Release 212/212；Linux Debug/Release 324/324，Task Runtime 85/85 |
 | 6 | 插件系统 | completed | 最终 Linux Debug/Release 428/428、smoke pass；项目源码/测试 warning 0 |
-| 7 | Application 组合与最小 HTTP Task API | planned | 未开始 |
+| 7 | Application 组合与最小 HTTP Task API | implemented / Linux validation blocked | Windows API 回归通过；等待 Linux CI |
 | 8 | 异步日志与配置扩展 | planned | 未开始 |
 | 9 | 压力测试与工程完善 | planned | 未开始 |
 | 10 | 真实工业视觉插件预留 | planned | 未开始，需用户明确批准 |
@@ -789,7 +811,7 @@ Phase 6D 文档更新及 Phase 6F 封板前后也再次一致。
 
 ## 未实现
 
-- Task HTTP API、`/v1/tasks` 或 `/api/v1/tasks` 实际路由
+- CLI `--serve`、生产常驻模式和外部配置到 ServiceOptions 的组合
 - 动态 `.so`/DLL、插件发现、热加载/卸载和进程隔离
 - timerfd/signalfd、自动任务/连接超时和取消
 - 异步日志、文件日志和轮转
@@ -798,8 +820,8 @@ Phase 6D 文档更新及 Phase 6F 封板前后也再次一致。
 - sanitizer 和 `/proc` fd 长时间稳定性结果
 
 `worker_threads` 和 `task_queue_capacity` 仍只是 CLI/AppConfig 中经过校验的配置
-字段；TaskManager/PluginManager 只由显式 C++ API 组合，当前 CLI 不创建 worker、
-队列或插件 registry。
+字段；Phase 7 ServiceOptions 尚未接入 AppConfig。当前 CLI 不创建 worker、队列、
+插件 registry 或 listener。
 
 ## 当前阻塞与风险
 
@@ -807,23 +829,22 @@ Phase 6D 文档更新及 Phase 6F 封板前后也再次一致。
 - Phase 2 没有剩余验收阻塞。
 - Phase 3 没有剩余封板阻塞；本机仍无 Linux/WSL，当前 Linux 结论来自可追溯的 GitHub Actions run。
 - Phase 4、Phase 5 和 Phase 6 均已完成最终 Linux 封板。
+- Phase 7 代码已实现但尚无对应提交的 Linux CI，不能封板。
 - 默认 FetchContent 首次 Linux 配置需要 GitHub 网络和有效 CA 证书。
 - 系统依赖模式已设计但未在已安装 Linux 包环境验证。
 - Windows/NTFS 工作区不能可靠表达新 shell 脚本的 POSIX executable bit；workflow 会在运行时执行 `chmod +x scripts/*.sh`，人工 Linux 使用前仍应确认权限。
 - Visual Studio 本机 vcpkg applocal 集成的非致命 `pwsh.exe` 诊断不影响当前测试，但应与 Linux 结果分开记录。
 
-## Phase 7 建议入口
+## Phase 8 建议入口
 
-Phase 7 只建议组合现有 HttpServer、TaskManager、PluginManager，静态注册
-Echo/MockVision，并实现 `POST /v1/tasks`、`GET /v1/tasks/{id}`、`GET /health`、
-`GET /version`，覆盖 queue-full 503、unknown operation、validation error、安全
-TaskSnapshot 及启动/停止顺序。暂不包含 timerfd、自动 timeout、signalfd、生产 CLI
-常驻、动态插件、GPU/真实 AI、数据库、异步日志或 benchmark。
+Phase 7 Linux 封板后才可规划 timerfd 连接/任务 timeout、signalfd 停止接入、
+ServiceOptions/AppConfig 组合与有界异步日志。动态插件、GPU/真实 AI、数据库和
+benchmark 仍不在下一阶段。
 
 ## 建议 commit
 
 本轮未执行 commit。建议：
 
 ```text
-docs: complete phase 6 validation record
+feat: integrate task HTTP service
 ```

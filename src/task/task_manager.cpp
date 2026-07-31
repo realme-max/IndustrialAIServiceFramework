@@ -6,6 +6,23 @@
 #include <utility>
 
 namespace iaisf::task {
+namespace {
+
+TaskSubmitOutcome rejected(
+    const TaskSubmitFailure failure,
+    Error error) {
+    return TaskSubmitOutcome{
+        Result<TaskId>::failure(std::move(error)),
+        failure};
+}
+
+TaskSubmitOutcome accepted(const TaskId id) {
+    return TaskSubmitOutcome{
+        Result<TaskId>::success(id),
+        TaskSubmitFailure::None};
+}
+
+}  // namespace
 
 Result<std::unique_ptr<TaskManager>> TaskManager::create(
     const ThreadPoolOptions pool_options,
@@ -85,40 +102,60 @@ TaskManager::~TaskManager() {
 }
 
 Result<TaskId> TaskManager::submit(const TaskRequest& request) {
+    auto outcome = submit_with_outcome(request);
+    return std::move(outcome.result);
+}
+
+TaskSubmitOutcome TaskManager::submit_with_outcome(
+    const TaskRequest& request) {
     auto admitted = begin_submission();
     if (!admitted) {
-        return Result<TaskId>::failure(std::move(admitted).error());
+        return rejected(
+            TaskSubmitFailure::NotAccepting,
+            std::move(admitted).error());
     }
     const SubmissionGuard submission{*this};
     return submit_admitted(request);
 }
 
-Result<TaskId> TaskManager::submit_admitted(const TaskRequest& request) {
+TaskSubmitOutcome TaskManager::submit_admitted(const TaskRequest& request) {
     auto valid_request = repository_.limits().validate_request(request);
     if (!valid_request) {
-        return Result<TaskId>::failure(std::move(valid_request).error());
+        return rejected(
+            TaskSubmitFailure::InvalidRequest,
+            std::move(valid_request).error());
     }
 
     if (validator_) {
         try {
             auto validated = validator_(request);
             if (!validated) {
-                return Result<TaskId>::failure(std::move(validated).error());
+                return rejected(
+                    TaskSubmitFailure::ValidationRejected,
+                    std::move(validated).error());
             }
         } catch (const std::exception&) {
-            return Result<TaskId>::failure(make_error(
-                ErrorCode::InternalError,
-                "task validation failed"));
+            return rejected(
+                TaskSubmitFailure::InternalFailure,
+                make_error(
+                    ErrorCode::InternalError,
+                    "task validation failed"));
         } catch (...) {
-            return Result<TaskId>::failure(make_error(
-                ErrorCode::InternalError,
-                "task validation failed"));
+            return rejected(
+                TaskSubmitFailure::InternalFailure,
+                make_error(
+                    ErrorCode::InternalError,
+                    "task validation failed"));
         }
     }
 
     auto created = repository_.create_queued(request);
     if (!created) {
-        return created;
+        const auto failure =
+            created.error().code == ErrorCode::ResourceExhausted
+            ? TaskSubmitFailure::RepositoryCapacity
+            : TaskSubmitFailure::InternalFailure;
+        return rejected(failure, std::move(created).error());
     }
     const TaskId id = created.value();
 
@@ -130,56 +167,80 @@ Result<TaskId> TaskManager::submit_admitted(const TaskRequest& request) {
             }};
         auto submitted = pool_->try_submit(std::move(work));
         if (submitted) {
-            return Result<TaskId>::success(id);
+            return accepted(id);
         }
 
         const auto rolled_back = repository_.rollback_queued(id);
         if (!rolled_back) {
-            return Result<TaskId>::failure(make_error(
-                ErrorCode::InternalError,
-                "task queue rejection rollback failed"));
+            return rejected(
+                TaskSubmitFailure::InternalFailure,
+                make_error(
+                    ErrorCode::InternalError,
+                    "task queue rejection rollback failed"));
         }
-        return Result<TaskId>::failure(std::move(submitted).error());
+        const auto failure =
+            submitted.error().code == ErrorCode::ResourceExhausted
+            ? TaskSubmitFailure::QueueCapacity
+            : (submitted.error().code == ErrorCode::InvalidState
+                   ? TaskSubmitFailure::NotAccepting
+                   : TaskSubmitFailure::InternalFailure);
+        return rejected(failure, std::move(submitted).error());
     } catch (const std::bad_alloc&) {
         const auto rolled_back = repository_.rollback_queued(id);
         if (!rolled_back) {
-            return Result<TaskId>::failure(make_error(
-                ErrorCode::InternalError,
-                "task allocation rollback failed"));
+            return rejected(
+                TaskSubmitFailure::InternalFailure,
+                make_error(
+                    ErrorCode::InternalError,
+                    "task allocation rollback failed"));
         }
-        return Result<TaskId>::failure(make_error(
-            ErrorCode::ResourceExhausted,
-            "unable to allocate submitted task work item"));
+        return rejected(
+            TaskSubmitFailure::ResourceFailure,
+            make_error(
+                ErrorCode::ResourceExhausted,
+                "unable to allocate submitted task work item"));
     } catch (const std::length_error&) {
         const auto rolled_back = repository_.rollback_queued(id);
         if (!rolled_back) {
-            return Result<TaskId>::failure(make_error(
-                ErrorCode::InternalError,
-                "task length failure rollback failed"));
+            return rejected(
+                TaskSubmitFailure::InternalFailure,
+                make_error(
+                    ErrorCode::InternalError,
+                    "task length failure rollback failed"));
         }
-        return Result<TaskId>::failure(make_error(
-            ErrorCode::ResourceExhausted,
-            "submitted task exceeds the platform size limit"));
+        return rejected(
+            TaskSubmitFailure::ResourceFailure,
+            make_error(
+                ErrorCode::ResourceExhausted,
+                "submitted task exceeds the platform size limit"));
     } catch (const std::exception&) {
         const auto rolled_back = repository_.rollback_queued(id);
         if (!rolled_back) {
-            return Result<TaskId>::failure(make_error(
-                ErrorCode::InternalError,
-                "task submission rollback failed"));
+            return rejected(
+                TaskSubmitFailure::InternalFailure,
+                make_error(
+                    ErrorCode::InternalError,
+                    "task submission rollback failed"));
         }
-        return Result<TaskId>::failure(make_error(
-            ErrorCode::InternalError,
-            "task submission failed"));
+        return rejected(
+            TaskSubmitFailure::InternalFailure,
+            make_error(
+                ErrorCode::InternalError,
+                "task submission failed"));
     } catch (...) {
         const auto rolled_back = repository_.rollback_queued(id);
         if (!rolled_back) {
-            return Result<TaskId>::failure(make_error(
-                ErrorCode::InternalError,
-                "unknown task submission rollback failed"));
+            return rejected(
+                TaskSubmitFailure::InternalFailure,
+                make_error(
+                    ErrorCode::InternalError,
+                    "unknown task submission rollback failed"));
         }
-        return Result<TaskId>::failure(make_error(
-            ErrorCode::InternalError,
-            "task submission failed"));
+        return rejected(
+            TaskSubmitFailure::InternalFailure,
+            make_error(
+                ErrorCode::InternalError,
+                "task submission failed"));
     }
 }
 
@@ -218,6 +279,10 @@ Result<void> TaskManager::shutdown() {
 bool TaskManager::accepting() const {
     std::lock_guard<std::mutex> lock(admission_mutex_);
     return accepting_ && pool_->accepting();
+}
+
+bool TaskManager::stopped() const {
+    return pool_->stopped();
 }
 
 std::size_t TaskManager::repository_size() const {

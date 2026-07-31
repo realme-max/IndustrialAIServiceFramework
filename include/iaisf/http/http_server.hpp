@@ -47,6 +47,7 @@ public:
     [[nodiscard]] bool started() const noexcept;
     [[nodiscard]] bool stopped() const noexcept;
     [[nodiscard]] std::size_t session_count() const noexcept;
+    [[nodiscard]] std::size_t connection_count() const noexcept;
     [[nodiscard]] const net::tcp::Ipv4Endpoint& local_endpoint() const noexcept;
 
 private:
