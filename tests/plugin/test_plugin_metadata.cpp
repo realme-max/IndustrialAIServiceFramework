@@ -18,6 +18,7 @@ PluginMetadata valid_metadata() {
         "1.0.0",
         "A deterministic test plugin.",
         false,
+        {},
     };
 }
 

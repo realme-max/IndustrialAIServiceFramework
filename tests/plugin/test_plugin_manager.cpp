@@ -109,6 +109,7 @@ PluginMetadata metadata_for(const std::string& operation) {
         "1.0.0",
         "Test-only deterministic plugin.",
         false,
+        {},
     };
 }
 

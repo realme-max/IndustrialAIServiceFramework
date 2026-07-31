@@ -61,6 +61,7 @@ public:
               "1.0.0",
               "Deterministic adapter test plugin.",
               false,
+              {},
           },
           validator_(std::move(validator)),
           executor_(std::move(executor)) {}
