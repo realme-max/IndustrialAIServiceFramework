@@ -3,15 +3,15 @@
 ## 当前结论
 
 ```text
-PHASE_6_PLUGIN_SYSTEM_IMPLEMENTED_LINUX_VALIDATION_BLOCKED
+PHASE_6_PLUGIN_SYSTEM_COMPLETED
 ```
 
 - 当前阶段：Phase 6 Static Algorithm Plugin System
-- 实现状态：静态插件系统、TaskValidator/Task Runtime 适配和 Phase 6C 最终契约审计已完成，尚未 commit/push
+- 实现状态：静态插件系统、TaskValidator/Task Runtime 适配、契约审计及最终零 warning Linux 验证全部完成
 - Windows 验证：Visual Studio 2022 x64 Debug/Release 均为 316/316（Foundation 43 + HTTP Core 84 + Task Runtime 97 + Plugin System 92）
-- Linux CI 验证：当前改动没有对应真实 run；最近 Phase 5 CI 324/324 不能替代 Phase 6 验证
+- Linux CI 验证：最终 push run `30604428624` Debug/Release 均 428/428、smoke 成功，项目源码和测试 warning 均为 0
 - 日期：2026-07-31（Asia/Shanghai）
-- 下一阶段：Phase 7 定时器与任务超时；必须先完成 Phase 6 Linux CI 封板
+- 下一阶段：Phase 7 Application 组合与最小 HTTP Task API；尚未开始
 
 Phase 6 已实现显式静态注册、Frozen 并发 registry、Echo/MockVision、异常隔离及
 TaskValidator/PluginTaskAdapter；`iaisf_server` 仍不启动监听、不加载插件，也没有
@@ -36,11 +36,14 @@ Task HTTP API。动态插件、自动超时、定时器和异步日志未实现�
 | Phase 4 文档封板 / Phase 5 基线 / main / origin/main | `fe5b58446a14ebedf13978b0339f3ad0171f0ffa` |
 | Phase 5 实现 / 最终验证提交 | `79d3d4e89feb71595dc67d820f9a5398dcc814d4` |
 | Phase 5 最终 Linux CI | [run 30547126540](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30547126540) |
-| Phase 5 文档封板 / Phase 6 基线 / main / origin/main / 当前 HEAD | `b8e7ded21ce9b78d0d59e18785a4912356eb5e15` |
-| Phase 6 upstream | 当前分支未配置 upstream |
+| Phase 5 文档封板 / Phase 6 基线 / main / origin/main | `b8e7ded21ce9b78d0d59e18785a4912356eb5e15` |
+| Phase 6 功能提交 | `66a606bb53bf8ed80b8efd6faf7c6529b5cd22d1` |
+| Phase 6 warning 修复 / 当前 HEAD / upstream | `853ccccca80cdc042b3d51eae52fe45566aa2b22` |
+| Phase 6 Linux 功能 CI | [run 30602538268](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30602538268) |
+| Phase 6 最终零 warning Linux CI | [run 30604428624](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30604428624) |
 | origin | `https://github.com/realme-max/IndustrialAIServiceFramework.git` |
 | Phase 3 开始时工作区 | clean |
-| Phase 6 本轮 Git 操作 | 产生实现、测试、构建和九份文档 diff；未 commit/push |
+| Phase 6F 本轮 Git 操作 | 只更新九份阶段文档；未 commit/push |
 
 本阶段没有 amend、reset、stash、rebase、merge、commit、push 或修改 origin。
 
@@ -54,8 +57,8 @@ Task HTTP API。动态插件、自动超时、定时器和异步日志未实现�
 | 3 | TCP Transport Layer | completed | Debug/Release 138/138；Foundation 43、Reactor 45、TCP 50 |
 | 4 | HTTP 协议与健康路由 | completed | Windows 127/127；Linux Debug/Release 239/239 |
 | 5 | 线程池与任务系统 | completed | Windows Debug/Release 212/212；Linux Debug/Release 324/324，Task Runtime 85/85 |
-| 6 | 插件系统 | implemented / Linux validation blocked | Windows Debug/Release 316/316；Phase 6C 审计完成，尚无当前提交 Linux CI |
-| 7 | 定时器与任务超时 | planned | 未开始 |
+| 6 | 插件系统 | completed | 最终 Linux Debug/Release 428/428、smoke pass；项目源码/测试 warning 0 |
+| 7 | Application 组合与最小 HTTP Task API | planned | 未开始 |
 | 8 | 异步日志与配置扩展 | planned | 未开始 |
 | 9 | 压力测试与工程完善 | planned | 未开始 |
 | 10 | 真实工业视觉插件预留 | planned | 未开始，需用户明确批准 |
@@ -734,17 +737,42 @@ IndustrialAIServiceFramework 0.1.0
 Debug/Release clean build 均成功，项目源码和测试编译 warning 为 0。Visual Studio
 环境的既有 vcpkg applocal `pwsh.exe` 缺失诊断非致命且不是编译器 warning。
 新增并发测试使用 promise/future 屏障和有限 wait_for；没有 fixed sleep 或 detached
-thread。按当前定义，未来 Linux 完整矩阵应为 Foundation 43 + Reactor 45 + TCP 51 +
-HTTP Core 84 + HTTP Integration 16 + Task Runtime 97 + Plugin System 92 = 428，
-但必须以真实 CI 日志为准。
+thread。
 
 ### 当前 Linux 结论
 
-没有当前未提交 Phase 6 改动对应的真实 Linux CI。最近 run `30547126540` 只验证
-Phase 5 提交，不能推断 plugin targets、92 项测试或当前 warning 状态。因此保持：
+Phase 6 功能提交 `66a606bb53bf8ed80b8efd6faf7c6529b5cd22d1` 对应首次
+[Linux CI run 30602538268](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30602538268)，
+workflow `Linux CI`，push event，attempt 1，completed/success。Debug 和 Release
+checkout SHA、本地 HEAD 与 upstream 一致。runner 为 `ubuntu-24.04`，Ubuntu
+24.04.4 LTS，kernel `6.17.0-1020-azure`，GCC 13.3.0，CMake 3.31.6。
+
+| Job | Configure/build | Foundation | Reactor | TCP | HTTP Core | HTTP Integration | Task | Plugin | CTest | Smoke |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---|
+| Linux Debug | success | 43 | 45 | 51 | 84 | 16 | 97 | 92 | 428/428 | N/A |
+| Linux Release | success | 43 | 45 | 51 | 84 | 16 | 97 | 92 | 428/428 | version/config success |
+
+`iaisf_plugin`、`iaisf_plugin_tests` 与规定的并发、freeze/register 竞态、输入快照、
+JSON 转义字节限制、Echo 任意 JSON 原值及 MockVision `mock: true` 测试均实际执行。
+没有 failed、cancelled、skipped、neutral、timeout 或 `continue-on-error`。
+
+该首次 run 的 Debug 和 Release 各有 3 条项目源码 warning（全部
+`-Wsign-conversion`）及 3 条项目测试 warning（全部
+`-Wmissing-field-initializers`），因此只作为功能通过历史记录。
+
+warning 修复提交 `853ccccca80cdc042b3d51eae52fe45566aa2b22` 对应最终
+[Linux CI run 30604428624](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30604428624)，
+workflow `Linux CI`，push event，attempt 1。head SHA、Debug checkout、Release
+checkout、本地 HEAD 与 upstream 完全一致。两个 job 的 configure/build 均成功，
+Debug/Release 各实际通过 428/428，分项仍为 Foundation 43、Reactor 45、TCP 51、
+HTTP Core 84、HTTP Integration 16、Task Runtime 97、Plugin System 92。
+`iaisf_plugin` 和 `iaisf_plugin_tests` 均实际构建，Release version/config smoke
+成功；完整日志中项目源码 warning 0、项目测试 warning 0。workflow、两个 job 和
+所有步骤均 success，无 failed、cancelled、skipped、neutral、timeout 或
+`continue-on-error`。最终状态：
 
 ```text
-PHASE_6_PLUGIN_SYSTEM_IMPLEMENTED_LINUX_VALIDATION_BLOCKED
+PHASE_6_PLUGIN_SYSTEM_COMPLETED
 ```
 
 ## 参考工程保护
@@ -755,7 +783,8 @@ PHASE_6_PLUGIN_SYSTEM_IMPLEMENTED_LINUX_VALIDATION_BLOCKED
 |---:|---:|---|
 | 62 | 59,240,225 | `83AE7E469DEA30C860DEFD4D26CB313B7B3C87EFCD9387414741E152EE46CF27` |
 
-Phase 5 开始、交付前和 Phase 5C 封板前均复核为相同值；Phase 6 开始与交付前也再次一致。
+Phase 5 开始、交付前和 Phase 5C 封板前均复核为相同值；Phase 6 开始、交付前及
+Phase 6D 文档更新及 Phase 6F 封板前后也再次一致。
 参考工程未被构建、格式化或添加到 Git。
 
 ## 未实现
@@ -777,7 +806,7 @@ Phase 5 开始、交付前和 Phase 5C 封板前均复核为相同值；Phase 6 
 - Phase 1 没有剩余验收阻塞。
 - Phase 2 没有剩余验收阻塞。
 - Phase 3 没有剩余封板阻塞；本机仍无 Linux/WSL，当前 Linux 结论来自可追溯的 GitHub Actions run。
-- Phase 4 和 Phase 5 均已完成最终 Linux 封板；Phase 6 等待当前提交的真实 Linux CI。
+- Phase 4、Phase 5 和 Phase 6 均已完成最终 Linux 封板。
 - 默认 FetchContent 首次 Linux 配置需要 GitHub 网络和有效 CA 证书。
 - 系统依赖模式已设计但未在已安装 Linux 包环境验证。
 - Windows/NTFS 工作区不能可靠表达新 shell 脚本的 POSIX executable bit；workflow 会在运行时执行 `chmod +x scripts/*.sh`，人工 Linux 使用前仍应确认权限。
@@ -785,14 +814,16 @@ Phase 5 开始、交付前和 Phase 5C 封板前均复核为相同值；Phase 6 
 
 ## Phase 7 建议入口
 
-Phase 7 只建议实现最小堆 TimerQueue、timerfd、连接 idle timeout、任务 deadline
-与终态竞态测试；不得同时加入 HTTP Task API、动态插件、异步日志、真实
-TensorRT/PCL/GPU、机器人、Agent、数据库或 benchmark。
+Phase 7 只建议组合现有 HttpServer、TaskManager、PluginManager，静态注册
+Echo/MockVision，并实现 `POST /v1/tasks`、`GET /v1/tasks/{id}`、`GET /health`、
+`GET /version`，覆盖 queue-full 503、unknown operation、validation error、安全
+TaskSnapshot 及启动/停止顺序。暂不包含 timerfd、自动 timeout、signalfd、生产 CLI
+常驻、动态插件、GPU/真实 AI、数据库、异步日志或 benchmark。
 
 ## 建议 commit
 
 本轮未执行 commit。建议：
 
 ```text
-feat: implement static plugin system
+docs: complete phase 6 validation record
 ```

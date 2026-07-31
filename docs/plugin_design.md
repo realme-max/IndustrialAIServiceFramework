@@ -2,14 +2,21 @@
 
 ## 1. 状态与范围
 
-Phase 6 已实现跨平台静态插件系统，当前状态：
+Phase 6 跨平台静态插件系统已完成，当前状态：
 
 ```text
-PHASE_6_PLUGIN_SYSTEM_IMPLEMENTED_LINUX_VALIDATION_BLOCKED
+PHASE_6_PLUGIN_SYSTEM_COMPLETED
 ```
 
 Windows VS2022 Debug/Release 已各通过 316/316 CTest，其中 Task Runtime 97、
-Plugin System 92；当前改动尚未 commit/push，因此没有对应的真实 Linux CI。
+Plugin System 92。功能提交 `66a606bb53bf8ed80b8efd6faf7c6529b5cd22d1` 的首次
+[Linux CI run 30602538268](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30602538268)
+Debug/Release 均为 428/428，Plugin System 92/92、Task Runtime 97/97，Release smoke
+成功；但两个配置各有 3 条项目源码 warning 和 3 条项目测试 warning，因此不是最终
+封板证据。warning 修复提交 `853ccccca80cdc042b3d51eae52fe45566aa2b22`
+对应最终 [Linux CI run 30604428624](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30604428624)：
+Debug/Release 均 428/428，Plugin System 92/92、Task Runtime 97/97，Release smoke
+成功，项目源码与测试 warning 均为 0。
 
 “静态”仅表示插件代码编译进进程，并在组合阶段显式注册对象。当前没有动态 `.so`/
 DLL、目录扫描、全局注册宏、热加载、卸载、HTTP Task API、自动 timeout、文件读取、
@@ -96,7 +103,7 @@ public:
 
 契约：
 
-- `validate_input` 必须快速、确定、可重复、无外部可见副作用，不能做文件/网络 I/O
+- `validate_input` 必须快速、纯、确定、可重复、可重入且无外部可见副作用，不能做文件/网络 I/O
   或真实推理；同一输入的成功/失败分类不得依赖调用次数；
 - 同一实例的 `validate_input` 与 `execute` 可能同时运行，多个 worker 也可能并发
   `execute`；插件必须无共享可变状态或自行同步，`const` 本身不提供线程安全保证；
@@ -361,9 +368,10 @@ Total           316
 ```
 
 并发用例使用 promise/future 屏障和有限 `wait_for`，没有 fixed sleep、detached
-thread、网络、文件读取、随机值或测试顺序依赖。当前还没有
-Phase 6 Linux PASS；workflow 已显式构建 plugin targets，必须在 commit/push 后用真实
-Ubuntu 24.04 Debug/Release 完整 CTest 和 smoke 封板。
+thread、网络、文件读取、随机值或测试顺序依赖。Linux Debug/Release 已实际执行全部
+92 项 Plugin 测试，包括并发、register/freeze 竞态、输入快照、转义后字节边界、
+Echo 任意 JSON 原值和 MockVision mock 契约；功能测试全部通过。当前唯一 Phase 6
+封板阻塞是项目 warning 不为 0，必须修复后重新运行完整 Linux CI。
 
 ## 16. 后续边界
 
@@ -378,3 +386,7 @@ Ubuntu 24.04 Debug/Release 完整 CTest 和 smoke 封板。
 
 未来真实或不可信插件可能需要进程隔离、稳定 C ABI、资源配额和安全策略。当前
 C++ `try/catch` 只隔离语言异常，不隔离崩溃、死锁、无限循环或内存破坏。
+
+Phase 7 只建议组合现有 HttpServer、TaskManager、PluginManager，静态注册内置插件并
+增加最小 `/v1/tasks` 提交/查询 API；timerfd、自动超时、signalfd、生产 CLI 常驻、
+动态插件、GPU/真实 AI、数据库、异步日志和 benchmark 均不在该建议范围。

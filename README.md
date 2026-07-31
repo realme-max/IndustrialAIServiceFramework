@@ -2,7 +2,7 @@
 
 面向工业 AI 应用的 C++ 高性能任务服务框架。
 
-> 当前状态：`PHASE_6_PLUGIN_SYSTEM_IMPLEMENTED_LINUX_VALIDATION_BLOCKED`。跨平台静态插件系统及 Task Runtime 适配已完成并通过专项审计；Windows Visual Studio 2022 Debug/Release 均为 316/316（Task Runtime 97、Plugin System 92），项目源码和测试编译 warning 为 0。当前未提交改动尚无对应的真实 Linux CI，不能标记 Phase 6 completed。
+> 当前状态：`PHASE_6_PLUGIN_SYSTEM_COMPLETED`。warning 修复提交 `853ccccca80cdc042b3d51eae52fe45566aa2b22` 已由最终 [Linux CI run 30604428624](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30604428624) 完成 Ubuntu 24.04 Debug/Release 428/428 CTest、Release smoke 和项目源码/测试零 warning 验证。Windows Visual Studio 2022 Debug/Release 均为 316/316。
 
 ## 项目定位
 
@@ -113,7 +113,7 @@ Phase 3 的线程边界不是“TCP 层整体线程安全”：只有 `EventLoop
 
 Phase 5 尚未把 TaskManager 暴露为 HTTP API，也未实现自动 timeout 扫描。Windows Debug/Release 均实际执行 Foundation 43、HTTP Core 84、Task Runtime 85，合计 212/212。最终 [Linux CI run 30547126540](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30547126540) 对实现提交 `79d3d4e89feb71595dc67d820f9a5398dcc814d4` 完成真实验证：Debug/Release 均为 Foundation 43、Reactor 45、TCP 51、HTTP Core 84、HTTP Integration 16、Task Runtime 85，合计 324/324；两个配置均实际构建 `iaisf_task` 和 `iaisf_task_tests`，项目源码和测试编译 warning 为 0。
 
-## Phase 6 已实现、等待 Linux 验证
+## Phase 6 静态插件系统已完成
 
 - 跨平台 `iaisf_plugin` / `iaisf::plugin` 与 `iaisf_plugin_tests`，不依赖 net、tcp 或 http
 - `PluginLimits` 对注册数量、元数据、错误、输入/输出序列化字节、JSON 深度、总节点数、单字符串以及 capabilities 设置经校验的硬上限
@@ -131,7 +131,11 @@ Phase 5 尚未把 TaskManager 暴露为 HTTP API，也未实现自动 timeout �
 - `EchoPlugin` 接受严格 `{"payload": <任意 JSON>}`，成功时直接返回 payload 的独立副本，不附加 operation 包装
 - `MockVisionPlugin` 接受 image_id/width/height/可选 threshold，始终输出确定性 `mock: true`；它不读取图片或点云、不运行模型/GPU，不代表准确率或生产能力，不应直接驱动机器人
 
-Windows Debug/Release clean build 与完整 CTest 均为 316/316：Foundation 43、HTTP Core 84、Task Runtime 97、Plugin System 92；Release version/config smoke 均 exit 0，项目源码和测试编译 warning 为 0。由于本轮未 commit/push，尚无当前改动对应的 Linux CI，Phase 6 保持 validation blocked。
+Windows Debug/Release clean build 与完整 CTest 均为 316/316：Foundation 43、HTTP Core 84、Task Runtime 97、Plugin System 92；Release version/config smoke 均 exit 0，项目源码和测试编译 warning 为 0。
+
+首次功能 push run `30602538268` 对 Phase 6 功能提交 `66a606bb53bf8ed80b8efd6faf7c6529b5cd22d1` 完成 Debug/Release 428/428 与 Release smoke，但两个配置各记录 3 条项目源码 warning 和 3 条项目测试 warning，因此它不是最终封板证据。
+
+warning 修复提交 `853ccccca80cdc042b3d51eae52fe45566aa2b22` 的最终 push run `30604428624` 在 Ubuntu 24.04.4 LTS、kernel `6.17.0-1020-azure`、GCC 13.3.0、CMake 3.31.6 上完成真实验证：Debug/Release 均为 Foundation 43、Reactor 45、TCP 51、HTTP Core 84、HTTP Integration 16、Task Runtime 97、Plugin System 92，共 428/428；`iaisf_plugin`、`iaisf_plugin_tests` 和全部专项测试实际构建/执行，Release version/config smoke 成功，项目源码 warning 0、项目测试 warning 0。两个 job 及所有步骤均为 success，无被隐藏的失败。
 
 ## 尚未实现
 
@@ -160,11 +164,14 @@ Phase 4 (completed)
 Phase 5 (completed)
   bounded fixed thread pool / Task values and limits / Repository / Executor / Manager
 
-Phase 6 (implemented; Linux validation blocked)
+Phase 6 (completed)
   explicit static plugins / frozen registry / validator + handler adapter / Echo / MockVision
 
+Phase 7 (planned; not started)
+  Application composition / static plugin registration / minimal HTTP task API
+
 Later phases (planned)
-  timers -> async logging
+  timers / async logging
 
 Phase 9—10 (planned)
   measured engineering baseline -> production vision-plugin boundary
@@ -342,7 +349,7 @@ ctest --test-dir build/linux-release --output-on-failure
 - CTest CLI version 和 example-config smoke
 - Linux `UniqueFd`、Socket、Channel、EpollPoller 和 EventLoop
 
-真实结果见 [stage_status.md](docs/stage_status.md)。Phase 6 Windows/MSVC Debug/Release 均为 316/316：Foundation 43/43、HTTP Core 84/84、Task Runtime 97/97、Plugin System 92/92；Release `--version` 与示例配置 smoke 成功，项目源码和测试编译 warning 为 0。最近的真实 Linux 结果仍是已封板 Phase 5 的 324/324；它不验证当前 Phase 6 未提交改动。
+真实结果见 [stage_status.md](docs/stage_status.md)。Phase 6 Windows/MSVC Debug/Release 均为 316/316：Foundation 43/43、HTTP Core 84/84、Task Runtime 97/97、Plugin System 92/92。最终 Linux Debug/Release 均为 428/428，Plugin System 92/92、Task Runtime 97/97，Release smoke 成功，项目源码和测试 warning 均为 0。
 
 ## 项目结构
 

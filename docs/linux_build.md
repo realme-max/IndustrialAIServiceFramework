@@ -4,8 +4,9 @@
 
 IndustrialAIServiceFramework 的 Phase 2 Reactor、Phase 3 TCP Transport 和 Phase 4
 HTTP adapter 直接使用 epoll、eventfd、accept4 和 POSIX Socket；HTTP Core、
-Task Runtime 与 Phase 6 Plugin System 本身可移植。Phase 6 已在 Windows 验证，
-但当前改动还没有对应真实 Linux CI。timerfd 与 signalfd 仍是后续计划。
+Task Runtime 与 Phase 6 Plugin System 本身可移植。Phase 6 已完成 Windows 验证和
+最终 Linux Debug/Release 428/428、Release smoke、项目源码/测试零 warning 封板。
+timerfd 与 signalfd 仍是后续计划。
 Windows MinGW 或 MSVC 可以帮助发现一部分可移植 C++ 问题，但不能替代真实 Linux
 构建、测试和运行验证。
 
@@ -468,9 +469,20 @@ Plugin System       92
 Total              428
 ```
 
-这些定义数不能替代真实 Linux 结果。当前改动未 commit/push，没有 run URL、run ID、
-head/checkout SHA 或 Ubuntu 编译日志，故不得写 Linux PASS。Windows 实际结果是
-Debug/Release 316/316；最近可追溯 Linux run `30547126540` 仍只验证 Phase 5。
+Phase 6 功能提交 `66a606bb53bf8ed80b8efd6faf7c6529b5cd22d1` 已由首次
+[Linux CI run 30602538268](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30602538268)
+实际验证。workflow `Linux CI`，push event，attempt 1；head、Debug checkout、
+Release checkout、本地 HEAD 和 upstream 一致。runner 为 `ubuntu-24.04`，环境是
+Ubuntu 24.04.4 LTS、kernel `6.17.0-1020-azure`、GCC 13.3.0、CMake 3.31.6。
+
+| Job | Configure/build | CTest | Task Runtime | Plugin System | Smoke |
+|---|---|---:|---:|---:|---|
+| Linux Debug | success | 428/428 | 97/97 | 92/92 | N/A |
+| Linux Release | success | 428/428 | 97/97 | 92/92 | version/config success |
+
+实际模块数为 Foundation 43、Reactor 45、TCP 51、HTTP Core 84、HTTP Integration
+16、Task Runtime 97、Plugin System 92。`iaisf_plugin` 与 `iaisf_plugin_tests`
+在两个配置都实际构建，专项测试均实际执行。
 
 Phase 6B/6C 增加并审计的 `validate_json_value` 是跨平台 core source；Task Runtime
 与 Plugin targets 均实际链接它。JSON byte 校验用 counting stream 精确匹配 nlohmann
@@ -478,11 +490,38 @@ compact dump 的 UTF-8 输出（包含引号、反斜杠、控制字符和 key �
 中止，不保存额外整份 dump 文本。Adapter 生成的 validator/handler closure 只持有
 只读 PluginManager，不持有 Adapter 或 TaskManager；释放 runtime closure 后 Manager
 与 Plugin 可析构，不存在 shared ownership cycle。Linux CI 必须实际执行 Task
-Runtime 97 和 Plugin System 92，并确认项目源码/测试 warning 为 0；不能只根据上述
-定义数或 workflow target 列表推断。
+Runtime 97 和 Plugin System 92。
+
+本次 run 的功能、CTest 与 smoke 全部成功，但 Debug 和 Release 各出现：
+
+- 项目源码 warning 3 条：`plugin_metadata.cpp` 两条与
+  `mock_vision_plugin.cpp` 一条 `-Wsign-conversion`；
+- 项目测试 warning 3 条：PluginMetadata 聚合初始化的
+  `-Wmissing-field-initializers`。
+
+所有 workflow step 均 success，没有 failed、cancelled、skipped、neutral、timeout
+或 `continue-on-error`。由于项目 warning 不为 0，这次功能成功不是 Phase 6 最终
+零 warning 封板证据。
+
+warning 修复提交 `853ccccca80cdc042b3d51eae52fe45566aa2b22` 的最终
+[Linux CI run 30604428624](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30604428624)
+为 workflow `Linux CI`、push event、attempt 1。head、Debug checkout、Release
+checkout、本地 HEAD 与 upstream 一致；runner 为 `ubuntu-24.04`，Ubuntu 24.04.4
+LTS、kernel `6.17.0-1020-azure`、GCC 13.3.0、CMake 3.31.6。
+
+| Job | Configure/build | CTest | Foundation | Reactor | TCP | HTTP Core | HTTP Integration | Task | Plugin | Smoke |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---|
+| Linux Debug | success | 428/428 | 43 | 45 | 51 | 84 | 16 | 97 | 92 | N/A |
+| Linux Release | success | 428/428 | 43 | 45 | 51 | 84 | 16 | 97 | 92 | version/config success |
+
+两个配置均实际构建 `iaisf_plugin` 和 `iaisf_plugin_tests`，完整日志中项目源码
+warning 0、项目测试 warning 0。Release smoke 输出版本
+`IndustrialAIServiceFramework 0.1.0`，示例配置验证成功。workflow、两个 job 和
+所有步骤均 success，无 failed、cancelled、skipped、neutral、timeout、
+`continue-on-error` 或被隐藏的失败。
 
 当前 Phase 6 状态：
 
 ```text
-PHASE_6_PLUGIN_SYSTEM_IMPLEMENTED_LINUX_VALIDATION_BLOCKED
+PHASE_6_PLUGIN_SYSTEM_COMPLETED
 ```

@@ -4,8 +4,8 @@
 
 - 项目：IndustrialAIServiceFramework
 - 阶段：Phase 6 Static Algorithm Plugin System
-- 日期：2026-07-30
-- 状态：`PHASE_6_PLUGIN_SYSTEM_IMPLEMENTED_LINUX_VALIDATION_BLOCKED`；实现、专项审计与 Windows Debug/Release 316/316 已完成，当前改动尚无真实 Linux CI
+- 日期：2026-07-31
+- 状态：`PHASE_6_PLUGIN_SYSTEM_COMPLETED`；Windows Debug/Release 316/316，最终 Linux Debug/Release 428/428、Release smoke 与项目源码/测试零 warning 验证完成
 - 目标平台：Linux x86_64，C++17
 
 本文同时记录已实现的 Phase 1 基础设施、Phase 2 Reactor、Phase 3 TCP、Phase 4 HTTP、Phase 5 Task Runtime 与 Phase 6 静态插件系统，以及后续目标边界。只有明确列入已实现边界的类才是当前能力。
@@ -195,8 +195,23 @@ Phase 6 新增跨平台 `iaisf_plugin` / `iaisf::plugin`，PUBLIC 依赖
   确定性 JSON，不读取图片/点云、不运行模型或 GPU。
 
 Windows Debug/Release clean build 均为 316/316：Foundation 43、HTTP Core 84、
-Task Runtime 97、Plugin System 92，项目源码和测试 warning 为 0。当前未提交改动
-没有对应 Linux CI，因此不能宣称 Phase 6 completed。
+Task Runtime 97、Plugin System 92，项目源码和测试 warning 为 0。
+
+Phase 6 功能提交 `66a606bb53bf8ed80b8efd6faf7c6529b5cd22d1` 的首次功能
+[Linux CI run 30602538268](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30602538268)
+在 Ubuntu 24.04.4 LTS、kernel `6.17.0-1020-azure`、GCC 13.3.0 和 CMake 3.31.6
+上完成 Debug/Release configure/build、428/428 CTest 与 Release smoke。实际分项为
+Foundation 43、Reactor 45、TCP 51、HTTP Core 84、HTTP Integration 16、Task Runtime
+97、Plugin System 92；两个 plugin target 和要求的专项测试均实际构建/执行。
+然而 Debug 与 Release 各有 3 条项目源码 warning 和 3 条项目测试 warning，故该 run
+只能证明功能通过，不能完成零 warning 封板。
+
+warning 修复提交 `853ccccca80cdc042b3d51eae52fe45566aa2b22` 的最终
+[Linux CI run 30604428624](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30604428624)
+在相同 Ubuntu/GCC/CMake 基线上完成 Debug/Release configure、build 和 428/428
+CTest；`iaisf_plugin`、`iaisf_plugin_tests`、Task Runtime 97 项及 Plugin System
+92 项均实际构建/执行，Release version/config smoke 成功。完整日志中项目源码和
+测试 warning 均为 0，两个 job 与所有步骤均 success，因此 Phase 6 完成封板。
 
 ## 2. 调查结果与设计来源
 
@@ -778,7 +793,7 @@ TimedOut 记录允许显式 `erase_terminal` 释放容量；删除不取消 hand
 工作队列满和 Repository 满在当前层都返回 `ResourceExhausted`。HTTP 状态映射尚未
 实现；未来可以映射为 `503 Service Unavailable`，但 Phase 5 不返回 HTTP 响应。
 
-C++17 无法安全强杀执行任意插件代码的线程。Phase 7 的超时语义是：
+C++17 无法安全强杀执行任意插件代码的线程。未来定时器阶段的超时语义是：
 
 1. 截止时间到达后把仍为 Running 的任务原子地标记为 TimedOut；
 2. handler 若继续运行，晚到结果被丢弃；
@@ -904,11 +919,13 @@ Phase 1 的 `Error` 保留公开字段以维持轻量值语义，因此调用者
 
 ## 19. Phase 7 建议边界
 
-Phase 6 已实现但等待当前改动对应的 Linux CI。后续 Phase 7 建议只实现最小堆
-TimerQueue、timerfd 驱动、连接 idle timeout、任务 deadline 与 first-terminal-wins
-竞态测试；开始前必须先完成 Phase 6 commit/push/真实 Linux 验证。
+Phase 6 已完成零 warning Linux 封板。Phase 7 尚未开始，建议只把现有
+`HttpServer`、`TaskManager` 和 `PluginManager` 组合进 Application，
+静态注册 Echo/MockVision，并实现最小 `POST /v1/tasks`、`GET /v1/tasks/{id}`、
+`GET /health`、`GET /version`。提交、查询、queue-full 503、unknown operation、
+validation error 及启动/停止顺序都必须有集成测试。
 
-Phase 7 不应顺带实现 HTTP Task API、动态插件、异步日志、TensorRT/PCL/GPU、
-真实文件读取、机器人、Agent、多 Reactor、数据库或 benchmark。插件仍不能直接
-操作 TcpConnection、HttpSession、Channel、Socket 或 epoll；未来高风险或不可信
-真实插件应评估独立进程隔离，而不是假设 C++ 异常边界等同故障隔离。
+Phase 7 暂不包含 timerfd、自动任务超时、signalfd、生产 CLI 常驻模式、动态插件、
+GPU/真实 AI、数据库、异步日志或 benchmark。插件仍不能直接操作 TcpConnection、
+HttpSession、Channel、Socket 或 epoll；未来高风险或不可信真实插件应评估独立进程
+隔离，而不是假设 C++ 异常边界等同故障隔离。
