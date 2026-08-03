@@ -5,6 +5,7 @@
 #include <exception>
 #include <limits>
 #include <new>
+#include <stdexcept>
 #include <utility>
 
 #include <sys/timerfd.h>
@@ -144,6 +145,24 @@ Result<TimerId> TimerQueue::run_after(
     return add(now + delay, callback, std::nullopt);
 }
 
+Result<TimerId> TimerQueue::run_every(
+    const Duration interval,
+    const TimerCallback& callback) {
+    if (interval <= Duration::zero()) {
+        return Result<TimerId>::failure(make_error(
+            ErrorCode::InvalidArgument,
+            "repeating timer interval must be positive"));
+    }
+
+    const TimePoint now = Clock::now();
+    if (interval > TimePoint::max() - now) {
+        return Result<TimerId>::failure(make_error(
+            ErrorCode::InvalidArgument,
+            "repeating timer deadline exceeds steady clock range"));
+    }
+    return add(now + interval, callback, interval);
+}
+
 Result<TimerId> TimerQueue::add(
     const TimePoint deadline,
     const TimerCallback& callback,
@@ -162,6 +181,11 @@ Result<TimerId> TimerQueue::add(
         return Result<TimerId>::failure(make_error(
             ErrorCode::InvalidArgument,
             "timer callback cannot be empty"));
+    }
+    if (interval.has_value() && *interval <= Duration::zero()) {
+        return Result<TimerId>::failure(make_error(
+            ErrorCode::InvalidArgument,
+            "repeating timer interval must be positive"));
     }
     if (id_index_.size() >= options_.max_timers) {
         return Result<TimerId>::failure(make_error(
@@ -182,6 +206,7 @@ Result<TimerId> TimerQueue::add(
         TimerRecord record{
             callback,
             std::move(interval),
+            deadline,
             false,
             TimerRecordState::Scheduled,
             std::nullopt};
@@ -445,6 +470,39 @@ Result<void> TimerQueue::collect_expired(const TimePoint now) {
     return arm_next_timer();
 }
 
+Result<TimerQueue::TimePoint> TimerQueue::next_repeating_deadline(
+    const TimePoint previous_deadline,
+    const Duration interval,
+    const TimePoint now) {
+    if (interval <= Duration::zero()) {
+        return Result<TimePoint>::failure(make_error(
+            ErrorCode::InvalidArgument,
+            "repeating timer interval must be positive"));
+    }
+    if (previous_deadline > TimePoint::max() - interval) {
+        return Result<TimePoint>::failure(make_error(
+            ErrorCode::ResourceExhausted,
+            "repeating timer deadline exceeds steady clock range"));
+    }
+
+    const TimePoint nominal_next = previous_deadline + interval;
+    if (nominal_next > now) {
+        return Result<TimePoint>::success(nominal_next);
+    }
+
+    // Preserve the fixed-rate phase while skipping every missed interval.
+    // This arithmetic is constant-time and never replays missed callbacks.
+    const Duration overdue = now - nominal_next;
+    const Duration remainder = overdue % interval;
+    const Duration advance = interval - remainder;
+    if (advance > TimePoint::max() - now) {
+        return Result<TimePoint>::failure(make_error(
+            ErrorCode::ResourceExhausted,
+            "repeating timer deadline exceeds steady clock range"));
+    }
+    return Result<TimePoint>::success(now + advance);
+}
+
 void TimerQueue::handle_readable() noexcept {
     if (faulted_ || shutdown_) {
         return;
@@ -487,6 +545,8 @@ void TimerQueue::dispatch_expired() noexcept {
         }
 
         TimerCallback callback;
+        std::optional<Duration> interval;
+        TimePoint previous_deadline{};
         {
             const auto record_iterator = id_index_.find(id);
             if (record_iterator == id_index_.end()) {
@@ -497,19 +557,84 @@ void TimerQueue::dispatch_expired() noexcept {
                 fail_closed("timer pending-dispatch state is inconsistent");
                 return;
             }
-            record_iterator->second.state =
-                TimerRecordState::DispatchingOneShot;
-            callback = std::move(record_iterator->second.callback);
+            auto& record = record_iterator->second;
+            interval = record.interval;
+            previous_deadline = record.deadline;
+            record.state = interval.has_value()
+                               ? TimerRecordState::DispatchingRepeating
+                               : TimerRecordState::DispatchingOneShot;
+            callback = std::move(record.callback);
         }
 
+        bool callback_failed = false;
         try {
             callback();
         } catch (const std::exception&) {
+            callback_failed = true;
             notify("timer callback threw std::exception", false);
         } catch (...) {
+            callback_failed = true;
             notify("timer callback threw an unknown exception", false);
         }
-        id_index_.erase(id);
+
+        auto record_iterator = id_index_.find(id);
+        if (record_iterator == id_index_.end()) {
+            continue;
+        }
+        auto& record = record_iterator->second;
+        if (!interval.has_value() || callback_failed ||
+            record.cancel_requested || shutdown_ || faulted_ ||
+            owner_.state() != EventLoop::State::Running) {
+            id_index_.erase(record_iterator);
+            continue;
+        }
+
+        auto deadline_result = next_repeating_deadline(
+            previous_deadline,
+            *interval,
+            Clock::now());
+        if (!deadline_result) {
+            id_index_.erase(record_iterator);
+            fail_closed("repeating timer deadline overflowed");
+            return;
+        }
+        const TimePoint next_deadline = std::move(deadline_result).value();
+
+        ScheduleMap::iterator schedule_iterator = schedule_.end();
+        try {
+            const auto schedule_result = schedule_.emplace(
+                DeadlineKey{next_deadline, id.sequence_},
+                id);
+            if (!schedule_result.second) {
+                id_index_.erase(record_iterator);
+                fail_closed("repeating timer schedule key collided");
+                return;
+            }
+            schedule_iterator = schedule_result.first;
+        } catch (const std::exception&) {
+            id_index_.erase(record_iterator);
+            fail_closed("unable to reschedule repeating timer");
+            return;
+        } catch (...) {
+            id_index_.erase(record_iterator);
+            fail_closed("unable to reschedule repeating timer");
+            return;
+        }
+
+        record.callback = std::move(callback);
+        record.deadline = next_deadline;
+        record.state = TimerRecordState::Scheduled;
+        record.schedule_iterator = schedule_iterator;
+
+        if (schedule_iterator == schedule_.begin()) {
+            auto arm_result = arm_next_timer();
+            if (!arm_result) {
+                schedule_.erase(schedule_iterator);
+                id_index_.erase(record_iterator);
+                fail_closed("failed to rearm repeating timer");
+                return;
+            }
+        }
     }
 }
 
@@ -605,6 +730,16 @@ bool TimerQueueTestAccess::faulted(const TimerQueue& queue) noexcept {
     return queue.faulted_;
 }
 
+Result<TimerQueue::TimePoint> TimerQueueTestAccess::next_repeating_deadline(
+    const TimerQueue::TimePoint previous_deadline,
+    const TimerQueue::Duration interval,
+    const TimerQueue::TimePoint now) {
+    return TimerQueue::next_repeating_deadline(
+        previous_deadline,
+        interval,
+        now);
+}
+
 void TimerQueueTestAccess::set_next_sequence(
     TimerQueue& queue,
     const std::uint64_t next_sequence,
@@ -634,6 +769,17 @@ void TimerQueueTestAccess::fail_next_arm(TimerQueue& queue) noexcept {
 
 void TimerQueueTestAccess::fail_next_read(TimerQueue& queue) noexcept {
     queue.fail_next_read_ = true;
+}
+
+void TimerQueueTestAccess::set_record_deadline(
+    TimerQueue& queue,
+    const TimerId id,
+    const TimerQueue::TimePoint deadline) {
+    const auto iterator = queue.id_index_.find(id);
+    if (iterator == queue.id_index_.end()) {
+        throw std::logic_error{"timer id is not present"};
+    }
+    iterator->second.deadline = deadline;
 }
 
 void TimerQueueTestAccess::make_pending_dispatch(

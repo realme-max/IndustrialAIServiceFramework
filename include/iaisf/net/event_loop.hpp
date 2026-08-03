@@ -95,9 +95,12 @@ public:
     [[nodiscard]] Result<void> run();
     void stop() noexcept;
 
-    /** Owner-thread-only one-shot timer scheduling and cancellation. */
+    /** Owner-thread-only timer scheduling and cancellation. */
     [[nodiscard]] Result<TimerId> run_after(
         std::chrono::steady_clock::duration delay,
+        TimerCallback callback);
+    [[nodiscard]] Result<TimerId> run_every(
+        std::chrono::steady_clock::duration interval,
         TimerCallback callback);
     [[nodiscard]] Result<TimerCancelOutcome> cancel_timer(TimerId id);
 

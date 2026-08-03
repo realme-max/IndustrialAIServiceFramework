@@ -226,6 +226,28 @@ Result<TimerId> EventLoop::run_after(
     return timer_queue_->run_after(delay, callback);
 }
 
+Result<TimerId> EventLoop::run_every(
+    const std::chrono::steady_clock::duration interval,
+    TimerCallback callback) {
+    if (!is_in_loop_thread()) {
+        return Result<TimerId>::failure(make_error(
+            ErrorCode::InvalidState,
+            "timer scheduling requires the EventLoop owner thread"));
+    }
+    const State current = state_.load(std::memory_order_acquire);
+    if (current == State::Stopping || current == State::Stopped) {
+        return Result<TimerId>::failure(make_error(
+            ErrorCode::InvalidState,
+            "stopped EventLoop cannot schedule timers"));
+    }
+    if (!timer_queue_) {
+        return Result<TimerId>::failure(make_error(
+            ErrorCode::InvalidState,
+            "EventLoop timer queue is unavailable"));
+    }
+    return timer_queue_->run_every(interval, callback);
+}
+
 Result<TimerCancelOutcome> EventLoop::cancel_timer(const TimerId id) {
     if (!is_in_loop_thread()) {
         return Result<TimerCancelOutcome>::failure(make_error(
