@@ -9,8 +9,14 @@
 #include <vector>
 
 #include "iaisf/net/timer.hpp"
+#include "iaisf/net/unique_fd.hpp"
 
-namespace iaisf::net::detail {
+namespace iaisf::net {
+
+class EventLoop;
+class Channel;
+
+namespace detail {
 
 struct TimerIdLess final {
     [[nodiscard]] bool operator()(TimerId lhs, TimerId rhs) const noexcept {
@@ -19,11 +25,11 @@ struct TimerIdLess final {
 };
 
 /**
- * Pure in-memory timer index used by the Linux timer implementation.
+ * Owner-thread-only timerfd scheduler embedded in one EventLoop.
  *
- * Phase 8A-1 deliberately has no timerfd, Channel, EventLoop, locking, or
- * dispatch behavior. The eventual EventLoop owner thread is responsible for
- * serializing access.
+ * The queue owns its timerfd and Channel but only borrows the EventLoop. It
+ * never adds locking or cross-thread scheduling; EventLoop serializes all
+ * access and performs final Channel removal outside an active event batch.
  */
 class TimerQueue final {
 public:
@@ -31,14 +37,18 @@ public:
     using TimePoint = Clock::time_point;
     using Duration = Clock::duration;
 
+    using EventNotification = std::function<void(const char*, bool)>;
+
     [[nodiscard]] static Result<std::unique_ptr<TimerQueue>> create(
-        const TimerQueueOptions& options);
+        EventLoop& owner,
+        const TimerQueueOptions& options,
+        EventNotification notification);
 
     TimerQueue(const TimerQueue&) = delete;
     TimerQueue& operator=(const TimerQueue&) = delete;
     TimerQueue(TimerQueue&&) = delete;
     TimerQueue& operator=(TimerQueue&&) = delete;
-    ~TimerQueue() = default;
+    ~TimerQueue() noexcept;
 
     [[nodiscard]] Result<TimerId> run_at(
         TimePoint deadline,
@@ -47,6 +57,7 @@ public:
         Duration delay,
         const TimerCallback& callback);
     [[nodiscard]] Result<TimerCancelOutcome> cancel(TimerId id);
+    [[nodiscard]] Result<void> shutdown();
 
 private:
     struct DeadlineKey final {
@@ -90,18 +101,43 @@ private:
         BeforeIdIndexInsert,
     };
 
-    explicit TimerQueue(TimerQueueOptions options) noexcept;
+    TimerQueue(
+        EventLoop& owner,
+        TimerQueueOptions options,
+        UniqueFd timer_fd,
+        EventNotification notification) noexcept;
 
+    [[nodiscard]] Result<void> initialize_channel();
     [[nodiscard]] Result<TimerId> add(
         TimePoint deadline,
         const TimerCallback& callback,
         std::optional<Duration> interval);
+    [[nodiscard]] Result<void> arm_next_timer();
+    [[nodiscard]] Result<void> set_timer(TimePoint deadline);
+    [[nodiscard]] Result<void> disarm_timer();
+    [[nodiscard]] Result<void> drain_timer_fd();
+    [[nodiscard]] Result<void> collect_expired(TimePoint now);
+    void handle_readable() noexcept;
+    void handle_descriptor_failure() noexcept;
+    void dispatch_expired() noexcept;
+    void fail_closed(const char* message) noexcept;
+    void notify(const char* message, bool request_stop) noexcept;
 
+    EventLoop& owner_;
     TimerQueueOptions options_;
+    UniqueFd timer_fd_;
+    std::unique_ptr<Channel> timer_channel_;
+    EventNotification notification_;
     ScheduleMap schedule_;
     IdIndex id_index_;
+    std::vector<TimerId> expired_batch_;
     std::uint64_t next_sequence_{1U};
     bool id_exhausted_{false};
+    bool faulted_{false};
+    bool shutdown_{false};
+    bool fail_next_arm_{false};
+    bool fail_next_read_{false};
+    bool notification_failed_{false};
     AddFailurePoint add_failure_point_{AddFailurePoint::None};
 
     friend class TimerQueueTestAccess;
@@ -122,6 +158,9 @@ public:
     [[nodiscard]] static bool cancel_requested(
         const TimerQueue& queue,
         TimerId id) noexcept;
+    [[nodiscard]] static TimerQueue& queue(EventLoop& loop) noexcept;
+    [[nodiscard]] static int timer_fd(const TimerQueue& queue) noexcept;
+    [[nodiscard]] static bool faulted(const TimerQueue& queue) noexcept;
 
     static void set_next_sequence(
         TimerQueue& queue,
@@ -130,6 +169,8 @@ public:
     static void fail_next_add(
         TimerQueue& queue,
         AddFailurePoint failure_point) noexcept;
+    static void fail_next_arm(TimerQueue& queue) noexcept;
+    static void fail_next_read(TimerQueue& queue) noexcept;
     static void make_pending_dispatch(TimerQueue& queue, TimerId id);
     static void make_dispatching(
         TimerQueue& queue,
@@ -137,4 +178,5 @@ public:
         bool repeating);
 };
 
-}  // namespace iaisf::net::detail
+}  // namespace detail
+}  // namespace iaisf::net

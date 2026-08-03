@@ -1,6 +1,7 @@
 #pragma once
 
 #include <atomic>
+#include <chrono>
 #include <cstddef>
 #include <deque>
 #include <functional>
@@ -11,12 +12,18 @@
 
 #include "iaisf/core/result.hpp"
 #include "iaisf/logging/logger.hpp"
+#include "iaisf/net/timer.hpp"
 #include "iaisf/net/unique_fd.hpp"
 
 namespace iaisf::net {
 
 class Channel;
 class EpollPoller;
+
+namespace detail {
+class TimerQueue;
+class TimerQueueTestAccess;
+}  // namespace detail
 
 /**
  * Single-thread Linux Reactor core with bounded cross-thread callback input.
@@ -88,6 +95,12 @@ public:
     [[nodiscard]] Result<void> run();
     void stop() noexcept;
 
+    /** Owner-thread-only one-shot timer scheduling and cancellation. */
+    [[nodiscard]] Result<TimerId> run_after(
+        std::chrono::steady_clock::duration delay,
+        TimerCallback callback);
+    [[nodiscard]] Result<TimerCancelOutcome> cancel_timer(TimerId id);
+
     [[nodiscard]] bool is_in_loop_thread() const noexcept;
     [[nodiscard]] State state() const noexcept;
 
@@ -111,6 +124,7 @@ public:
 
 private:
     friend struct EventLoopTestAccess;
+    friend class detail::TimerQueueTestAccess;
 
     EventLoop(
         ILogger& logger,
@@ -119,10 +133,12 @@ private:
         std::size_t pending_callback_capacity);
 
     [[nodiscard]] Result<void> initialize_wakeup_channel();
+    [[nodiscard]] Result<void> initialize_timer_queue();
     [[nodiscard]] Result<void> signal_wakeup();
     void drain_wakeup() noexcept;
     void execute_pending_callbacks() noexcept;
     void execute_deferred_cleanups() noexcept;
+    void finalize_timer_queue() noexcept;
     void handle_active_channels(const std::vector<Channel*>& active_channels) noexcept;
     void transition_to_stopped() noexcept;
     void safe_log(LogLevel level, const char* message) noexcept;
@@ -132,6 +148,7 @@ private:
     std::unique_ptr<EpollPoller> poller_;
     UniqueFd wakeup_fd_;
     std::unique_ptr<Channel> wakeup_channel_;
+    std::unique_ptr<detail::TimerQueue> timer_queue_;
     const std::size_t pending_callback_capacity_;
 
     mutable std::mutex pending_mutex_;

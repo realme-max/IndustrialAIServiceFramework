@@ -13,6 +13,7 @@
 
 #include "iaisf/net/channel.hpp"
 #include "iaisf/net/epoll_poller.hpp"
+#include "timer_queue.hpp"
 #include "system_error.hpp"
 
 namespace iaisf::net {
@@ -66,6 +67,11 @@ Result<std::unique_ptr<EventLoop>> EventLoop::create(
         return Result<std::unique_ptr<EventLoop>>::failure(
             std::move(initialization_result).error());
     }
+    initialization_result = loop->initialize_timer_queue();
+    if (!initialization_result) {
+        return Result<std::unique_ptr<EventLoop>>::failure(
+            std::move(initialization_result).error());
+    }
     return Result<std::unique_ptr<EventLoop>>::success(std::move(loop));
 }
 
@@ -91,6 +97,8 @@ EventLoop::~EventLoop() noexcept {
     }
 
     stop();
+    finalize_timer_queue();
+    timer_queue_.reset();
     if (wakeup_channel_ && wakeup_channel_->is_registered()) {
         auto remove_result = poller_->remove(*wakeup_channel_);
         if (!remove_result) {
@@ -106,6 +114,23 @@ Result<void> EventLoop::initialize_wakeup_channel() {
     wakeup_channel_->enable_reading();
     wakeup_channel_->set_edge_triggered(true);
     return update_channel(*wakeup_channel_);
+}
+
+Result<void> EventLoop::initialize_timer_queue() {
+    auto queue_result = detail::TimerQueue::create(
+        *this,
+        TimerQueueOptions{},
+        [this](const char* const message, const bool request_stop) {
+            safe_log(LogLevel::Error, message);
+            if (request_stop) {
+                stop();
+            }
+        });
+    if (!queue_result) {
+        return Result<void>::failure(std::move(queue_result).error());
+    }
+    timer_queue_ = std::move(queue_result).value();
+    return Result<void>::success();
 }
 
 Result<void> EventLoop::run() {
@@ -137,6 +162,7 @@ Result<void> EventLoop::run() {
             execute_deferred_cleanups();
             execute_pending_callbacks();
             execute_deferred_cleanups();
+            finalize_timer_queue();
             transition_to_stopped();
             return Result<void>::failure(std::move(poll_result).error());
         }
@@ -150,6 +176,7 @@ Result<void> EventLoop::run() {
     drain_wakeup();
     execute_pending_callbacks();
     execute_deferred_cleanups();
+    finalize_timer_queue();
     transition_to_stopped();
     return Result<void>::success();
 }
@@ -175,6 +202,48 @@ void EventLoop::stop() noexcept {
             safe_log(LogLevel::Error, "failed to signal EventLoop stop");
         }
     }
+}
+
+Result<TimerId> EventLoop::run_after(
+    const std::chrono::steady_clock::duration delay,
+    TimerCallback callback) {
+    if (!is_in_loop_thread()) {
+        return Result<TimerId>::failure(make_error(
+            ErrorCode::InvalidState,
+            "timer scheduling requires the EventLoop owner thread"));
+    }
+    const State current = state_.load(std::memory_order_acquire);
+    if (current == State::Stopping || current == State::Stopped) {
+        return Result<TimerId>::failure(make_error(
+            ErrorCode::InvalidState,
+            "stopped EventLoop cannot schedule timers"));
+    }
+    if (!timer_queue_) {
+        return Result<TimerId>::failure(make_error(
+            ErrorCode::InvalidState,
+            "EventLoop timer queue is unavailable"));
+    }
+    return timer_queue_->run_after(delay, callback);
+}
+
+Result<TimerCancelOutcome> EventLoop::cancel_timer(const TimerId id) {
+    if (!is_in_loop_thread()) {
+        return Result<TimerCancelOutcome>::failure(make_error(
+            ErrorCode::InvalidState,
+            "timer cancellation requires the EventLoop owner thread"));
+    }
+    const State current = state_.load(std::memory_order_acquire);
+    if (current == State::Stopping || current == State::Stopped) {
+        return Result<TimerCancelOutcome>::failure(make_error(
+            ErrorCode::InvalidState,
+            "stopped EventLoop cannot cancel timers"));
+    }
+    if (!timer_queue_) {
+        return Result<TimerCancelOutcome>::failure(make_error(
+            ErrorCode::InvalidState,
+            "EventLoop timer queue is unavailable"));
+    }
+    return timer_queue_->cancel(id);
 }
 
 bool EventLoop::is_in_loop_thread() const noexcept {
@@ -404,6 +473,16 @@ void EventLoop::execute_deferred_cleanups() noexcept {
         current->pending_ = false;
         current->function_(current->context_);
         current = next;
+    }
+}
+
+void EventLoop::finalize_timer_queue() noexcept {
+    if (!timer_queue_) {
+        return;
+    }
+    auto result = timer_queue_->shutdown();
+    if (!result) {
+        safe_log(LogLevel::Error, "failed to shut down EventLoop timer queue");
     }
 }
 
