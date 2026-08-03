@@ -22,7 +22,8 @@ TcpServerOptions::TcpServerOptions(
     const std::size_t output_initial_capacity,
     const std::size_t output_high_water_mark,
     const std::size_t output_maximum_capacity,
-    std::optional<int> socket_send_buffer_bytes) noexcept
+    std::optional<int> socket_send_buffer_bytes,
+    std::optional<std::chrono::milliseconds> idle_timeout) noexcept
     : listen_backlog_(listen_backlog),
       max_connections_(max_connections),
       input_initial_capacity_(input_initial_capacity),
@@ -30,7 +31,8 @@ TcpServerOptions::TcpServerOptions(
       output_initial_capacity_(output_initial_capacity),
       output_high_water_mark_(output_high_water_mark),
       output_maximum_capacity_(output_maximum_capacity),
-      socket_send_buffer_bytes_(socket_send_buffer_bytes) {}
+      socket_send_buffer_bytes_(socket_send_buffer_bytes),
+      idle_timeout_(idle_timeout) {}
 
 Result<TcpServerOptions> TcpServerOptions::create(
     const std::int64_t listen_backlog,
@@ -40,7 +42,8 @@ Result<TcpServerOptions> TcpServerOptions::create(
     const std::int64_t output_initial_capacity,
     const std::int64_t output_high_water_mark,
     const std::int64_t output_maximum_capacity,
-    const std::optional<std::int64_t> socket_send_buffer_bytes) {
+    const std::optional<std::int64_t> socket_send_buffer_bytes,
+    const std::optional<std::int64_t> idle_timeout_ms) {
     if (listen_backlog <= 0 ||
         listen_backlog > Acceptor::kMaximumBacklog) {
         return Result<TcpServerOptions>::failure(make_error(
@@ -78,6 +81,13 @@ Result<TcpServerOptions> TcpServerOptions::create(
             ErrorCode::InvalidArgument,
             "TCP socket send buffer size is outside the supported range"));
     }
+    if (idle_timeout_ms.has_value() &&
+        (*idle_timeout_ms <= 0 ||
+         *idle_timeout_ms > kMaximumIdleTimeoutMilliseconds)) {
+        return Result<TcpServerOptions>::failure(make_error(
+            ErrorCode::InvalidArgument,
+            "TCP idle timeout is outside the supported range"));
+    }
 
     return Result<TcpServerOptions>::success(TcpServerOptions{
         static_cast<int>(listen_backlog),
@@ -90,6 +100,10 @@ Result<TcpServerOptions> TcpServerOptions::create(
         socket_send_buffer_bytes.has_value()
             ? std::optional<int>{
                   static_cast<int>(*socket_send_buffer_bytes)}
+            : std::nullopt,
+        idle_timeout_ms.has_value()
+            ? std::optional<std::chrono::milliseconds>{
+                  std::chrono::milliseconds{*idle_timeout_ms}}
             : std::nullopt});
 }
 
@@ -102,6 +116,7 @@ TcpServerOptions TcpServerOptions::defaults() noexcept {
         4096U,
         64U * 1024U,
         1024U * 1024U,
+        std::nullopt,
         std::nullopt};
 }
 
@@ -135,6 +150,11 @@ std::size_t TcpServerOptions::output_maximum_capacity() const noexcept {
 
 std::optional<int> TcpServerOptions::socket_send_buffer_bytes() const noexcept {
     return socket_send_buffer_bytes_;
+}
+
+std::optional<std::chrono::milliseconds> TcpServerOptions::idle_timeout()
+    const noexcept {
+    return idle_timeout_;
 }
 
 Result<TcpServer::Ptr> TcpServer::create(
@@ -383,7 +403,8 @@ void TcpServer::handle_new_connection(
         options_.input_maximum_capacity(),
         options_.output_initial_capacity(),
         options_.output_maximum_capacity(),
-        options_.output_high_water_mark());
+        options_.output_high_water_mark(),
+        options_.idle_timeout());
     if (!connection_result) {
         ++rejected_connection_count_;
         safe_log(LogLevel::Error, connection_result.error().message);
