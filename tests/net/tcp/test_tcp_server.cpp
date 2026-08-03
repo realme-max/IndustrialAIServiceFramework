@@ -6,6 +6,7 @@
 #include <future>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -267,6 +268,7 @@ TEST(TcpServerOptionsTest, ProvidesValidatedDefaults) {
         options.output_high_water_mark(),
         options.output_maximum_capacity());
     EXPECT_FALSE(options.socket_send_buffer_bytes().has_value());
+    EXPECT_FALSE(options.idle_timeout().has_value());
 }
 
 TEST(TcpServerOptionsTest, RejectsNegativeZeroCrossFieldAndHardLimitValues) {
@@ -307,6 +309,36 @@ TEST(TcpServerOptionsTest, RejectsNegativeZeroCrossFieldAndHardLimitValues) {
         1,
         1,
         TcpServerOptions::kMaximumBufferBytes + 1);
+    auto zero_idle_timeout = TcpServerOptions::create(
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        std::nullopt,
+        0);
+    auto excessive_idle_timeout = TcpServerOptions::create(
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        std::nullopt,
+        TcpServerOptions::kMaximumIdleTimeoutMilliseconds + 1);
+    auto valid_idle_timeout = TcpServerOptions::create(
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        std::nullopt,
+        250);
 
     EXPECT_FALSE(negative_backlog);
     EXPECT_FALSE(zero_connections);
@@ -317,6 +349,13 @@ TEST(TcpServerOptionsTest, RejectsNegativeZeroCrossFieldAndHardLimitValues) {
     EXPECT_FALSE(excessive_buffer);
     EXPECT_FALSE(zero_socket_send_buffer);
     EXPECT_FALSE(excessive_socket_send_buffer);
+    EXPECT_FALSE(zero_idle_timeout);
+    EXPECT_FALSE(excessive_idle_timeout);
+    ASSERT_TRUE(valid_idle_timeout);
+    ASSERT_TRUE(valid_idle_timeout.value().idle_timeout().has_value());
+    EXPECT_EQ(
+        *valid_idle_timeout.value().idle_timeout(),
+        250ms);
 }
 
 TEST(TcpServerTest, EchoesBinaryBytesAndClosesAfterPeerHalfClose) {
@@ -904,6 +943,72 @@ TEST(TcpServerTest, RearmsHighWaterAfterOutputDrainsBelowThreshold) {
     server.reset();
 }
 
+TEST(TcpServerTest, IdleTimeoutClosesThroughDeferredConnectionCleanup) {
+    RecordingLogger logger;
+    auto loop = make_loop(logger);
+    ASSERT_NE(loop, nullptr);
+    auto options_result = TcpServerOptions::create(
+        16,
+        8,
+        64,
+        1024,
+        64,
+        512,
+        1024,
+        std::nullopt,
+        1);
+    ASSERT_TRUE(options_result);
+    auto server = create_server(
+        *loop,
+        logger,
+        std::move(options_result).value());
+    ASSERT_NE(server, nullptr);
+    ServerCleanupGuard server_cleanup{server};
+    std::size_t connected_count = 0U;
+    std::size_t disconnected_count = 0U;
+    ASSERT_TRUE(server->start(
+        [](const TcpConnection::Ptr&, Buffer& input) {
+            input.retrieve_all();
+        },
+        [
+            &loop,
+            &connected_count,
+            &disconnected_count](const TcpConnection::Ptr& connection) {
+            if (connection->state() == TcpConnection::State::Connected) {
+                ++connected_count;
+                return;
+            }
+            ++disconnected_count;
+            loop->stop();
+        }));
+
+    const Ipv4Endpoint endpoint = server->local_endpoint();
+    std::promise<std::string> client_promise;
+    auto client_result = client_promise.get_future();
+    std::thread client([&loop, endpoint, &client_promise] {
+        ClientSocket socket = connect_client(endpoint);
+        std::string error = socket.error;
+        if (error.empty()) {
+            error = expect_peer_close(socket.fd.get());
+        }
+        client_promise.set_value(error);
+        if (!error.empty()) {
+            loop->stop();
+        }
+    });
+
+    auto run_result = loop->run();
+    client.join();
+
+    ASSERT_TRUE(run_result);
+    EXPECT_TRUE(client_result.get().empty());
+    EXPECT_EQ(connected_count, 1U);
+    EXPECT_EQ(disconnected_count, 1U);
+    EXPECT_EQ(server->connection_count(), 0U);
+    EXPECT_TRUE(server->stop());
+    server.reset();
+}
+
 TEST(TcpServerTest, StopClosesExistingConnectionsWithoutStoppingLoopItself) {
     RecordingLogger logger;
     auto loop = make_loop(logger);
@@ -1311,10 +1416,21 @@ TEST(TcpServerTest, StopInsideActiveBatchDrainsMultipleConnectionsWithFullQueue)
     RecordingLogger logger;
     auto loop = make_loop(logger, 1U);
     ASSERT_NE(loop, nullptr);
+    auto options_result = TcpServerOptions::create(
+        16,
+        8,
+        64,
+        1024,
+        64,
+        512,
+        1024,
+        std::nullopt,
+        60LL * 60LL * 1000LL);
+    ASSERT_TRUE(options_result);
     auto server = create_server(
         *loop,
         logger,
-        TcpServerOptions::defaults());
+        std::move(options_result).value());
     ASSERT_NE(server, nullptr);
     ServerCleanupGuard server_cleanup{server};
     constexpr std::size_t kConnectionCount = 3U;

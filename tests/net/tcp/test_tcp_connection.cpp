@@ -1,8 +1,10 @@
 #include <chrono>
 #include <cerrno>
 #include <cstddef>
+#include <cstdint>
 #include <future>
 #include <memory>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -34,6 +36,29 @@ struct TcpConnectionTestAccess {
 
     static int native_handle(const TcpConnection& connection) noexcept {
         return connection.socket_.native_handle();
+    }
+
+    static std::uint64_t idle_generation(
+        const TcpConnection& connection) noexcept {
+        return connection.idle_generation_;
+    }
+
+    static bool has_idle_timer(const TcpConnection& connection) noexcept {
+        return connection.idle_timer_.has_value();
+    }
+
+    static void handle_read(TcpConnection& connection) {
+        connection.handle_read();
+    }
+
+    static void handle_write(TcpConnection& connection) {
+        connection.handle_write();
+    }
+
+    static void handle_idle_timeout(
+        TcpConnection& connection,
+        const std::uint64_t generation) noexcept {
+        connection.handle_idle_timeout(generation);
     }
 };
 
@@ -95,7 +120,9 @@ ConnectionPair make_connection(
     NullLogger& logger,
     const std::size_t output_initial_capacity = 64U,
     const std::size_t output_maximum_capacity = 1024U,
-    const std::size_t output_high_water_mark = 512U) {
+    const std::size_t output_high_water_mark = 512U,
+    const std::optional<std::chrono::steady_clock::duration> idle_timeout =
+        std::nullopt) {
     int descriptors[2]{-1, -1};
     EXPECT_EQ(
         ::socketpair(
@@ -118,7 +145,8 @@ ConnectionPair make_connection(
         1024U,
         output_initial_capacity,
         output_maximum_capacity,
-        output_high_water_mark);
+        output_high_water_mark,
+        idle_timeout);
     EXPECT_TRUE(connection_result);
     return {
         connection_result ? std::move(connection_result).value() : nullptr,
@@ -244,10 +272,34 @@ TEST(TcpConnectionTest, RejectsInvalidSocketIdentifierAndBufferLimits) {
         1U,
         1U,
         1U);
+    int timeout_descriptors[2]{-1, -1};
+    ASSERT_EQ(
+        ::socketpair(
+            AF_UNIX,
+            SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC,
+            0,
+            timeout_descriptors),
+        0);
+    iaisf::net::UniqueFd timeout_peer{timeout_descriptors[1]};
+    auto invalid_timeout = TcpConnection::create(
+        *loop,
+        logger,
+        3U,
+        iaisf::net::Socket{
+            iaisf::net::UniqueFd{timeout_descriptors[0]}},
+        Ipv4Endpoint::loopback(1U),
+        Ipv4Endpoint::loopback(2U),
+        1U,
+        1U,
+        1U,
+        1U,
+        1U,
+        std::chrono::steady_clock::duration::zero());
 
     ASSERT_FALSE(invalid_socket);
     ASSERT_FALSE(zero_identifier);
     ASSERT_FALSE(invalid_limits);
+    ASSERT_FALSE(invalid_timeout);
     EXPECT_EQ(
         invalid_socket.error().code,
         iaisf::ErrorCode::InvalidArgument);
@@ -256,6 +308,9 @@ TEST(TcpConnectionTest, RejectsInvalidSocketIdentifierAndBufferLimits) {
         iaisf::ErrorCode::InvalidArgument);
     EXPECT_EQ(
         invalid_limits.error().code,
+        iaisf::ErrorCode::InvalidArgument);
+    EXPECT_EQ(
+        invalid_timeout.error().code,
         iaisf::ErrorCode::InvalidArgument);
 }
 
@@ -682,6 +737,257 @@ TEST(TcpConnectionTest, DynamicWriteInterestDrainsAndRearmsHighWater) {
     EXPECT_EQ(transition_count, 2);
     EXPECT_EQ(
         connection->state(),
+        TcpConnection::State::Disconnected);
+}
+
+TEST(TcpConnectionTest, IdleTimerClosesAnInactiveConnection) {
+    NullLogger logger;
+    auto loop = make_loop(logger);
+    ASSERT_NE(loop, nullptr);
+    auto pair = make_connection(
+        *loop,
+        logger,
+        64U,
+        1024U,
+        512U,
+        1ns);
+    ASSERT_NE(pair.connection, nullptr);
+    ConnectionCleanupGuard connection_cleanup{pair.connection};
+    int close_count = 0;
+    int transition_count = 0;
+    ASSERT_TRUE(configure_callbacks(
+        *loop,
+        pair.connection,
+        close_count,
+        transition_count));
+    ASSERT_TRUE(pair.connection->connect_established());
+
+    auto run_result = loop->run();
+
+    ASSERT_TRUE(run_result);
+    EXPECT_EQ(close_count, 1);
+    EXPECT_EQ(transition_count, 2);
+    EXPECT_EQ(
+        pair.connection->state(),
+        TcpConnection::State::Disconnected);
+    EXPECT_FALSE(
+        iaisf::net::tcp::TcpConnectionTestAccess::has_idle_timer(
+            *pair.connection));
+}
+
+TEST(TcpConnectionTest, PositiveReadRefreshesIdleTimerAndRejectsStaleCallback) {
+    NullLogger logger;
+    auto loop = make_loop(logger);
+    ASSERT_NE(loop, nullptr);
+    auto pair = make_connection(
+        *loop,
+        logger,
+        64U,
+        1024U,
+        512U,
+        1h);
+    ASSERT_NE(pair.connection, nullptr);
+    ConnectionCleanupGuard connection_cleanup{pair.connection};
+    int close_count = 0;
+    int transition_count = 0;
+    ASSERT_TRUE(configure_callbacks(
+        *loop,
+        pair.connection,
+        close_count,
+        transition_count));
+    ASSERT_TRUE(pair.connection->connect_established());
+    const std::uint64_t stale_generation =
+        iaisf::net::tcp::TcpConnectionTestAccess::idle_generation(
+            *pair.connection);
+    ASSERT_TRUE(
+        iaisf::net::tcp::TcpConnectionTestAccess::has_idle_timer(
+            *pair.connection));
+    const char byte = 'r';
+    ASSERT_EQ(
+        ::send(pair.peer.get(), &byte, sizeof(byte), MSG_NOSIGNAL),
+        static_cast<ssize_t>(sizeof(byte)));
+
+    iaisf::net::tcp::TcpConnectionTestAccess::handle_read(
+        *pair.connection);
+
+    const std::uint64_t refreshed_generation =
+        iaisf::net::tcp::TcpConnectionTestAccess::idle_generation(
+            *pair.connection);
+    EXPECT_GT(refreshed_generation, stale_generation);
+    EXPECT_TRUE(pair.connection->connected());
+    EXPECT_EQ(close_count, 0);
+    iaisf::net::tcp::TcpConnectionTestAccess::handle_idle_timeout(
+        *pair.connection,
+        stale_generation);
+    EXPECT_TRUE(pair.connection->connected());
+    EXPECT_EQ(close_count, 0);
+
+    ASSERT_TRUE(pair.connection->force_close());
+    auto run_result = loop->run();
+    ASSERT_TRUE(run_result);
+    EXPECT_EQ(close_count, 1);
+    EXPECT_EQ(transition_count, 2);
+}
+
+TEST(TcpConnectionTest, PositiveWriteRefreshesIdleTimerButQueuedOutputDoesNot) {
+    NullLogger logger;
+    auto loop = make_loop(logger);
+    ASSERT_NE(loop, nullptr);
+    auto pair = make_connection(
+        *loop,
+        logger,
+        64U,
+        1024U,
+        512U,
+        1h);
+    ASSERT_NE(pair.connection, nullptr);
+    ConnectionCleanupGuard connection_cleanup{pair.connection};
+    int close_count = 0;
+    int transition_count = 0;
+    ASSERT_TRUE(configure_callbacks(
+        *loop,
+        pair.connection,
+        close_count,
+        transition_count));
+    ASSERT_TRUE(pair.connection->connect_established());
+    const std::uint64_t initial_generation =
+        iaisf::net::tcp::TcpConnectionTestAccess::idle_generation(
+            *pair.connection);
+    constexpr std::string_view kPayload{"write activity"};
+
+    ASSERT_TRUE(pair.connection->send(kPayload));
+    EXPECT_EQ(
+        iaisf::net::tcp::TcpConnectionTestAccess::idle_generation(
+            *pair.connection),
+        initial_generation);
+
+    iaisf::net::tcp::TcpConnectionTestAccess::handle_write(
+        *pair.connection);
+
+    EXPECT_GT(
+        iaisf::net::tcp::TcpConnectionTestAccess::idle_generation(
+            *pair.connection),
+        initial_generation);
+    EXPECT_TRUE(
+        receive_exact_bytes(pair.peer.get(), kPayload).empty());
+
+    ASSERT_TRUE(pair.connection->force_close());
+    auto run_result = loop->run();
+    ASSERT_TRUE(run_result);
+    EXPECT_EQ(close_count, 1);
+    EXPECT_EQ(transition_count, 2);
+}
+
+TEST(TcpConnectionTest, IdleTimersRemainIndependentAcrossConnections) {
+    NullLogger logger;
+    auto loop = make_loop(logger);
+    ASSERT_NE(loop, nullptr);
+    auto first = make_connection(
+        *loop,
+        logger,
+        64U,
+        1024U,
+        512U,
+        1h);
+    auto second = make_connection(
+        *loop,
+        logger,
+        64U,
+        1024U,
+        512U,
+        1h);
+    ASSERT_NE(first.connection, nullptr);
+    ASSERT_NE(second.connection, nullptr);
+    ConnectionCleanupGuard first_cleanup{first.connection};
+    ConnectionCleanupGuard second_cleanup{second.connection};
+    int first_close_count = 0;
+    int second_close_count = 0;
+    const auto configure = [](const TcpConnection::Ptr& connection,
+                              int& close_count) {
+        auto message_result = connection->set_message_callback(
+            [](const TcpConnection::Ptr&, Buffer& input) {
+                input.retrieve_all();
+            });
+        if (!message_result) {
+            return message_result;
+        }
+        auto close_result = connection->set_close_callback(
+            [&close_count](const TcpConnection::Ptr& closing) {
+                ++close_count;
+                EXPECT_TRUE(closing->connect_destroyed());
+            });
+        if (!close_result) {
+            return close_result;
+        }
+        return connection->set_connection_callback(
+            [](const TcpConnection::Ptr&) {});
+    };
+    ASSERT_TRUE(configure(first.connection, first_close_count));
+    ASSERT_TRUE(configure(second.connection, second_close_count));
+    ASSERT_TRUE(first.connection->connect_established());
+    ASSERT_TRUE(second.connection->connect_established());
+    const std::uint64_t first_generation =
+        iaisf::net::tcp::TcpConnectionTestAccess::idle_generation(
+            *first.connection);
+
+    iaisf::net::tcp::TcpConnectionTestAccess::handle_idle_timeout(
+        *first.connection,
+        first_generation);
+
+    EXPECT_EQ(first_close_count, 1);
+    EXPECT_EQ(
+        first.connection->state(),
+        TcpConnection::State::Disconnected);
+    EXPECT_EQ(second_close_count, 0);
+    EXPECT_TRUE(second.connection->connected());
+
+    ASSERT_TRUE(second.connection->force_close());
+    EXPECT_EQ(second_close_count, 1);
+    EXPECT_EQ(
+        second.connection->state(),
+        TcpConnection::State::Disconnected);
+}
+
+TEST(TcpConnectionTest, ExplicitCloseWinsRaceWithIdleTimeoutExactlyOnce) {
+    NullLogger logger;
+    auto loop = make_loop(logger);
+    ASSERT_NE(loop, nullptr);
+    auto pair = make_connection(
+        *loop,
+        logger,
+        64U,
+        1024U,
+        512U,
+        1h);
+    ASSERT_NE(pair.connection, nullptr);
+    ConnectionCleanupGuard connection_cleanup{pair.connection};
+    int close_count = 0;
+    int transition_count = 0;
+    ASSERT_TRUE(configure_callbacks(
+        *loop,
+        pair.connection,
+        close_count,
+        transition_count));
+    ASSERT_TRUE(pair.connection->connect_established());
+    const std::uint64_t timeout_generation =
+        iaisf::net::tcp::TcpConnectionTestAccess::idle_generation(
+            *pair.connection);
+
+    ASSERT_TRUE(pair.connection->force_close());
+    EXPECT_FALSE(
+        iaisf::net::tcp::TcpConnectionTestAccess::has_idle_timer(
+            *pair.connection));
+    iaisf::net::tcp::TcpConnectionTestAccess::handle_idle_timeout(
+        *pair.connection,
+        timeout_generation);
+
+    EXPECT_EQ(close_count, 1);
+    auto run_result = loop->run();
+    ASSERT_TRUE(run_result);
+    EXPECT_EQ(close_count, 1);
+    EXPECT_EQ(transition_count, 2);
+    EXPECT_EQ(
+        pair.connection->state(),
         TcpConnection::State::Disconnected);
 }
 
