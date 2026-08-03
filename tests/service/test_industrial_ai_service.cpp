@@ -1038,8 +1038,8 @@ INSTANTIATE_TEST_SUITE_P(
             "null_root",
             post_request("null"),
             400}),
-    [](const ::testing::TestParamInfo<ErrorCase>& info) {
-        return info.param.name;
+    [](const ::testing::TestParamInfo<ErrorCase>& test_info) {
+        return test_info.param.name;
     });
 
 }  // namespace
