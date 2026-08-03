@@ -1,6 +1,7 @@
 #include <atomic>
 #include <cerrno>
 #include <chrono>
+#include <condition_variable>
 #include <cstdint>
 #include <future>
 #include <limits>
@@ -57,6 +58,16 @@ public:
 private:
     mutable std::mutex mutex_;
     std::vector<std::string> messages_;
+};
+
+class ThrowingLogger final : public iaisf::ILogger {
+public:
+    void log(
+        iaisf::LogLevel,
+        std::string_view,
+        std::string_view) override {
+        throw std::runtime_error{"expected logger failure"};
+    }
 };
 
 struct QueueStorage final {
@@ -793,6 +804,415 @@ TEST(TimerFdIntegrationTest, NonOwnerThreadCannotScheduleTimer) {
 
     std::thread caller{[&loop, &result_promise] {
         result_promise.set_value(loop->run_after(0ns, [] {}));
+    }};
+    caller.join();
+    auto result = result_future.get();
+
+    ASSERT_FALSE(result);
+    EXPECT_EQ(result.error().code, ErrorCode::InvalidState);
+}
+
+TEST(TimerFdIntegrationTest, RunEveryDispatchesRepeatingTimer) {
+    RecordingLogger logger;
+    auto loop = make_event_loop(logger);
+    ASSERT_NE(loop, nullptr);
+    int callback_count = 0;
+
+    auto scheduled = loop->run_every(1ms, [&loop, &callback_count] {
+        ++callback_count;
+        loop->stop();
+    });
+    ASSERT_TRUE(scheduled);
+
+    auto result = loop->run();
+
+    EXPECT_TRUE(result);
+    EXPECT_EQ(callback_count, 1);
+}
+
+TEST(TimerFdIntegrationTest, RunEveryRejectsZeroInterval) {
+    RecordingLogger logger;
+    auto loop = make_event_loop(logger);
+    ASSERT_NE(loop, nullptr);
+
+    auto result = loop->run_every(0ns, [] {});
+
+    ASSERT_FALSE(result);
+    EXPECT_EQ(result.error().code, ErrorCode::InvalidArgument);
+}
+
+TEST(TimerFdIntegrationTest, RunEveryRejectsNegativeInterval) {
+    RecordingLogger logger;
+    auto loop = make_event_loop(logger);
+    ASSERT_NE(loop, nullptr);
+
+    auto result = loop->run_every(-1ns, [] {});
+
+    ASSERT_FALSE(result);
+    EXPECT_EQ(result.error().code, ErrorCode::InvalidArgument);
+}
+
+TEST(TimerFdIntegrationTest, RunEveryRejectsEmptyCallback) {
+    RecordingLogger logger;
+    auto loop = make_event_loop(logger);
+    ASSERT_NE(loop, nullptr);
+
+    auto result = loop->run_every(1ms, TimerCallback{});
+
+    ASSERT_FALSE(result);
+    EXPECT_EQ(result.error().code, ErrorCode::InvalidArgument);
+}
+
+TEST(TimerFdIntegrationTest, RunEveryRejectsInitialDeadlineOverflow) {
+    RecordingLogger logger;
+    auto loop = make_event_loop(logger);
+    ASSERT_NE(loop, nullptr);
+
+    auto result = loop->run_every(TimerQueue::Duration::max(), [] {});
+
+    ASSERT_FALSE(result);
+    EXPECT_EQ(result.error().code, ErrorCode::InvalidArgument);
+}
+
+TEST(TimerFdIntegrationTest, RepeatingTimerRunsAcrossMultiplePeriods) {
+    RecordingLogger logger;
+    auto loop = make_event_loop(logger);
+    ASSERT_NE(loop, nullptr);
+    int callback_count = 0;
+    TimerId repeating_id;
+    TimerCancelOutcome self_cancel = TimerCancelOutcome::NotFound;
+
+    auto scheduled = loop->run_every(
+        1ms,
+        [&loop, &callback_count, &repeating_id, &self_cancel] {
+            ++callback_count;
+            if (callback_count == 3) {
+                auto cancelled = loop->cancel_timer(repeating_id);
+                if (cancelled) {
+                    self_cancel = cancelled.value();
+                }
+                loop->stop();
+            }
+        });
+    ASSERT_TRUE(scheduled);
+    repeating_id = scheduled.value();
+
+    auto result = loop->run();
+
+    EXPECT_TRUE(result);
+    EXPECT_EQ(callback_count, 3);
+    EXPECT_EQ(self_cancel, TimerCancelOutcome::TooLate);
+}
+
+TEST(TimerQueueTest, RepeatingDeadlineUsesFixedRatePhase) {
+    const TimerQueue::TimePoint previous{100ns};
+
+    auto result = TimerQueueTestAccess::next_repeating_deadline(
+        previous,
+        10ns,
+        previous + 4ns);
+
+    ASSERT_TRUE(result);
+    EXPECT_EQ(result.value(), previous + 10ns);
+}
+
+TEST(TimerQueueTest, RepeatingDeadlineSkipsMissedIntervals) {
+    const TimerQueue::TimePoint previous{100ns};
+
+    auto result = TimerQueueTestAccess::next_repeating_deadline(
+        previous,
+        10ns,
+        previous + 35ns);
+
+    ASSERT_TRUE(result);
+    EXPECT_EQ(result.value(), previous + 40ns);
+}
+
+TEST(TimerFdIntegrationTest, MissedIntervalsDoNotReplayCallbacksInBurst) {
+    RecordingLogger logger;
+    auto loop = make_event_loop(logger);
+    ASSERT_NE(loop, nullptr);
+    std::mutex wait_mutex;
+    std::condition_variable wait_condition;
+    int callback_count = 0;
+    int marker_count = 0;
+    TimerId repeating_id;
+
+    auto scheduled = loop->run_every(
+        1ms,
+        [&loop,
+         &wait_mutex,
+         &wait_condition,
+         &callback_count,
+         &marker_count,
+         &repeating_id] {
+            ++callback_count;
+            std::unique_lock<std::mutex> lock{wait_mutex};
+            static_cast<void>(wait_condition.wait_for(lock, 10ms));
+            lock.unlock();
+            auto marker = loop->run_after(
+                0ns,
+                [&loop, &marker_count, &repeating_id] {
+                    ++marker_count;
+                    auto cancelled = loop->cancel_timer(repeating_id);
+                    EXPECT_TRUE(cancelled);
+                    loop->stop();
+                });
+            EXPECT_TRUE(marker);
+        });
+    ASSERT_TRUE(scheduled);
+    repeating_id = scheduled.value();
+
+    auto result = loop->run();
+
+    EXPECT_TRUE(result);
+    EXPECT_EQ(callback_count, 1);
+    EXPECT_EQ(marker_count, 1);
+}
+
+TEST(TimerFdIntegrationTest, RepeatingTimerCanCancelItself) {
+    RecordingLogger logger;
+    auto loop = make_event_loop(logger);
+    ASSERT_NE(loop, nullptr);
+    TimerId repeating_id;
+    TimerCancelOutcome outcome = TimerCancelOutcome::NotFound;
+    int callback_count = 0;
+
+    auto scheduled = loop->run_every(
+        1ms,
+        [&loop, &repeating_id, &outcome, &callback_count] {
+            ++callback_count;
+            auto cancelled = loop->cancel_timer(repeating_id);
+            if (cancelled) {
+                outcome = cancelled.value();
+            }
+            auto stopper = loop->run_after(1ms, [&loop] { loop->stop(); });
+            EXPECT_TRUE(stopper);
+        });
+    ASSERT_TRUE(scheduled);
+    repeating_id = scheduled.value();
+
+    auto result = loop->run();
+
+    EXPECT_TRUE(result);
+    EXPECT_EQ(outcome, TimerCancelOutcome::TooLate);
+    EXPECT_EQ(callback_count, 1);
+}
+
+TEST(TimerFdIntegrationTest, CallbackCanCancelAnotherRepeatingTimer) {
+    RecordingLogger logger;
+    auto loop = make_event_loop(logger);
+    ASSERT_NE(loop, nullptr);
+    int cancelled_callback_count = 0;
+    TimerCancelOutcome outcome = TimerCancelOutcome::NotFound;
+    auto other = loop->run_every(1h, [&cancelled_callback_count] {
+        ++cancelled_callback_count;
+    });
+    ASSERT_TRUE(other);
+
+    ASSERT_TRUE(loop->run_every(1ms, [&loop, &other, &outcome] {
+        auto cancelled = loop->cancel_timer(other.value());
+        if (cancelled) {
+            outcome = cancelled.value();
+        }
+        loop->stop();
+    }));
+
+    auto result = loop->run();
+
+    EXPECT_TRUE(result);
+    EXPECT_EQ(outcome, TimerCancelOutcome::Cancelled);
+    EXPECT_EQ(cancelled_callback_count, 0);
+}
+
+TEST(TimerFdIntegrationTest, RepeatingTimerCanBeCancelledBeforeNextFire) {
+    RecordingLogger logger;
+    auto loop = make_event_loop(logger);
+    ASSERT_NE(loop, nullptr);
+    TimerId repeating_id;
+    TimerCancelOutcome outcome = TimerCancelOutcome::NotFound;
+    int callback_count = 0;
+
+    auto scheduled = loop->run_every(
+        2ms,
+        [&loop, &repeating_id, &callback_count, &outcome] {
+            ++callback_count;
+            auto canceller = loop->run_after(
+                0ns,
+                [&loop, &repeating_id, &outcome] {
+                    auto cancelled = loop->cancel_timer(repeating_id);
+                    if (cancelled) {
+                        outcome = cancelled.value();
+                    }
+                    loop->stop();
+                });
+            EXPECT_TRUE(canceller);
+        });
+    ASSERT_TRUE(scheduled);
+    repeating_id = scheduled.value();
+
+    auto result = loop->run();
+
+    EXPECT_TRUE(result);
+    EXPECT_EQ(callback_count, 1);
+    EXPECT_EQ(outcome, TimerCancelOutcome::Cancelled);
+}
+
+TEST(TimerFdIntegrationTest, StandardExceptionRemovesRepeatingTimer) {
+    RecordingLogger logger;
+    auto loop = make_event_loop(logger);
+    ASSERT_NE(loop, nullptr);
+    int callback_count = 0;
+
+    ASSERT_TRUE(loop->run_every(1ms, [&callback_count] {
+        ++callback_count;
+        throw std::runtime_error{"expected repeating timer failure"};
+    }));
+    ASSERT_TRUE(loop->run_after(5ms, [&loop] { loop->stop(); }));
+
+    auto result = loop->run();
+
+    EXPECT_TRUE(result);
+    EXPECT_EQ(callback_count, 1);
+    EXPECT_TRUE(logger.contains("timer callback threw std::exception"));
+}
+
+TEST(TimerFdIntegrationTest, UnknownExceptionRemovesRepeatingTimer) {
+    RecordingLogger logger;
+    auto loop = make_event_loop(logger);
+    ASSERT_NE(loop, nullptr);
+    int callback_count = 0;
+
+    ASSERT_TRUE(loop->run_every(1ms, [&callback_count] {
+        ++callback_count;
+        throw 7;
+    }));
+    ASSERT_TRUE(loop->run_after(5ms, [&loop] { loop->stop(); }));
+
+    auto result = loop->run();
+
+    EXPECT_TRUE(result);
+    EXPECT_EQ(callback_count, 1);
+    EXPECT_TRUE(logger.contains("timer callback threw an unknown exception"));
+}
+
+TEST(TimerFdIntegrationTest, LoggerFailureDoesNotBreakRepeatingCleanup) {
+    ThrowingLogger logger;
+    auto loop_result = iaisf::net::EventLoop::create(logger, 32U, 32U);
+    ASSERT_TRUE(loop_result);
+    auto loop = std::move(loop_result).value();
+    int callback_count = 0;
+
+    ASSERT_TRUE(loop->run_every(1ms, [&callback_count] {
+        ++callback_count;
+        throw std::runtime_error{"expected repeating timer failure"};
+    }));
+    ASSERT_TRUE(loop->run_after(5ms, [&loop] { loop->stop(); }));
+
+    auto result = loop->run();
+
+    EXPECT_TRUE(result);
+    EXPECT_EQ(callback_count, 1);
+    EXPECT_EQ(loop->logger_failure_count(), 1U);
+}
+
+TEST(TimerFdIntegrationTest, RepeatingCallbackStopPreventsReinsert) {
+    RecordingLogger logger;
+    auto loop = make_event_loop(logger);
+    ASSERT_NE(loop, nullptr);
+    auto& queue = TimerQueueTestAccess::queue(*loop);
+    int callback_count = 0;
+
+    ASSERT_TRUE(loop->run_every(1ms, [&loop, &callback_count] {
+        ++callback_count;
+        loop->stop();
+    }));
+
+    auto result = loop->run();
+
+    EXPECT_TRUE(result);
+    EXPECT_EQ(callback_count, 1);
+    EXPECT_EQ(TimerQueueTestAccess::timer_count(queue), 0U);
+    EXPECT_TRUE(TimerQueueTestAccess::scheduled_ids(queue).empty());
+}
+
+TEST(TimerQueueTest, ShutdownRejectsNewRepeatingTimer) {
+    auto queue = make_queue();
+    ASSERT_TRUE(queue);
+    ASSERT_TRUE(queue->shutdown());
+
+    auto result = queue->run_every(1ms, [] {});
+
+    ASSERT_FALSE(result);
+    EXPECT_EQ(result.error().code, ErrorCode::InvalidState);
+}
+
+TEST(TimerFdIntegrationTest, RepeatingRearmFailureFaultsAndStopsLoop) {
+    RecordingLogger logger;
+    auto loop = make_event_loop(logger);
+    ASSERT_NE(loop, nullptr);
+    auto& queue = TimerQueueTestAccess::queue(*loop);
+    int callback_count = 0;
+
+    ASSERT_TRUE(loop->run_every(1ms, [&queue, &callback_count] {
+        ++callback_count;
+        TimerQueueTestAccess::fail_next_arm(queue);
+    }));
+
+    auto result = loop->run();
+
+    EXPECT_TRUE(result);
+    EXPECT_EQ(callback_count, 1);
+    EXPECT_TRUE(TimerQueueTestAccess::faulted(queue));
+    EXPECT_EQ(TimerQueueTestAccess::timer_count(queue), 0U);
+    EXPECT_TRUE(logger.contains("failed to rearm repeating timer"));
+}
+
+TEST(TimerQueueTest, RepeatingDeadlineOverflowFailsClosedCalculation) {
+    const TimerQueue::TimePoint previous = TimerQueue::TimePoint::max() - 1ns;
+
+    auto result = TimerQueueTestAccess::next_repeating_deadline(
+        previous,
+        2ns,
+        previous);
+
+    ASSERT_FALSE(result);
+    EXPECT_EQ(result.error().code, ErrorCode::ResourceExhausted);
+}
+
+TEST(TimerFdIntegrationTest, RepeatingDeadlineOverflowFaultsAndStopsLoop) {
+    RecordingLogger logger;
+    auto loop = make_event_loop(logger);
+    ASSERT_NE(loop, nullptr);
+    auto& queue = TimerQueueTestAccess::queue(*loop);
+    int callback_count = 0;
+    auto scheduled = loop->run_every(1ms, [&callback_count] {
+        ++callback_count;
+    });
+    ASSERT_TRUE(scheduled);
+    TimerQueueTestAccess::set_record_deadline(
+        queue,
+        scheduled.value(),
+        TimerQueue::TimePoint::max() - 1ns);
+
+    auto result = loop->run();
+
+    EXPECT_TRUE(result);
+    EXPECT_EQ(callback_count, 1);
+    EXPECT_TRUE(TimerQueueTestAccess::faulted(queue));
+    EXPECT_EQ(TimerQueueTestAccess::timer_count(queue), 0U);
+    EXPECT_TRUE(logger.contains("repeating timer deadline overflowed"));
+}
+
+TEST(TimerFdIntegrationTest, NonOwnerThreadCannotScheduleRepeatingTimer) {
+    RecordingLogger logger;
+    auto loop = make_event_loop(logger);
+    ASSERT_NE(loop, nullptr);
+    std::promise<iaisf::Result<TimerId>> result_promise;
+    auto result_future = result_promise.get_future();
+
+    std::thread caller{[&loop, &result_promise] {
+        result_promise.set_value(loop->run_every(1ms, [] {}));
     }};
     caller.join();
     auto result = result_future.get();

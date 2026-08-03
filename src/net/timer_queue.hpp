@@ -56,6 +56,9 @@ public:
     [[nodiscard]] Result<TimerId> run_after(
         Duration delay,
         const TimerCallback& callback);
+    [[nodiscard]] Result<TimerId> run_every(
+        Duration interval,
+        const TimerCallback& callback);
     [[nodiscard]] Result<TimerCancelOutcome> cancel(TimerId id);
     [[nodiscard]] Result<void> shutdown();
 
@@ -88,6 +91,7 @@ private:
     struct TimerRecord final {
         TimerCallback callback;
         std::optional<Duration> interval;
+        TimePoint deadline;
         bool cancel_requested{false};
         TimerRecordState state{TimerRecordState::Scheduled};
         std::optional<ScheduleMap::iterator> schedule_iterator;
@@ -117,6 +121,10 @@ private:
     [[nodiscard]] Result<void> disarm_timer();
     [[nodiscard]] Result<void> drain_timer_fd();
     [[nodiscard]] Result<void> collect_expired(TimePoint now);
+    [[nodiscard]] static Result<TimePoint> next_repeating_deadline(
+        TimePoint previous_deadline,
+        Duration interval,
+        TimePoint now);
     void handle_readable() noexcept;
     void handle_descriptor_failure() noexcept;
     void dispatch_expired() noexcept;
@@ -161,6 +169,10 @@ public:
     [[nodiscard]] static TimerQueue& queue(EventLoop& loop) noexcept;
     [[nodiscard]] static int timer_fd(const TimerQueue& queue) noexcept;
     [[nodiscard]] static bool faulted(const TimerQueue& queue) noexcept;
+    [[nodiscard]] static Result<TimerQueue::TimePoint> next_repeating_deadline(
+        TimerQueue::TimePoint previous_deadline,
+        TimerQueue::Duration interval,
+        TimerQueue::TimePoint now);
 
     static void set_next_sequence(
         TimerQueue& queue,
@@ -171,6 +183,10 @@ public:
         AddFailurePoint failure_point) noexcept;
     static void fail_next_arm(TimerQueue& queue) noexcept;
     static void fail_next_read(TimerQueue& queue) noexcept;
+    static void set_record_deadline(
+        TimerQueue& queue,
+        TimerId id,
+        TimerQueue::TimePoint deadline);
     static void make_pending_dispatch(TimerQueue& queue, TimerId id);
     static void make_dispatching(
         TimerQueue& queue,
