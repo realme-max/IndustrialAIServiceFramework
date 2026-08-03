@@ -1,13 +1,24 @@
+#include <atomic>
+#include <cerrno>
 #include <chrono>
 #include <cstdint>
+#include <future>
 #include <limits>
 #include <memory>
+#include <mutex>
 #include <stdexcept>
+#include <string>
+#include <string_view>
+#include <thread>
 #include <vector>
 
+#include <fcntl.h>
 #include <gtest/gtest.h>
+#include <unistd.h>
 
 #include "iaisf/core/error.hpp"
+#include "iaisf/logging/logger.hpp"
+#include "iaisf/net/event_loop.hpp"
 #include "iaisf/net/timer.hpp"
 #include "timer_queue.hpp"
 
@@ -21,19 +32,99 @@ using iaisf::net::TimerQueueOptions;
 using iaisf::net::detail::TimerQueue;
 using iaisf::net::detail::TimerQueueTestAccess;
 
-std::unique_ptr<TimerQueue> make_queue(
+using namespace std::chrono_literals;
+
+class RecordingLogger final : public iaisf::ILogger {
+public:
+    void log(
+        iaisf::LogLevel,
+        std::string_view,
+        const std::string_view message) override {
+        std::lock_guard<std::mutex> lock{mutex_};
+        messages_.emplace_back(message);
+    }
+
+    [[nodiscard]] bool contains(const std::string_view fragment) const {
+        std::lock_guard<std::mutex> lock{mutex_};
+        for (const auto& message : messages_) {
+            if (message.find(fragment) != std::string::npos) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+private:
+    mutable std::mutex mutex_;
+    std::vector<std::string> messages_;
+};
+
+struct QueueStorage final {
+    RecordingLogger logger;
+    std::size_t notification_count{0U};
+    std::unique_ptr<iaisf::net::EventLoop> loop;
+    std::unique_ptr<TimerQueue> queue;
+};
+
+class QueueHandle final {
+public:
+    explicit QueueHandle(std::unique_ptr<QueueStorage> storage) noexcept
+        : storage_(std::move(storage)) {}
+
+    [[nodiscard]] explicit operator bool() const noexcept {
+        return storage_ && storage_->queue;
+    }
+
+    [[nodiscard]] TimerQueue* operator->() const noexcept {
+        return storage_->queue.get();
+    }
+
+    [[nodiscard]] TimerQueue& operator*() const noexcept {
+        return *storage_->queue;
+    }
+
+private:
+    std::unique_ptr<QueueStorage> storage_;
+};
+
+QueueHandle make_queue(
     const std::size_t max_timers = TimerQueueOptions::kDefaultMaxTimers) {
+    auto storage = std::make_unique<QueueStorage>();
+    auto loop_result = iaisf::net::EventLoop::create(storage->logger, 32U, 32U);
+    EXPECT_TRUE(loop_result);
+    if (!loop_result) {
+        return QueueHandle{nullptr};
+    }
+    storage->loop = std::move(loop_result).value();
+
     auto options_result = TimerQueueOptions::create(max_timers);
     EXPECT_TRUE(options_result);
     if (!options_result) {
-        return nullptr;
+        return QueueHandle{nullptr};
     }
-    auto queue_result = TimerQueue::create(options_result.value());
+    QueueStorage* const storage_pointer = storage.get();
+    auto queue_result = TimerQueue::create(
+        *storage->loop,
+        options_result.value(),
+        [storage_pointer](const char*, bool) {
+            ++storage_pointer->notification_count;
+        });
     EXPECT_TRUE(queue_result);
     if (!queue_result) {
+        return QueueHandle{nullptr};
+    }
+    storage->queue = std::move(queue_result).value();
+    return QueueHandle{std::move(storage)};
+}
+
+std::unique_ptr<iaisf::net::EventLoop> make_event_loop(
+    RecordingLogger& logger) {
+    auto result = iaisf::net::EventLoop::create(logger, 32U, 32U);
+    EXPECT_TRUE(result);
+    if (!result) {
         return nullptr;
     }
-    return std::move(queue_result).value();
+    return std::move(result).value();
 }
 
 TEST(TimerIdTest, DefaultConstructedIdIsInvalid) {
@@ -79,8 +170,17 @@ TEST(TimerQueueOptionsTest, RejectsCapacityAboveHardMaximum) {
 TEST(TimerQueueTest, RejectsMutatedInvalidOptionsAtQueueCreation) {
     TimerQueueOptions options;
     options.max_timers = 0U;
+    RecordingLogger logger;
+    auto loop_result = iaisf::net::EventLoop::create(logger, 16U, 16U);
+    ASSERT_TRUE(loop_result);
+    auto loop = std::move(loop_result).value();
 
-    auto result = TimerQueue::create(options);
+    auto result = TimerQueue::create(
+        *loop,
+        options,
+        [](const char*, bool) noexcept {
+            static_cast<void>(0);
+        });
 
     ASSERT_FALSE(result);
     EXPECT_EQ(result.error().code, ErrorCode::InvalidArgument);
@@ -88,7 +188,7 @@ TEST(TimerQueueTest, RejectsMutatedInvalidOptionsAtQueueCreation) {
 
 TEST(TimerQueueTest, AllocatesUniqueMonotonicIdsWithoutReuse) {
     auto queue = make_queue(3U);
-    ASSERT_NE(queue, nullptr);
+    ASSERT_TRUE(queue);
     const auto deadline = TimerQueue::TimePoint{};
 
     auto first = queue->run_at(deadline, [] {});
@@ -111,7 +211,7 @@ TEST(TimerQueueTest, AllocatesUniqueMonotonicIdsWithoutReuse) {
 
 TEST(TimerQueueTest, OrdersTimersByDeadline) {
     auto queue = make_queue(3U);
-    ASSERT_NE(queue, nullptr);
+    ASSERT_TRUE(queue);
     const auto origin = TimerQueue::TimePoint{};
 
     auto later = queue->run_at(origin + std::chrono::seconds{3}, [] {});
@@ -130,7 +230,7 @@ TEST(TimerQueueTest, OrdersTimersByDeadline) {
 
 TEST(TimerQueueTest, UsesSequenceOrderForEqualDeadlines) {
     auto queue = make_queue(3U);
-    ASSERT_NE(queue, nullptr);
+    ASSERT_TRUE(queue);
     const auto deadline = TimerQueue::TimePoint{};
 
     auto first = queue->run_at(deadline, [] {});
@@ -149,7 +249,7 @@ TEST(TimerQueueTest, UsesSequenceOrderForEqualDeadlines) {
 
 TEST(TimerQueueTest, EnforcesCapacityWithoutLeavingResidualState) {
     auto queue = make_queue(2U);
-    ASSERT_NE(queue, nullptr);
+    ASSERT_TRUE(queue);
 
     ASSERT_TRUE(queue->run_at(TimerQueue::TimePoint{}, [] {}));
     ASSERT_TRUE(queue->run_at(TimerQueue::TimePoint{}, [] {}));
@@ -163,7 +263,7 @@ TEST(TimerQueueTest, EnforcesCapacityWithoutLeavingResidualState) {
 
 TEST(TimerQueueTest, RejectsEmptyCallbackWithoutConsumingId) {
     auto queue = make_queue(1U);
-    ASSERT_NE(queue, nullptr);
+    ASSERT_TRUE(queue);
 
     auto rejected = queue->run_at(
         TimerQueue::TimePoint{},
@@ -178,7 +278,7 @@ TEST(TimerQueueTest, RejectsEmptyCallbackWithoutConsumingId) {
 
 TEST(TimerQueueTest, RejectsNegativeDelayWithoutConsumingId) {
     auto queue = make_queue(1U);
-    ASSERT_NE(queue, nullptr);
+    ASSERT_TRUE(queue);
 
     auto rejected = queue->run_after(-std::chrono::nanoseconds{1}, [] {});
     auto accepted = queue->run_after(TimerQueue::Duration::zero(), [] {});
@@ -201,7 +301,7 @@ TEST(TimerQueueTest, CallbackCopyFailureLeavesQueueUnchanged) {
     };
 
     auto queue = make_queue(1U);
-    ASSERT_NE(queue, nullptr);
+    ASSERT_TRUE(queue);
     TimerCallback callback{ThrowOnCopy{}};
 
     auto result = queue->run_at(TimerQueue::TimePoint{}, callback);
@@ -216,7 +316,7 @@ TEST(TimerQueueTest, CallbackCopyFailureLeavesQueueUnchanged) {
 
 TEST(TimerQueueTest, ScheduleInsertionFailureRollsBackAndPreservesId) {
     auto queue = make_queue(1U);
-    ASSERT_NE(queue, nullptr);
+    ASSERT_TRUE(queue);
     TimerQueueTestAccess::fail_next_add(
         *queue,
         TimerQueueTestAccess::AddFailurePoint::BeforeScheduleInsert);
@@ -234,7 +334,7 @@ TEST(TimerQueueTest, ScheduleInsertionFailureRollsBackAndPreservesId) {
 
 TEST(TimerQueueTest, IdIndexInsertionFailureRollsBackScheduleAndPreservesId) {
     auto queue = make_queue(1U);
-    ASSERT_NE(queue, nullptr);
+    ASSERT_TRUE(queue);
     TimerQueueTestAccess::fail_next_add(
         *queue,
         TimerQueueTestAccess::AddFailurePoint::BeforeIdIndexInsert);
@@ -252,7 +352,7 @@ TEST(TimerQueueTest, IdIndexInsertionFailureRollsBackScheduleAndPreservesId) {
 
 TEST(TimerQueueTest, AllocatesMaximumIdOnceThenReportsPermanentExhaustion) {
     auto queue = make_queue(2U);
-    ASSERT_NE(queue, nullptr);
+    ASSERT_TRUE(queue);
     TimerQueueTestAccess::set_next_sequence(
         *queue,
         std::numeric_limits<std::uint64_t>::max());
@@ -273,7 +373,7 @@ TEST(TimerQueueTest, AllocatesMaximumIdOnceThenReportsPermanentExhaustion) {
 
 TEST(TimerQueueTest, FailureAtMaximumIdDoesNotExhaustSequence) {
     auto queue = make_queue(1U);
-    ASSERT_NE(queue, nullptr);
+    ASSERT_TRUE(queue);
     TimerQueueTestAccess::set_next_sequence(
         *queue,
         std::numeric_limits<std::uint64_t>::max());
@@ -293,7 +393,7 @@ TEST(TimerQueueTest, FailureAtMaximumIdDoesNotExhaustSequence) {
 
 TEST(TimerQueueTest, CancelsScheduledTimerFromBothIndexes) {
     auto queue = make_queue(1U);
-    ASSERT_NE(queue, nullptr);
+    ASSERT_TRUE(queue);
     auto added = queue->run_at(TimerQueue::TimePoint{}, [] {});
     ASSERT_TRUE(added);
 
@@ -308,7 +408,7 @@ TEST(TimerQueueTest, CancelsScheduledTimerFromBothIndexes) {
 
 TEST(TimerQueueTest, CancellingSameTimerTwiceReturnsNotFound) {
     auto queue = make_queue(1U);
-    ASSERT_NE(queue, nullptr);
+    ASSERT_TRUE(queue);
     auto added = queue->run_at(TimerQueue::TimePoint{}, [] {});
     ASSERT_TRUE(added);
     ASSERT_TRUE(queue->cancel(added.value()));
@@ -321,7 +421,7 @@ TEST(TimerQueueTest, CancellingSameTimerTwiceReturnsNotFound) {
 
 TEST(TimerQueueTest, RejectsInvalidTimerId) {
     auto queue = make_queue(1U);
-    ASSERT_NE(queue, nullptr);
+    ASSERT_TRUE(queue);
 
     auto result = queue->cancel(TimerId{});
 
@@ -331,7 +431,7 @@ TEST(TimerQueueTest, RejectsInvalidTimerId) {
 
 TEST(TimerQueueTest, CancelsPendingDispatchBeforeCallbackStarts) {
     auto queue = make_queue(1U);
-    ASSERT_NE(queue, nullptr);
+    ASSERT_TRUE(queue);
     auto added = queue->run_at(TimerQueue::TimePoint{}, [] {});
     ASSERT_TRUE(added);
     TimerQueueTestAccess::make_pending_dispatch(*queue, added.value());
@@ -345,7 +445,7 @@ TEST(TimerQueueTest, CancelsPendingDispatchBeforeCallbackStarts) {
 
 TEST(TimerQueueTest, DispatchingOneShotIsTooLateToCancel) {
     auto queue = make_queue(1U);
-    ASSERT_NE(queue, nullptr);
+    ASSERT_TRUE(queue);
     auto added = queue->run_at(TimerQueue::TimePoint{}, [] {});
     ASSERT_TRUE(added);
     TimerQueueTestAccess::make_dispatching(*queue, added.value(), false);
@@ -361,7 +461,7 @@ TEST(TimerQueueTest, DispatchingOneShotIsTooLateToCancel) {
 
 TEST(TimerQueueTest, DispatchingRepeatingLatchesCancelAndReturnsTooLate) {
     auto queue = make_queue(1U);
-    ASSERT_NE(queue, nullptr);
+    ASSERT_TRUE(queue);
     auto added = queue->run_at(TimerQueue::TimePoint{}, [] {});
     ASSERT_TRUE(added);
     TimerQueueTestAccess::make_dispatching(*queue, added.value(), true);
@@ -372,6 +472,333 @@ TEST(TimerQueueTest, DispatchingRepeatingLatchesCancelAndReturnsTooLate) {
     EXPECT_EQ(result.value(), TimerCancelOutcome::TooLate);
     EXPECT_TRUE(
         TimerQueueTestAccess::cancel_requested(*queue, added.value()));
+}
+
+TEST(TimerFdIntegrationTest, CreatesNonblockingCloseOnExecDescriptorAndClosesIt) {
+    RecordingLogger logger;
+    int descriptor = -1;
+    {
+        auto loop = make_event_loop(logger);
+        ASSERT_NE(loop, nullptr);
+        auto& queue = TimerQueueTestAccess::queue(*loop);
+        descriptor = TimerQueueTestAccess::timer_fd(queue);
+        ASSERT_GE(descriptor, 0);
+
+        const int status_flags = ::fcntl(descriptor, F_GETFL);
+        const int descriptor_flags = ::fcntl(descriptor, F_GETFD);
+        ASSERT_GE(status_flags, 0);
+        ASSERT_GE(descriptor_flags, 0);
+        EXPECT_NE(status_flags & O_NONBLOCK, 0);
+        EXPECT_NE(descriptor_flags & FD_CLOEXEC, 0);
+    }
+
+    errno = 0;
+    EXPECT_EQ(::fcntl(descriptor, F_GETFD), -1);
+    EXPECT_EQ(errno, EBADF);
+}
+
+TEST(TimerFdIntegrationTest, RunAfterDispatchesOneShotExactlyOnce) {
+    RecordingLogger logger;
+    auto loop = make_event_loop(logger);
+    ASSERT_NE(loop, nullptr);
+    int callback_count = 0;
+
+    auto scheduled = loop->run_after(0ns, [&loop, &callback_count] {
+        ++callback_count;
+        loop->stop();
+    });
+    ASSERT_TRUE(scheduled);
+
+    auto result = loop->run();
+
+    EXPECT_TRUE(result);
+    EXPECT_EQ(callback_count, 1);
+    EXPECT_EQ(loop->state(), iaisf::net::EventLoop::State::Stopped);
+}
+
+TEST(TimerFdIntegrationTest, CallbackDoesNotRunBeforeItsDeadline) {
+    RecordingLogger logger;
+    auto loop = make_event_loop(logger);
+    ASSERT_NE(loop, nullptr);
+    constexpr auto delay = 10ms;
+    const auto start = TimerQueue::Clock::now();
+    TimerQueue::TimePoint callback_time{};
+
+    ASSERT_TRUE(loop->run_after(delay, [&loop, &callback_time] {
+        callback_time = TimerQueue::Clock::now();
+        loop->stop();
+    }));
+
+    auto result = loop->run();
+
+    EXPECT_TRUE(result);
+    EXPECT_GE(callback_time, start + delay);
+}
+
+TEST(TimerFdIntegrationTest, DispatchesMultipleTimersByDeadline) {
+    RecordingLogger logger;
+    auto loop = make_event_loop(logger);
+    ASSERT_NE(loop, nullptr);
+    auto& queue = TimerQueueTestAccess::queue(*loop);
+    const auto base = TimerQueue::Clock::now();
+    std::vector<int> order;
+
+    ASSERT_TRUE(queue.run_at(base + 20ms, [&loop, &order] {
+        order.push_back(3);
+        loop->stop();
+    }));
+    ASSERT_TRUE(queue.run_at(base, [&order] { order.push_back(1); }));
+    ASSERT_TRUE(queue.run_at(base + 10ms, [&order] { order.push_back(2); }));
+
+    auto result = loop->run();
+
+    EXPECT_TRUE(result);
+    EXPECT_EQ(order, (std::vector<int>{1, 2, 3}));
+}
+
+TEST(TimerFdIntegrationTest, EqualDeadlinesUseSequenceOrder) {
+    RecordingLogger logger;
+    auto loop = make_event_loop(logger);
+    ASSERT_NE(loop, nullptr);
+    auto& queue = TimerQueueTestAccess::queue(*loop);
+    const auto deadline = TimerQueue::Clock::now() + 1ms;
+    std::vector<int> order;
+
+    ASSERT_TRUE(queue.run_at(deadline, [&order] { order.push_back(1); }));
+    ASSERT_TRUE(queue.run_at(deadline, [&order] { order.push_back(2); }));
+    ASSERT_TRUE(queue.run_at(deadline, [&loop, &order] {
+        order.push_back(3);
+        loop->stop();
+    }));
+
+    auto result = loop->run();
+
+    EXPECT_TRUE(result);
+    EXPECT_EQ(order, (std::vector<int>{1, 2, 3}));
+}
+
+TEST(TimerFdIntegrationTest, CancelBeforeFirePreventsCallback) {
+    RecordingLogger logger;
+    auto loop = make_event_loop(logger);
+    ASSERT_NE(loop, nullptr);
+    int cancelled_callback_count = 0;
+    auto scheduled = loop->run_after(1h, [&cancelled_callback_count] {
+        ++cancelled_callback_count;
+    });
+    ASSERT_TRUE(scheduled);
+
+    auto cancelled = loop->cancel_timer(scheduled.value());
+    ASSERT_TRUE(cancelled);
+    EXPECT_EQ(cancelled.value(), TimerCancelOutcome::Cancelled);
+    ASSERT_TRUE(loop->run_after(0ns, [&loop] { loop->stop(); }));
+
+    auto result = loop->run();
+
+    EXPECT_TRUE(result);
+    EXPECT_EQ(cancelled_callback_count, 0);
+}
+
+TEST(TimerFdIntegrationTest, CancelUnknownAndInvalidIdsHaveStableOutcomes) {
+    RecordingLogger logger;
+    auto loop = make_event_loop(logger);
+    ASSERT_NE(loop, nullptr);
+    auto scheduled = loop->run_after(1h, [] {});
+    ASSERT_TRUE(scheduled);
+    ASSERT_TRUE(loop->cancel_timer(scheduled.value()));
+
+    auto unknown = loop->cancel_timer(scheduled.value());
+    auto invalid = loop->cancel_timer(TimerId{});
+
+    ASSERT_TRUE(unknown);
+    EXPECT_EQ(unknown.value(), TimerCancelOutcome::NotFound);
+    ASSERT_FALSE(invalid);
+    EXPECT_EQ(invalid.error().code, ErrorCode::InvalidArgument);
+}
+
+TEST(TimerFdIntegrationTest, CallbackCanScheduleTimerOutsideCurrentSnapshot) {
+    RecordingLogger logger;
+    auto loop = make_event_loop(logger);
+    ASSERT_NE(loop, nullptr);
+    std::vector<int> order;
+    bool nested_schedule_succeeded = false;
+
+    ASSERT_TRUE(loop->run_after(
+        0ns,
+        [&loop, &order, &nested_schedule_succeeded] {
+            order.push_back(1);
+            auto nested = loop->run_after(0ns, [&loop, &order] {
+                order.push_back(2);
+                loop->stop();
+            });
+            nested_schedule_succeeded = static_cast<bool>(nested);
+        }));
+
+    auto result = loop->run();
+
+    EXPECT_TRUE(result);
+    EXPECT_TRUE(nested_schedule_succeeded);
+    EXPECT_EQ(order, (std::vector<int>{1, 2}));
+}
+
+TEST(TimerFdIntegrationTest, CallbackCanCancelPendingSnapshotTimer) {
+    RecordingLogger logger;
+    auto loop = make_event_loop(logger);
+    ASSERT_NE(loop, nullptr);
+    auto& queue = TimerQueueTestAccess::queue(*loop);
+    const auto deadline = TimerQueue::Clock::now() + 1ms;
+    TimerId second_id;
+    TimerCancelOutcome cancel_outcome = TimerCancelOutcome::NotFound;
+    int second_callback_count = 0;
+
+    ASSERT_TRUE(queue.run_at(
+        deadline,
+        [&loop, &second_id, &cancel_outcome] {
+            auto cancelled = loop->cancel_timer(second_id);
+            if (cancelled) {
+                cancel_outcome = cancelled.value();
+            }
+            auto stopper = loop->run_after(0ns, [&loop] { loop->stop(); });
+            EXPECT_TRUE(stopper);
+        }));
+    auto second = queue.run_at(deadline, [&second_callback_count] {
+        ++second_callback_count;
+    });
+    ASSERT_TRUE(second);
+    second_id = second.value();
+
+    auto result = loop->run();
+
+    EXPECT_TRUE(result);
+    EXPECT_EQ(cancel_outcome, TimerCancelOutcome::Cancelled);
+    EXPECT_EQ(second_callback_count, 0);
+}
+
+TEST(TimerFdIntegrationTest, TimerCallbackCanStopWithoutRemovingActiveChannel) {
+    RecordingLogger logger;
+    auto loop = make_event_loop(logger);
+    ASSERT_NE(loop, nullptr);
+    bool callback_saw_active_batch = false;
+
+    ASSERT_TRUE(loop->run_after(0ns, [&loop, &callback_saw_active_batch] {
+        callback_saw_active_batch = loop->dispatching_active_channels();
+        loop->stop();
+    }));
+
+    auto result = loop->run();
+
+    EXPECT_TRUE(result);
+    EXPECT_TRUE(callback_saw_active_batch);
+    EXPECT_EQ(loop->state(), iaisf::net::EventLoop::State::Stopped);
+}
+
+TEST(TimerFdIntegrationTest, StopBeforeRunPreventsScheduledCallback) {
+    RecordingLogger logger;
+    auto loop = make_event_loop(logger);
+    ASSERT_NE(loop, nullptr);
+    int callback_count = 0;
+    ASSERT_TRUE(loop->run_after(0ns, [&callback_count] { ++callback_count; }));
+
+    loop->stop();
+    auto result = loop->run();
+
+    ASSERT_FALSE(result);
+    EXPECT_EQ(result.error().code, ErrorCode::InvalidState);
+    EXPECT_EQ(callback_count, 0);
+}
+
+TEST(TimerFdIntegrationTest, CallbackExceptionDoesNotSkipLaterTimer) {
+    RecordingLogger logger;
+    auto loop = make_event_loop(logger);
+    ASSERT_NE(loop, nullptr);
+    auto& queue = TimerQueueTestAccess::queue(*loop);
+    const auto deadline = TimerQueue::Clock::now() + 1ms;
+    int later_callback_count = 0;
+
+    ASSERT_TRUE(queue.run_at(deadline, [] {
+        throw std::runtime_error{"expected timer callback failure"};
+    }));
+    ASSERT_TRUE(queue.run_at(deadline, [&loop, &later_callback_count] {
+        ++later_callback_count;
+        loop->stop();
+    }));
+
+    auto result = loop->run();
+
+    EXPECT_TRUE(result);
+    EXPECT_EQ(later_callback_count, 1);
+    EXPECT_TRUE(logger.contains("timer callback threw std::exception"));
+}
+
+TEST(TimerFdIntegrationTest, StopSkipsRemainingExpiredSnapshotCallbacks) {
+    RecordingLogger logger;
+    auto loop = make_event_loop(logger);
+    ASSERT_NE(loop, nullptr);
+    auto& queue = TimerQueueTestAccess::queue(*loop);
+    const auto deadline = TimerQueue::Clock::now() + 1ms;
+    int skipped_callback_count = 0;
+
+    ASSERT_TRUE(queue.run_at(deadline, [&loop] { loop->stop(); }));
+    ASSERT_TRUE(queue.run_at(deadline, [&skipped_callback_count] {
+        ++skipped_callback_count;
+    }));
+
+    auto result = loop->run();
+
+    EXPECT_TRUE(result);
+    EXPECT_EQ(skipped_callback_count, 0);
+}
+
+TEST(TimerFdIntegrationTest, ArmFailureRollsBackAndFailsClosed) {
+    RecordingLogger logger;
+    auto loop = make_event_loop(logger);
+    ASSERT_NE(loop, nullptr);
+    auto& queue = TimerQueueTestAccess::queue(*loop);
+    TimerQueueTestAccess::fail_next_arm(queue);
+    int callback_count = 0;
+
+    auto result = loop->run_after(0ns, [&callback_count] { ++callback_count; });
+
+    ASSERT_FALSE(result);
+    EXPECT_EQ(result.error().code, ErrorCode::SystemError);
+    EXPECT_TRUE(TimerQueueTestAccess::faulted(queue));
+    EXPECT_EQ(TimerQueueTestAccess::timer_count(queue), 0U);
+    EXPECT_EQ(loop->state(), iaisf::net::EventLoop::State::Stopped);
+    EXPECT_EQ(callback_count, 0);
+}
+
+TEST(TimerFdIntegrationTest, ReadFailureStopsWithoutExecutingCallback) {
+    RecordingLogger logger;
+    auto loop = make_event_loop(logger);
+    ASSERT_NE(loop, nullptr);
+    auto& queue = TimerQueueTestAccess::queue(*loop);
+    TimerQueueTestAccess::fail_next_read(queue);
+    int callback_count = 0;
+    ASSERT_TRUE(loop->run_after(0ns, [&callback_count] { ++callback_count; }));
+
+    auto result = loop->run();
+
+    EXPECT_TRUE(result);
+    EXPECT_TRUE(TimerQueueTestAccess::faulted(queue));
+    EXPECT_EQ(callback_count, 0);
+    EXPECT_EQ(loop->state(), iaisf::net::EventLoop::State::Stopped);
+    EXPECT_TRUE(logger.contains("failed to drain timerfd"));
+}
+
+TEST(TimerFdIntegrationTest, NonOwnerThreadCannotScheduleTimer) {
+    RecordingLogger logger;
+    auto loop = make_event_loop(logger);
+    ASSERT_NE(loop, nullptr);
+    std::promise<iaisf::Result<TimerId>> result_promise;
+    auto result_future = result_promise.get_future();
+
+    std::thread caller{[&loop, &result_promise] {
+        result_promise.set_value(loop->run_after(0ns, [] {}));
+    }};
+    caller.join();
+    auto result = result_future.get();
+
+    ASSERT_FALSE(result);
+    EXPECT_EQ(result.error().code, ErrorCode::InvalidState);
 }
 
 }  // namespace
