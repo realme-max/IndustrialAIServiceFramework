@@ -107,6 +107,7 @@ struct StopTriggerState {
     StopTriggerState() : invoked_future(invoked.get_future().share()) {}
 
     std::function<Result<void>()> stop;
+    std::function<void()> after_stop;
     std::promise<void> invoked;
     std::shared_future<void> invoked_future;
     std::atomic<bool> signalled{false};
@@ -135,6 +136,9 @@ public:
         }
         if (!state_->signalled.exchange(true, std::memory_order_acq_rel)) {
             auto stopped = state_->stop();
+            if (state_->after_stop) {
+                state_->after_stop();
+            }
             state_->invoked.set_value();
             if (!stopped) {
                 return stopped;
@@ -326,6 +330,23 @@ std::string send_all(const int descriptor, const std::string_view bytes) {
     return {};
 }
 
+std::string wait_for_eof(const int descriptor) {
+    char buffer[4096];
+    for (;;) {
+        const ssize_t count = ::recv(descriptor, buffer, sizeof(buffer), 0);
+        if (count > 0) {
+            continue;
+        }
+        if (count == 0) {
+            return {};
+        }
+        if (errno == EINTR) {
+            continue;
+        }
+        return "client close wait failed";
+    }
+}
+
 std::string post_request(
     const std::string_view body,
     const std::string_view content_type = "application/json",
@@ -497,6 +518,19 @@ TEST(
                        })
                        .value();
     trigger->stop = [&service] { return service->stop(); };
+    std::atomic<bool> http_cleanup_completed_at_stop{false};
+    std::atomic<bool> task_shutdown_started_at_stop{false};
+    trigger->after_stop = [&service,
+                           &http_cleanup_completed_at_stop,
+                           &task_shutdown_started_at_stop] {
+        http_cleanup_completed_at_stop.store(
+            service->session_count() == 0U &&
+                service->connection_count() == 0U,
+            std::memory_order_release);
+        task_shutdown_started_at_stop.store(
+            !service->task_manager().accepting(),
+            std::memory_order_release);
+    };
     ASSERT_TRUE(service->start());
     const auto endpoint = service->local_endpoint();
 
@@ -547,14 +581,13 @@ TEST(
                 std::future_status::ready) {
             error = "owner-thread stop trigger did not run";
         }
-        WireResponse stopping;
-        if (error.empty()) {
-            error = reader.read(socket.value().get(), stopping);
-        }
-        if (error.empty() && stopping.status != 503) {
-            error = "stopping submission did not return 503";
-        }
+        // TcpServer::stop force-closes active connections. The stop-triggering
+        // request therefore has no response contract; verify only that the
+        // peer observes the ordered close after the blocked task is released.
         blocking->release_once();
+        if (error.empty()) {
+            error = wait_for_eof(socket.value().get());
+        }
         client_result.set_value(std::move(error));
         loop->stop();
     });
@@ -562,7 +595,10 @@ TEST(
     const auto run = loop->run();
     client.join();
     EXPECT_TRUE(run);
-    EXPECT_TRUE(client_future.get().empty());
+    const auto client_error = client_future.get();
+    EXPECT_TRUE(client_error.empty()) << client_error;
+    EXPECT_FALSE(http_cleanup_completed_at_stop.load(std::memory_order_acquire));
+    EXPECT_FALSE(task_shutdown_started_at_stop.load(std::memory_order_acquire));
     EXPECT_TRUE(service->stopped());
     EXPECT_EQ(service->state(), IndustrialAiService::State::Stopped);
     EXPECT_EQ(service->session_count(), 0U);
