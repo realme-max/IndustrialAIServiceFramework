@@ -32,7 +32,8 @@ Result<TcpConnection::Ptr> TcpConnection::create(
     const std::size_t input_maximum_capacity,
     const std::size_t output_initial_capacity,
     const std::size_t output_maximum_capacity,
-    const std::size_t output_high_water_mark) {
+    const std::size_t output_high_water_mark,
+    const std::optional<std::chrono::steady_clock::duration> idle_timeout) {
     if (!loop.is_in_loop_thread()) {
         return Result<Ptr>::failure(make_error(
             ErrorCode::InvalidState,
@@ -47,6 +48,12 @@ Result<TcpConnection::Ptr> TcpConnection::create(
         return Result<Ptr>::failure(make_error(
             ErrorCode::InvalidArgument,
             "TcpConnection id must be nonzero"));
+    }
+    if (idle_timeout.has_value() &&
+        *idle_timeout <= std::chrono::steady_clock::duration::zero()) {
+        return Result<Ptr>::failure(make_error(
+            ErrorCode::InvalidArgument,
+            "TCP idle timeout must be positive"));
     }
     if (input_initial_capacity == 0U ||
         input_initial_capacity > input_maximum_capacity ||
@@ -82,7 +89,8 @@ Result<TcpConnection::Ptr> TcpConnection::create(
             std::move(peer_endpoint),
             std::move(input_result).value(),
             std::move(output_result).value(),
-            output_high_water_mark}});
+            output_high_water_mark,
+            idle_timeout}});
     } catch (const std::bad_alloc&) {
         return Result<Ptr>::failure(make_error(
             ErrorCode::ResourceExhausted,
@@ -99,7 +107,9 @@ TcpConnection::TcpConnection(
     Ipv4Endpoint peer_endpoint,
     Buffer input_buffer,
     Buffer output_buffer,
-    const std::size_t output_high_water_mark) noexcept
+    const std::size_t output_high_water_mark,
+    const std::optional<std::chrono::steady_clock::duration> idle_timeout)
+    noexcept
     : loop_(loop),
       logger_(logger),
       connection_id_(connection_id),
@@ -109,7 +119,8 @@ TcpConnection::TcpConnection(
       peer_endpoint_(std::move(peer_endpoint)),
       input_buffer_(std::move(input_buffer)),
       output_buffer_(std::move(output_buffer)),
-      output_high_water_mark_(output_high_water_mark) {}
+      output_high_water_mark_(output_high_water_mark),
+      idle_timeout_(idle_timeout) {}
 
 TcpConnection::~TcpConnection() noexcept {
     if (channel_.is_registered()) {
@@ -238,11 +249,17 @@ Result<void> TcpConnection::connect_established() {
             "TcpConnection Channel callback allocation failed"));
     }
 
+    auto idle_result = refresh_idle_timeout();
+    if (!idle_result) {
+        return idle_result;
+    }
+
     channel_.enable_reading();
     channel_.set_edge_triggered(true);
     auto update_result = channel_.update();
     if (!update_result) {
         channel_.disable_all();
+        cancel_idle_timeout();
         return update_result;
     }
     state_ = State::Connected;
@@ -273,6 +290,7 @@ Result<void> TcpConnection::connect_destroyed() {
         return Result<void>::success();
     }
     const bool was_established = state_ != State::Connecting;
+    cancel_idle_timeout();
     if (channel_.is_registered()) {
         auto remove_result = channel_.remove();
         if (!remove_result) {
@@ -515,6 +533,11 @@ void TcpConnection::handle_read() {
     }
 
     if (input_buffer_.readable_bytes() > readable_before) {
+        auto idle_result = refresh_idle_timeout();
+        if (!idle_result) {
+            fail_connection(idle_result.error());
+            return;
+        }
         try {
             message_callback_(shared_from_this(), input_buffer_);
         } catch (const std::exception& exception) {
@@ -544,6 +567,7 @@ void TcpConnection::handle_write() {
         return;
     }
 
+    bool wrote_bytes = false;
     while (!output_buffer_.empty()) {
         const std::size_t syscall_length = std::min(
             output_buffer_.readable_bytes(),
@@ -555,6 +579,7 @@ void TcpConnection::handle_write() {
             syscall_length,
             MSG_NOSIGNAL);
         if (sent > 0) {
+            wrote_bytes = true;
             auto retrieve_result =
                 output_buffer_.retrieve(static_cast<std::size_t>(sent));
             if (!retrieve_result) {
@@ -573,10 +598,24 @@ void TcpConnection::handle_write() {
             continue;
         }
         if (error_number == EAGAIN || error_number == EWOULDBLOCK) {
+            if (wrote_bytes) {
+                auto idle_result = refresh_idle_timeout();
+                if (!idle_result) {
+                    fail_connection(idle_result.error());
+                }
+            }
             return;
         }
         fail_connection(detail::make_system_error("send", error_number));
         return;
+    }
+
+    if (wrote_bytes) {
+        auto idle_result = refresh_idle_timeout();
+        if (!idle_result) {
+            fail_connection(idle_result.error());
+            return;
+        }
     }
 
     if (!output_buffer_.empty()) {
@@ -628,6 +667,68 @@ void TcpConnection::handle_close() {
     }
 }
 
+Result<void> TcpConnection::refresh_idle_timeout() {
+    if (!idle_timeout_.has_value()) {
+        return Result<void>::success();
+    }
+
+    cancel_idle_timeout();
+    if (idle_generation_ == std::numeric_limits<std::uint64_t>::max()) {
+        return Result<void>::failure(make_error(
+            ErrorCode::ResourceExhausted,
+            "TCP idle timeout generation is exhausted"));
+    }
+    ++idle_generation_;
+    const std::uint64_t generation = idle_generation_;
+    const std::weak_ptr<TcpConnection> weak_self = weak_from_this();
+    auto timer_result = loop_.run_after(
+        *idle_timeout_,
+        [weak_self, generation] {
+            if (const auto self = weak_self.lock()) {
+                self->handle_idle_timeout(generation);
+            }
+        });
+    if (!timer_result) {
+        return Result<void>::failure(std::move(timer_result).error());
+    }
+    idle_timer_ = std::move(timer_result).value();
+    return Result<void>::success();
+}
+
+void TcpConnection::cancel_idle_timeout() noexcept {
+    if (!idle_timer_.has_value()) {
+        return;
+    }
+    const TimerId timer = *idle_timer_;
+    idle_timer_.reset();
+    if (idle_generation_ != std::numeric_limits<std::uint64_t>::max()) {
+        ++idle_generation_;
+    }
+    try {
+        auto cancel_result = loop_.cancel_timer(timer);
+        static_cast<void>(cancel_result);
+    } catch (...) {
+        // Generation invalidation is the safety boundary. Timer cancellation
+        // is only a best-effort resource optimization during teardown.
+        safe_log(
+            LogLevel::Error,
+            "idle timer cancellation threw an exception");
+    }
+}
+
+void TcpConnection::handle_idle_timeout(
+    const std::uint64_t generation) noexcept {
+    if (!idle_timer_.has_value() || generation != idle_generation_ ||
+        state_ == State::Disconnected || close_notified_) {
+        return;
+    }
+    idle_timer_.reset();
+    if (idle_generation_ != std::numeric_limits<std::uint64_t>::max()) {
+        ++idle_generation_;
+    }
+    begin_close();
+}
+
 Result<void> TcpConnection::finish_write_shutdown() {
     if (write_shutdown_) {
         return Result<void>::success();
@@ -643,6 +744,7 @@ void TcpConnection::begin_close() {
     if (state_ == State::Disconnected || close_notified_) {
         return;
     }
+    cancel_idle_timeout();
     state_ = State::Disconnecting;
     close_notified_ = true;
     if (!close_callback_) {

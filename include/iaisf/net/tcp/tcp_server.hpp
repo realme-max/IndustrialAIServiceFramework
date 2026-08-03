@@ -1,5 +1,6 @@
 #pragma once
 
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -29,6 +30,8 @@ public:
     static constexpr std::int64_t kMaximumConnections = 1'000'000;
     static constexpr std::int64_t kMaximumBufferBytes =
         64LL * 1024LL * 1024LL;
+    static constexpr std::int64_t kMaximumIdleTimeoutMilliseconds =
+        24LL * 60LL * 60LL * 1000LL;
 
     [[nodiscard]] static Result<TcpServerOptions> create(
         std::int64_t listen_backlog,
@@ -38,7 +41,8 @@ public:
         std::int64_t output_initial_capacity,
         std::int64_t output_high_water_mark,
         std::int64_t output_maximum_capacity,
-        std::optional<std::int64_t> socket_send_buffer_bytes = std::nullopt);
+        std::optional<std::int64_t> socket_send_buffer_bytes = std::nullopt,
+        std::optional<std::int64_t> idle_timeout_ms = std::nullopt);
     [[nodiscard]] static TcpServerOptions defaults() noexcept;
 
     [[nodiscard]] int listen_backlog() const noexcept;
@@ -49,6 +53,8 @@ public:
     [[nodiscard]] std::size_t output_high_water_mark() const noexcept;
     [[nodiscard]] std::size_t output_maximum_capacity() const noexcept;
     [[nodiscard]] std::optional<int> socket_send_buffer_bytes() const noexcept;
+    [[nodiscard]] std::optional<std::chrono::milliseconds> idle_timeout()
+        const noexcept;
 
 private:
     TcpServerOptions(
@@ -59,7 +65,8 @@ private:
         std::size_t output_initial_capacity,
         std::size_t output_high_water_mark,
         std::size_t output_maximum_capacity,
-        std::optional<int> socket_send_buffer_bytes) noexcept;
+        std::optional<int> socket_send_buffer_bytes,
+        std::optional<std::chrono::milliseconds> idle_timeout) noexcept;
 
     int listen_backlog_;
     std::size_t max_connections_;
@@ -69,6 +76,7 @@ private:
     std::size_t output_high_water_mark_;
     std::size_t output_maximum_capacity_;
     std::optional<int> socket_send_buffer_bytes_;
+    std::optional<std::chrono::milliseconds> idle_timeout_;
 };
 
 /**

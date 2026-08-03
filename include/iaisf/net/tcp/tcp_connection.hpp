@@ -1,9 +1,11 @@
 #pragma once
 
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string_view>
 
 #include "iaisf/core/result.hpp"
@@ -60,7 +62,9 @@ public:
         std::size_t input_maximum_capacity,
         std::size_t output_initial_capacity,
         std::size_t output_maximum_capacity,
-        std::size_t output_high_water_mark);
+        std::size_t output_high_water_mark,
+        std::optional<std::chrono::steady_clock::duration> idle_timeout =
+            std::nullopt);
 
     TcpConnection(const TcpConnection&) = delete;
     TcpConnection& operator=(const TcpConnection&) = delete;
@@ -114,12 +118,17 @@ private:
         Ipv4Endpoint peer_endpoint,
         Buffer input_buffer,
         Buffer output_buffer,
-        std::size_t output_high_water_mark) noexcept;
+        std::size_t output_high_water_mark,
+        std::optional<std::chrono::steady_clock::duration> idle_timeout)
+        noexcept;
 
     void handle_read();
     void handle_write();
     void handle_error();
     void handle_close();
+    [[nodiscard]] Result<void> refresh_idle_timeout();
+    void cancel_idle_timeout() noexcept;
+    void handle_idle_timeout(std::uint64_t generation) noexcept;
     [[nodiscard]] Result<void> finish_write_shutdown();
     void begin_close();
     void fail_connection(const Error& error);
@@ -137,8 +146,11 @@ private:
     Buffer input_buffer_;
     Buffer output_buffer_;
     const std::size_t output_high_water_mark_;
+    const std::optional<std::chrono::steady_clock::duration> idle_timeout_;
 
     State state_{State::Connecting};
+    std::optional<TimerId> idle_timer_;
+    std::uint64_t idle_generation_{0U};
     bool peer_eof_received_{false};
     bool shutdown_requested_{false};
     bool close_after_write_requested_{false};
