@@ -20,7 +20,7 @@
 - Phase 6 功能提交：`66a606bb53bf8ed80b8efd6faf7c6529b5cd22d1`
 - Phase 6 warning 修复 / 最终验证提交：`853ccccca80cdc042b3d51eae52fe45566aa2b22`
 - 当前阶段：Phase 7 Service Integration and Task HTTP API
-- 状态：`PHASE_7_SERVICE_INTEGRATION_IMPLEMENTED_LINUX_VALIDATION_BLOCKED`
+- 状态：`PHASE_7_SERVICE_INTEGRATION_COMPLETED`
 - 日期：2026-07-31
 - Phase 1 GitHub Actions run：[30508113122](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30508113122)
 - Phase 2 首次功能 GitHub Actions run：[30514521602](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30514521602)
@@ -33,10 +33,9 @@
 - Phase 6 最终零 warning GitHub Actions run：[30604428624](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30604428624)
 - Phase 2 实现、warning 修复和文档封板：已合并 main
 - Phase 4 实现、修复与文档：已合并 main
-- Phase 6 已合并 main；当前 Phase 7 分支尚未 commit/push
-- 当前 Phase 7 基线 HEAD / main / origin/main：
-  `9f88e0726a5db1abfe2ebe999de68aef41f317fb`；当前分支未配置 upstream，Phase 7
-  工作区尚未 commit/push
+- Phase 6 已合并 main；Phase 7 修复提交已存在并已由最新 Linux CI 验证
+- 当前 Phase 7 HEAD：`1cc332b9d9e02ae78ec9e43455d36ffe939f73e2`；job checkout merge SHA：
+  `466b80f742457da1fa67aea2859b770e361dcbe4`
 - Phase 6 实现与 warning 修复已 commit/push；Phase 6F 只产生九份文档 diff
 
 Phase 6C 审计后 Windows Debug/Release 均为 316/316：Foundation 43、HTTP Core 84、
@@ -51,7 +50,7 @@ smoke，且项目源码和测试 warning 均为 0，Phase 6 已完成封板。
 
 - 基线 main/origin/main：`9f88e0726a5db1abfe2ebe999de68aef41f317fb`
 - 当前分支：`phase/7-service-integration`
-- 当前状态：`PHASE_7_SERVICE_INTEGRATION_IMPLEMENTED_LINUX_VALIDATION_BLOCKED`
+- 当前状态：`PHASE_7_SERVICE_INTEGRATION_COMPLETED`
 - 新目标：跨平台 `iaisf_task_api` / `iaisf::task_api`；Linux-only
   `iaisf_service` / `iaisf::service`
 - Task API：`POST /v1/tasks`、`GET /v1/tasks/{id}`，加既有 `/health`、`/version`
@@ -77,13 +76,12 @@ smoke，且项目源码和测试 warning 均为 0，Phase 6 已完成封板。
 - 所有权：Router handler weak-own TaskHttpApi；TaskHttpApi 借用 Manager；Adapter
   closure 只持有 PluginManager；无 Service 回环
 - Windows Debug/Release：370/370；Task API 46/46；Release smoke exit 0
-- Linux：Service 15 个 CTest 定义（参数展开 37 个 GoogleTest case）未执行；预计完整
-  CTest 497，但只能以真实 CI 为准；当前无 Phase 7 CI run
+- Linux 最新 push run 30781932731：Debug/Release 均实际执行完整 CTest 497/497；Service
+  及 ActiveHttpStop 测试均通过，项目源码与测试 warning 均为 0
 - CLI：仍不启动线程池、插件 registry 或常驻 listener
 - 未实现：timerfd/signalfd、自动 timeout、cancel/retry/list、动态插件、真实 AI/GPU、
   DB、异步日志和 benchmark
-- 下一步人工操作：审阅 diff，commit/push 后等待 exact commit 的 Linux Debug/Release
-  完整 CTest 与 Release smoke；通过前不得开始 Phase 8
+- 下一步人工操作：Phase 8 仍未开始；遵守其范围边界后再规划下一阶段
 
 ## 2. Phase 1 文件
 
@@ -1414,3 +1412,29 @@ benchmark
 ```text
 feat: integrate task HTTP service
 ```
+
+## Phase 7E 最终 Linux CI 审计记录（2026-08-03）
+
+- 当前分支：`phase/7-service-integration`；当前 HEAD/Phase 7 修复提交：`1cc332b9d9e02ae78ec9e43455d36ffe939f73e2`（`fix: stabilize active HTTP stop lifecycle test`）。
+- Linux CI：[run 30779555703](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30779555703)，workflow `Linux CI`，`pull_request`，attempt 1，conclusion `success`；job checkout merge SHA `466b80f742457da1fa67aea2859b770e361dcbe4`。
+- 环境：runner `ubuntu-24.04`，Ubuntu 24.04.4 LTS，kernel `6.17.0-1020-azure`，GCC 13.3.0，CMake 3.31.6。
+- Debug/Release：configure、build 均成功，CTest 均为 `497/497`，0 failed；Release version/config smoke 成功。
+- Active HTTP stop：`IndustrialAiServiceTest.ActiveHttpStopWaitsForDeferredCleanupBeforeJoiningTasks` 在 Debug/Release 均通过。
+- 历史状态：项目测试 warning 曾非零：`tests/service/test_industrial_ai_service.cpp:1041:51` 的 `-Wshadow`，每 job 3 次、共 6 条记录；后续 warning 修复提交和最终 run 已清零。尚未执行 `ctest --repeat until-fail:50`。
+
+### 生命周期不可破坏约定
+
+active HTTP 请求触发 stop 时，当前请求不保证返回 503；TcpServer/HttpServer cleanup 可能先关闭连接，已开始发送的响应不得被截断。普通 Stopping 阶段新 POST 仍映射 503。销毁顺序必须是：`TcpServer cleanup → HttpServer stopped → DeferredCleanup → TaskManager shutdown/join → Service Stopped`；DeferredCleanup 先于阻塞任务 shutdown。
+
+当前 CLI 仍只做 help/version/config 校验，不启动常驻服务。尚未实现 timerfd、signalfd、自动超时、动态插件、真实 AI/GPU、数据库、异步日志、benchmark；Phase 8 未开始。
+
+## Phase 7G 最终交接（2026-08-03）
+
+- 当前分支/HEAD/upstream：`phase/7-service-integration` / `a44b1272bf603a17724fa17c66d60ee0e18bb918`，均一致。
+- warning 修复提交只修改 `tests/service/test_industrial_ai_service.cpp`，将参数名 `info` 改为 `test_info`，未改变测试逻辑。
+- 最终 push [Linux CI run 30781932731](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30781932731)，workflow `Linux CI`，attempt 1，event `push`，conclusion `success`；Debug/Release checkout 均为该 SHA。
+- Ubuntu 24.04.4 LTS、kernel 6.17.0-1020-azure、GCC 13.3.0、CMake 3.31.6；Debug/Release configure、build 和 CTest 均通过 `497/497`，warning 均为 0。
+- Release version/config smoke 成功；`IndustrialAiServiceTest.ActiveHttpStopWaitsForDeferredCleanupBeforeJoiningTasks` Debug/Release 均通过。
+- 当前状态：`PHASE_7_SERVICE_INTEGRATION_COMPLETED`。尚未执行 `ctest --repeat until-fail:50`。
+
+Active stop 不保证触发请求返回 503；连接可能在响应生成前关闭，已开始发送的 response 不得截断。普通 Stopping 阶段 POST 仍返回 503。生命周期顺序：`TcpServer cleanup → HttpServer stopped → DeferredCleanup → TaskManager shutdown/join → Service Stopped`。

@@ -367,9 +367,8 @@ feat: implement bounded task runtime
   Reactor 45、TCP 51、HTTP Core 84、HTTP Integration 16、Task Runtime 97、
   Plugin System 92。Release smoke 成功，项目源码与测试 warning 均为 0。
 
-Phase 7 状态：**实现完成，Linux 验证阻塞**。跨平台 Task API 已通过 Windows
-Debug 回归；Linux Service 和 loopback 测试必须由当前代码提交对应的真实 Linux CI
-验证后才能封板。
+Phase 7 状态：**完成**。Linux Service 和 loopback 测试已由当前提交对应的真实 Linux
+CI 执行并通过，warning 修复后项目源码与测试 warning 均为 0。
 
 建议 commit message：
 
@@ -505,11 +504,24 @@ docs(vision): define phase 10 production vision plugin boundary
 
 ## 15. Phase 7B 审计状态
 
-Phase 7 实现已完成专项修复和 Windows 回归，但 Linux 验证仍阻塞。stop 已锁定为
+Phase 7 实现已完成专项修复和 Windows 回归；Linux 功能验证已通过。stop 已锁定为
 `StoppingHttp -> StoppingTasks -> Stopped`，202 只表达 accepted，ServiceOptions
 使用精确、溢出安全的跨层容量验证，Failed GET 和 typed 503 映射均已补测。
 
 Windows Debug/Release 实际均为 370/370：Foundation+smoke 43、HTTP Core 90、
 Task Runtime 99、Plugin System 92、Task API 46。Linux-only Service 当前为 15 个
-CTest 定义（参数展开 37 个 GoogleTest case），尚未执行，不得把 Phase 7 标为
-completed，也不得开始 Phase 8。
+CTest 定义（参数展开 37 个 GoogleTest case）；历史 run 30779555703 已执行完整 497/497，
+warning 已在提交 `a44b1272bf603a17724fa17c66d60ee0e18bb918` 中修复；最终 push run
+30781932731 已验证通过，Phase 7 已封板。Phase 8 尚未开始。
+
+## Phase 7E 封板结论（2026-08-03）
+
+Phase 7 Service Integration 的历史 run 30779555703 通过 Debug/Release configure、build 和 `497/497` CTest，但日志曾有项目测试 `-Wshadow`；后续 warning 修复和最终 run 已完成封板。尚未执行 `ctest --repeat until-fail:50`。
+
+Phase 8 尚未开始；不增加 timerfd、signalfd、自动超时、动态插件、真实 AI/GPU、数据库、异步日志或 benchmark。
+
+## Phase 7G 最终封板（2026-08-03）
+
+warning 修复提交 `a44b1272bf603a17724fa17c66d60ee0e18bb918` 仅修改测试变量名。最终 push run 30781932731 在 Ubuntu 24.04.4/GCC 13.3.0/CMake 3.31.6 上完成 Debug/Release configure、build 和 `497/497` CTest，version/config smoke 与 ActiveHttpStop 均通过，项目源码与测试 warning 均为 0。因此 Phase 7 状态为 `PHASE_7_SERVICE_INTEGRATION_COMPLETED`。
+
+尚未执行 `ctest --repeat until-fail:50`；Phase 8 尚未开始。
