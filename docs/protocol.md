@@ -3,8 +3,8 @@
 ## 1. 范围与状态
 
 Phase 4 HTTP 协议库状态保持 `PHASE_4_HTTP_PROTOCOL_COMPLETED`。Phase 5 总体状态为
-`PHASE_5_TASK_RUNTIME_COMPLETED`。Phase 6 当前为
-`PHASE_7_SERVICE_INTEGRATION_IMPLEMENTED_LINUX_VALIDATION_BLOCKED`。可移植
+`PHASE_5_TASK_RUNTIME_COMPLETED`。Phase 7 当前为
+`PHASE_7_SERVICE_INTEGRATION_COMPLETED`。可移植
 `iaisf_http_core` 已在 Windows Debug/Release 各通过 84/84 HTTP Core 测试；
 最终 [Linux CI run 30539245789](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30539245789)
 的 Debug/Release 均为 239/239，其中 HTTP Core 84/84、Linux-only
@@ -577,3 +577,17 @@ GPU/真实 AI、数据库、异步日志或 benchmark。
   为 404，POST 到 status resource 为 405 并携带 `Allow: GET`。
 - `/health` 保持 `{"status":"ok"}`，只说明当前 HTTP/EventLoop 路径响应，不表示
   GPU、模型、数据库、动态插件或 task capacity ready。
+
+## Phase 7E Service 集成审计
+
+最新 Linux CI run 30779555703（提交 `1cc332b9d9e02ae78ec9e43455d36ffe939f73e2`）在 Ubuntu 24.04.4/GCC 13.3.0/CMake 3.31.6 上 Debug、Release 均为 `497/497`，version/config smoke 成功。`IndustrialAiServiceTest.ActiveHttpStopWaitsForDeferredCleanupBeforeJoiningTasks` 两种配置均通过。
+
+Active HTTP 请求触发 stop 时，当前连接可能在响应生成前由 TcpServer/HttpServer cleanup 关闭，停止触发请求不保证返回 503，也不能截断已开始发送的响应；普通 Stopping 阶段新到的 POST 仍返回 503。生命周期顺序固定为 `TcpServer cleanup → HttpServer stopped → DeferredCleanup → TaskManager shutdown/join → Service Stopped`，DeferredCleanup 先于阻塞任务 shutdown。
+
+历史记录：该 run 当时因项目测试 `tests/service/test_industrial_ai_service.cpp:1041:51` 的 `-Wshadow` warning 未满足 warning=0；后续提交已修复。尚未执行 `ctest --repeat until-fail:50`；HTTP Task API 的路由和错误映射虽已集成到 Linux Service 测试，但 CLI 仍不启动常驻 HTTP 服务。
+
+## Phase 7G 最终协议与生命周期验证
+
+最终 push [Linux CI run 30781932731](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30781932731) 对提交 `a44b1272bf603a17724fa17c66d60ee0e18bb918` 完成 Debug/Release `497/497`，version/config smoke 成功，项目源码与测试 warning 均为 0。Task HTTP API 和 Service 生命周期测试已实际执行。
+
+Active HTTP stop 语义保持：触发 stop 的请求不保证返回 503，连接可能在响应生成前关闭，已开始发送的 response 不得截断；普通 Stopping 阶段 POST 仍为 503。生命周期为 `TcpServer cleanup → HttpServer stopped → DeferredCleanup → TaskManager shutdown/join → Service Stopped`。Phase 7 状态为 `PHASE_7_SERVICE_INTEGRATION_COMPLETED`；尚未执行 `ctest --repeat until-fail:50`。

@@ -2,7 +2,7 @@
 
 面向工业 AI 应用的 C++ 高性能任务服务框架。
 
-> 当前状态：`PHASE_7_SERVICE_INTEGRATION_IMPLEMENTED_LINUX_VALIDATION_BLOCKED`。跨平台 Task HTTP API、Linux-only 服务组合根和专项审计已实现；Windows Visual Studio 2022 Debug/Release 均完成 370/370。Linux-only Service 与停止状态机尚未经过当前实现对应的真实 Linux CI，不能宣称 Phase 7 完成。
+> 当前结论：`PHASE_7_SERVICE_INTEGRATION_COMPLETED`。warning 修复后的 Linux push CI 已通过 Debug/Release 全部测试，项目源码与测试 warning 均为 0。
 
 ## 项目定位
 
@@ -438,3 +438,23 @@ Licensed under the Apache License 2.0. See [LICENSE](LICENSE).
 - [测试计划](docs/test_plan.md)
 - [阶段状态](docs/stage_status.md)
 - [上下文交接](docs/context_handoff.md)
+
+## Phase 7E 历史审计记录（2026-08-03）
+
+历史记录：Linux CI run 30779555703 对提交 `1cc332b9d9e02ae78ec9e43455d36ffe939f73e2` 执行成功，但当时仍有测试 warning；该历史 run 不是最终封板证据。
+
+但构建日志仍报告项目测试 `tests/service/test_industrial_ai_service.cpp:1041:51` 的 GCC `-Wshadow`（每个 job 3 次、共 6 条记录），因此项目测试 warning 不是 0，不能宣称 Phase 7 完成。尚未执行 `ctest --repeat until-fail:50`。此前 CLI 仍只做 version/config 校验，不启动常驻服务；当前尚未实现 timerfd/signalfd、自动任务超时、动态插件、真实 AI/GPU、数据库、异步日志、benchmark 或生产 `--serve` 模式。
+
+Active HTTP stop 的最终契约是：停止触发请求不保证收到 503；清理可能先关闭当前连接，不能截断已经开始发送的响应。普通 Stopping 阶段新到的 POST 仍映射 503。顺序为 `TcpServer cleanup → HttpServer stopped → TaskManager shutdown/join → Service Stopped`，DeferredCleanup 必须先于阻塞任务 shutdown。
+
+## Phase 7G 最终封板记录（2026-08-03）
+
+状态：`PHASE_7_SERVICE_INTEGRATION_COMPLETED`。
+
+最终 [Linux CI push run 30781932731](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30781932731)（attempt 1，event `push`，conclusion `success`）验证提交 `a44b1272bf603a17724fa17c66d60ee0e18bb918`；Debug/Release checkout 均为该 SHA。环境为 `ubuntu-24.04`、Ubuntu 24.04.4 LTS、kernel 6.17.0-1020-azure、GCC 13.3.0、CMake 3.31.6。
+
+Debug 和 Release 均 configure/build 成功，CTest 均为 `497/497`，0 failed。标签实际数量包括 HTTP 106、integration 82、linux 127、plugin 92、service 15、smoke 2、task 99、task_api 46、tcp 51、unit 464。Release version/config smoke 成功，输出版本 `0.1.0` 和 configuration validated。项目源码 warning=0，项目测试 warning=0。
+
+`IndustrialAiServiceTest.ActiveHttpStopWaitsForDeferredCleanupBeforeJoiningTasks` 在 Debug/Release 均通过。active 请求触发 stop 不保证返回 503，连接可能在响应生成前关闭，已开始发送的 response 不得截断；普通 Stopping 阶段的新 POST 仍返回 503。顺序为 `TcpServer cleanup → HttpServer stopped → DeferredCleanup → TaskManager shutdown/join → Service Stopped`。
+
+尚未执行 50 次重复稳定性测试（`ctest --repeat until-fail:50`）。当前尚未实现常驻 `--serve` CLI、timerfd/signalfd、自动任务超时、动态插件、真实 AI/GPU、数据库、异步日志和 benchmark；Phase 8 尚未开始。

@@ -5,7 +5,7 @@
 当前状态为：
 
 ```text
-PHASE_7_SERVICE_INTEGRATION_IMPLEMENTED_LINUX_VALIDATION_BLOCKED
+PHASE_7_SERVICE_INTEGRATION_COMPLETED
 ```
 
 `iaisf_task_api` 是 Windows/Linux 可构建的静态库；`iaisf_service` 只在
@@ -186,3 +186,17 @@ Debug/Release 完整 CTest 和 Release smoke 为准。
 - API/Service factory 在分配 worker、listener、Channel 或 route 前验证最大合法
   request/response JSON（含转义后的紧凑序列化 bytes）、status URL、Header framing 与
   TCP capacity。配置恰好满足时接受，少 1 byte 时拒绝。
+
+## Phase 7E 最终服务生命周期记录
+
+最新 Linux CI run 30779555703 在 Debug/Release 均以 `497/497` CTest 通过，Task API 与 Service 集成测试实际执行，Release version/config smoke 成功。ActiveHttpStop 测试确认：触发 stop 的 active 请求不承诺 503，cleanup 可能先关闭连接；普通 Stopping 阶段新 POST 仍映射为 503。
+
+停止顺序为 `TcpServer cleanup → HttpServer stopped → DeferredCleanup → TaskManager shutdown/join → Service Stopped`。DeferredCleanup 必须先于阻塞任务 shutdown，响应一旦开始发送不得被生命周期代码主动截断。当前 CLI 仍只执行 `--help`、`--version` 和配置校验，不启动常驻 HTTP 服务。
+
+历史记录：该 run 当时因项目测试 `tests/service/test_industrial_ai_service.cpp:1041:51` 的 `-Wshadow` warning 未满足封板条件，后续提交已修复。尚未执行 `ctest --repeat until-fail:50`。timerfd/signalfd、自动任务超时、动态插件、真实 AI/GPU、数据库、异步日志和 benchmark 均未实现。
+
+## Phase 7G 最终封板
+
+最终 push run 30781932731（提交 `a44b1272bf603a17724fa17c66d60ee0e18bb918`）在 Debug/Release 均完成 `497/497` CTest，Task API 46、Service 15 实际执行，version/config smoke 和 ActiveHttpStop 均通过，项目源码与测试 warning 均为 0。当前状态：`PHASE_7_SERVICE_INTEGRATION_COMPLETED`。
+
+Active stop 的请求响应和 DeferredCleanup 顺序契约不变：停止触发请求不保证 503，普通 Stopping 阶段新 POST 返回 503；`TcpServer cleanup → HttpServer stopped → DeferredCleanup → TaskManager shutdown/join → Service Stopped`。CLI 仍不启动常驻 HTTP 服务。尚未执行 50 次重复稳定性测试。

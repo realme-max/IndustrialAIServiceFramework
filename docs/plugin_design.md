@@ -5,7 +5,7 @@
 Phase 6 跨平台静态插件系统已完成，当前状态：
 
 ```text
-PHASE_7_SERVICE_INTEGRATION_IMPLEMENTED_LINUX_VALIDATION_BLOCKED
+PHASE_7_SERVICE_INTEGRATION_COMPLETED
 ```
 
 Windows VS2022 Debug/Release 已各通过 316/316 CTest，其中 Task Runtime 97、
@@ -410,3 +410,13 @@ weak token，组件间无强引用环。
   不把 plugin error、`what()`、路径、errno 或输入回显到 HTTP。
 - 当前仍是静态注册；重复 operation 在 worker/listener 创建前失败并释放注册对象。
   不存在动态 `.so`、initialize/shutdown hook、GPU context 或真实模型生命周期。
+
+## Phase 7E 集成审计记录
+
+Service 只借用静态 PluginManager/TaskManager，不改变 Phase 6 插件契约：插件实例可被多个 worker 并发调用，`const` 不等于线程安全，调用方必须提供线程安全实现。HTTP 请求提交前和 worker 执行前仍执行双重校验，输入通过快照进入 closure，Adapter、Manager、TaskManager 不形成强引用环。
+
+历史 Linux CI run 30779555703 的 Debug/Release CTest 均 `497/497`，但项目测试 `tests/service/test_industrial_ai_service.cpp:1041:51` 尚有 `-Wshadow`；该 warning 已由后续提交修复。当前仍静态注册、不支持动态 `.so`，CLI 尚未启动插件系统，HTTP Task API 尚未成为常驻服务入口；真实模型/GPU 仍未实现。
+
+## Phase 7G 封板同步
+
+最终 push run 30781932731 对应 `a44b1272bf603a17724fa17c66d60ee0e18bb918`，Debug/Release 均 `497/497`，Plugin 92、Task 99 实际执行，项目源码与测试 warning 均为 0。静态注册、并发插件调用、输入快照、双重校验和错误安全规范化契约保持不变；动态 `.so`、真实模型/GPU 和常驻 CLI 仍未实现。Phase 7 状态为 `PHASE_7_SERVICE_INTEGRATION_COMPLETED`，尚未执行 50 次重复稳定性测试。

@@ -5,7 +5,7 @@
 - 项目：IndustrialAIServiceFramework
 - 阶段：Phase 7 Service Integration and Task HTTP API
 - 日期：2026-07-31
-- 状态：`PHASE_7_SERVICE_INTEGRATION_IMPLEMENTED_LINUX_VALIDATION_BLOCKED`；跨平台 API 已通过 Windows 回归，Linux-only Service 仍等待真实 Linux CI
+- 状态：`PHASE_7_SERVICE_INTEGRATION_COMPLETED`；最终 Linux CI Debug/Release 全部通过，项目源码与测试 warning 均为 0
 - 目标平台：Linux x86_64，C++17
 
 本文同时记录已实现的 Phase 1 基础设施、Phase 2 Reactor、Phase 3 TCP、Phase 4 HTTP、Phase 5 Task Runtime 与 Phase 6 静态插件系统，以及后续目标边界。只有明确列入已实现边界的类才是当前能力。
@@ -977,3 +977,29 @@ TaskId 的 canonical formatter/parser 位于 task value 层且由 POST status UR
 Snapshot 共用。前缀固定为 `task-`，最少 16 位十进制；为保持 Phase 5 的完整
 `uint64_t` ID 空间，17–20 位值采用无额外前导零的唯一文本，解析后必须逐字节重格式化
 一致。
+
+## Phase 7E 历史 Linux CI 与停止生命周期记录
+
+最新 [Linux CI run 30779555703](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30779555703)（`pull_request`，attempt 1，conclusion `success`）验证提交 `1cc332b9d9e02ae78ec9e43455d36ffe939f73e2`；job checkout 为 merge SHA `466b80f742457da1fa67aea2859b770e361dcbe4`。runner 为 Ubuntu 24.04.4 LTS（`ubuntu-24.04`，kernel `6.17.0-1020-azure`），GCC 13.3.0、CMake 3.31.6。Debug 和 Release 均 configure/build 成功，CTest 均为 `497/497`，version/config smoke 成功；ActiveHttpStop 测试两种配置均通过。
+
+该记录属于最终 warning 修复前的历史 run；当时项目测试仍有 `tests/service/test_industrial_ai_service.cpp:1041:51` 的 `-Wshadow` warning（每 job 3 次），不能作为最终封板证据。
+
+### Active HTTP stop 生命周期
+
+当 active HTTP 请求触发 stop 时，TcpServer/HttpServer 的 cleanup 可能先关闭该连接，请求不保证返回 503；客户端只能依赖已经完整写出的响应，不能要求停止请求得到特定状态码。普通 Stopping 阶段仍将新 POST 映射为 503。资源顺序固定为：
+
+```text
+TcpServer cleanup
+    -> HttpServer stopped
+    -> DeferredCleanup
+    -> TaskManager shutdown/join
+    -> Service Stopped
+```
+
+DeferredCleanup 必须在阻塞任务 shutdown 之前完成；不得在 cleanup 后截断已开始发送的 HTTP response。尚未执行 `ctest --repeat until-fail:50`。
+
+## Phase 7G 最终封板证据（2026-08-03）
+
+最终 push [Linux CI run 30781932731](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30781932731)（attempt 1，`success`）对应提交 `a44b1272bf603a17724fa17c66d60ee0e18bb918`，Debug/Release checkout 均一致。Ubuntu 24.04.4 LTS、kernel 6.17.0-1020-azure、GCC 13.3.0、CMake 3.31.6；Debug/Release configure、build、CTest 均通过 `497/497`，项目源码与测试 warning 均为 0，Release version/config smoke 成功。
+
+`IndustrialAiServiceTest.ActiveHttpStopWaitsForDeferredCleanupBeforeJoiningTasks` 在两种配置均通过。active HTTP 请求触发 stop 时不保证 503，cleanup 可能先关闭连接，已开始发送的 response 不得截断；普通 Stopping 阶段新 POST 仍映射为 503。生命周期顺序为 `TcpServer cleanup → HttpServer stopped → DeferredCleanup → TaskManager shutdown/join → Service Stopped`。尚未执行 `ctest --repeat until-fail:50`。

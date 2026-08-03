@@ -5,8 +5,8 @@
 IndustrialAIServiceFramework 的 Phase 2 Reactor、Phase 3 TCP Transport 和 Phase 4
 HTTP adapter 直接使用 epoll、eventfd、accept4 和 POSIX Socket；HTTP Core、
 Task Runtime、Plugin System 与 `iaisf_task_api` 本身可移植。Phase 7 新增的
-`iaisf_service` 和 loopback 集成测试依赖 Linux Reactor/TCP/HTTP adapter；当前仅
-完成 Windows API 回归，尚无与当前 Phase 7 代码对应的真实 Linux CI。
+`iaisf_service` 和 loopback 集成测试依赖 Linux Reactor/TCP/HTTP adapter；Phase 7
+最终 push run 已在 Ubuntu 24.04 真实执行并完成封板，项目源码与测试 warning 均为 0。
 timerfd 与 signalfd 仍是后续计划。
 Windows MinGW 或 MSVC 可以帮助发现一部分可移植 C++ 问题，但不能替代真实 Linux
 构建、测试和运行验证。
@@ -564,3 +564,15 @@ Service 15 个 CTest 定义中的参数化错误矩阵实际展开 37 个 Google
 Session/connection 清空、worker join、重复 stop、occupied port/duplicate plugin/start
 failure 回滚全部实际执行。workflow 不使用 `continue-on-error`、warning suppression、
 部署或制品上传；项目源码和测试 warning 必须为 0 才能封板。
+
+## Phase 7E 最终 Linux CI 记录
+
+本机没有以 WSL/Linux 构建结果冒充验证；最终证据来自 [Linux CI run 30779555703](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30779555703)，对应提交 `1cc332b9d9e02ae78ec9e43455d36ffe939f73e2`。runner 为 `ubuntu-24.04`、Ubuntu 24.04.4 LTS，kernel `6.17.0-1020-azure`，GCC 13.3.0、CMake 3.31.6。Debug 和 Release configure/build 成功，CTest 均 `497/497`，Release version/config smoke 成功；ActiveHttpStop 测试两种配置均通过。
+
+历史 run 的 workflow conclusion 为 success，但项目测试 warning 当时非零：`tests/service/test_industrial_ai_service.cpp:1041:51` 的 `-Wshadow`（每个 job 3 次）。该 run 不是最终封板证据。workflow 无 failed/cancelled/skipped/neutral/timeout，也未使用 `continue-on-error`。尚未执行 `ctest --repeat until-fail:50`。
+
+## Phase 7G 最终 Linux 封板
+
+最终 push [Linux CI run 30781932731](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30781932731) 对提交 `a44b1272bf603a17724fa17c66d60ee0e18bb918` 完成 Ubuntu 24.04.4 LTS、kernel 6.17.0-1020-azure、GCC 13.3.0、CMake 3.31.6 的 Debug/Release 验证。两套配置 configure/build 成功，CTest 均 `497/497`，Release version/config smoke 成功，项目源码与测试 warning 均为 0。
+
+ActiveHttpStop 测试在 Debug/Release 均通过。workflow 无失败或取消步骤，未使用 `continue-on-error`。尚未执行 `ctest --repeat until-fail:50`。Phase 7 状态为 `PHASE_7_SERVICE_INTEGRATION_COMPLETED`；Phase 8 尚未开始。

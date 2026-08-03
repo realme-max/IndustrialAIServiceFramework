@@ -2,6 +2,10 @@
 
 ## 1. 状态与原则
 
+> Phase 7G 最新结论覆盖下文历史性描述：Linux push CI run 30781932731 已实际执行完整测试并通过 497/497，warning 修复后项目源码与测试 warning 均为 0，当前状态为 `PHASE_7_SERVICE_INTEGRATION_COMPLETED`。
+
+下方长段落保留的是 Phase 7B 的历史快照，不是当前 Linux 结果；当前矩阵和 Phase 7E 审计记录优先。
+
 Phase 1 已实现基础单元测试和 CLI smoke，并在 Phase 1B 加强 Error 边界、Result 引用类别、配置数值类型和 UTF-8 字节限制覆盖。Phase 2 Reactor 最终 [GitHub Actions Linux CI run 30516007475](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30516007475) 已完成 Debug、Release、87/87 CTest 和 Release smoke 零 warning 验证。Phase 3 最终 [Linux CI run 30524686201](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30524686201) 已完成 Debug/Release 138/138 CTest，其中 Foundation 43、Reactor 45、TCP 50。Phase 4 最终 [Linux CI run 30539245789](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30539245789) Debug/Release 239/239。Phase 5 最终 [Linux CI run 30547126540](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30547126540) Debug/Release 324/324。Phase 6 最终 Linux Debug/Release 各 428/428。Phase 7 当前为 `PHASE_7_SERVICE_INTEGRATION_IMPLEMENTED_LINUX_VALIDATION_BLOCKED`：Windows Debug/Release 已实际 370/370，Linux-only Service 测试尚未在真实 Linux CI 执行。
 
 ## Phase 7 本地验证矩阵
@@ -10,8 +14,8 @@ Phase 1 已实现基础单元测试和 CLI smoke，并在 Phase 1B 加强 Error 
 |---|---|---|---:|---:|---:|
 | Windows VS2022 Debug | pass | pass | 370/370 | 46/46 | 不构建 |
 | Windows VS2022 Release | pass | pass | 370/370 | 46/46 | 不构建 |
-| Linux Debug | 未执行 | 未执行 | 未执行 | 46 个 CTest 定义 | 15 个 CTest 定义，未执行 |
-| Linux Release | 未执行 | 未执行 | 未执行 | 46 个 CTest 定义 | 15 个 CTest 定义，未执行 |
+| Linux Debug（run 30779555703） | pass | pass | 497/497 | 46/46 已纳入 | Service/ActiveHttpStop 已执行 |
+| Linux Release（run 30779555703） | pass | pass | 497/497 | 46/46 已纳入 | Service/ActiveHttpStop 已执行 |
 
 Windows 分项为 Foundation 41、HTTP Core 90、Task Runtime 99、Plugin System 92、
 Task API 46 和 smoke 2，共 370。Release `--version` 与示例配置 smoke 均 exit 0。
@@ -839,3 +843,30 @@ Phase 0 的非运行验证项：
   `83AE7E469DEA30C860DEFD4D26CB313B7B3C87EFCD9387414741E152EE46CF27`。
 - 当前宿主无可用 Linux/epoll 构建环境，因此没有伪造编译结果。
 - Phase 5C 封板前以及 Phase 6 开始、交付前复算均仍为 62 个文件、59,240,225 bytes 和相同聚合 SHA-256。
+
+## Phase 7E 最终 Linux CI 审计（2026-08-03）
+
+历史结论：功能验证已通过，但该次日志仍包含项目测试 warning，不能作为最终封板状态。
+
+- workflow：Linux CI；run [30779555703](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30779555703)，attempt 1，event `pull_request`，conclusion `success`。
+- head/local SHA：`1cc332b9d9e02ae78ec9e43455d36ffe939f73e2`；两个 job 的 merge checkout SHA：`466b80f742457da1fa67aea2859b770e361dcbe4`。
+- runner：`ubuntu-24.04`，Ubuntu 24.04.4 LTS；kernel `6.17.0-1020-azure`；GCC 13.3.0；CMake 3.31.6。
+- Debug：configure/build 成功，CTest `497/497`，0 failed。Release：configure/build 成功，CTest `497/497`，0 failed。
+- Release version/config smoke 成功，输出 `IndustrialAIServiceFramework 0.1.0` 和 configuration validated 日志，exit 0。
+- `IndustrialAiServiceTest.ActiveHttpStopWaitsForDeferredCleanupBeforeJoiningTasks` 在 Debug、Release 均通过。
+- 项目源码 warning：日志中未发现；项目测试 warning：非零，唯一位置为 `tests/service/test_industrial_ai_service.cpp:1041:51` 的 `-Wshadow`，每个构建 job 出现 3 次（共 6 条日志记录）。
+- workflow 无 failed/cancelled/skipped/neutral/timeout 步骤，也未使用 `continue-on-error`；这些事实不抵消 warning=0 条件未满足。
+- 尚未执行 `ctest --repeat until-fail:50` 稳定性测试。
+
+## Phase 7G 最终 Linux 验收（2026-08-03）
+
+最终 push [Linux CI run 30781932731](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30781932731)，提交 `a44b1272bf603a17724fa17c66d60ee0e18bb918`，attempt 1、event `push`、conclusion `success`。Ubuntu 24.04.4 LTS、kernel 6.17.0-1020-azure、GCC 13.3.0、CMake 3.31.6。
+
+| 配置 | Configure | Build | CTest | Warning |
+|---|---|---|---:|---:|
+| Linux Debug | pass | pass | 497/497 | source 0 / test 0 |
+| Linux Release | pass | pass | 497/497 | source 0 / test 0 |
+
+实际标签数量：HTTP 106、integration 82、linux 127、plugin 92、service 15、smoke 2、task 99、task_api 46、tcp 51、unit 464。Release version/config smoke 成功；ActiveHttpStop 测试 Debug/Release 均通过。尚未执行 `ctest --repeat until-fail:50`，不得将本次 CI 描述为 50 次稳定性验证。
+
+最终状态：`PHASE_7_SERVICE_INTEGRATION_COMPLETED`。此前 run 30779555703 的 `-Wshadow` 已由提交 `a44b1272bf603a17724fa17c66d60ee0e18bb918` 修复。
