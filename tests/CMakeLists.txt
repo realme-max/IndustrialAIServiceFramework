@@ -142,6 +142,7 @@ if(TARGET iaisf_net)
     net/test_epoll_poller.cpp
     net/test_event_loop.cpp
     net/test_socket.cpp
+    net/test_timer_queue.cpp
     net/test_unique_fd.cpp
   )
   target_compile_features(iaisf_net_tests PRIVATE cxx_std_17)
@@ -152,6 +153,11 @@ if(TARGET iaisf_net)
       GTest::gtest
       GTest::gtest_main
       Threads::Threads
+  )
+  target_include_directories(
+    iaisf_net_tests
+    PRIVATE
+      "${PROJECT_SOURCE_DIR}/src/net"
   )
   iaisf_enable_project_warnings(iaisf_net_tests)
 

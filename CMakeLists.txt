@@ -175,6 +175,7 @@ if(IAISF_BUILD_LINUX_NETWORK)
     src/net/epoll_poller.cpp
     src/net/event_loop.cpp
     src/net/socket.cpp
+    src/net/timer_queue.cpp
     src/net/tcp/ipv4_endpoint.cpp
   )
   add_library(iaisf::net ALIAS iaisf_net)
