@@ -32,6 +32,7 @@ struct ParseProgress {
     std::size_t consumed{0U};
     HttpStatus error_status{HttpStatus::BadRequest};
     ParsePhase phase{ParsePhase::Headers};
+    std::size_t body_bytes_consumed{0U};
 };
 
 /**

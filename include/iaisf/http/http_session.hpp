@@ -37,6 +37,8 @@ public:
         HttpLimits limits,
         const ConnectionPtr& connection,
         std::optional<std::chrono::steady_clock::duration> header_timeout =
+            std::nullopt,
+        std::optional<std::chrono::steady_clock::duration> body_timeout =
             std::nullopt);
 
     HttpSession(const HttpSession&) = delete;
@@ -57,6 +59,7 @@ private:
     enum class ReceiveState {
         AwaitingRequest,
         ReadingHeaders,
+        ReadingBody,
         AfterHeaders,
         Terminal,
     };
@@ -66,7 +69,8 @@ private:
         const HttpRouter& router,
         HttpLimits limits,
         const ConnectionPtr& connection,
-        std::optional<std::chrono::steady_clock::duration> header_timeout);
+        std::optional<std::chrono::steady_clock::duration> header_timeout,
+        std::optional<std::chrono::steady_clock::duration> body_timeout);
 
     void dispatch_available(
         const ConnectionPtr& connection,
@@ -85,6 +89,10 @@ private:
     [[nodiscard]] Result<void> begin_header_timeout();
     void cancel_header_timeout() noexcept;
     void handle_header_timeout(std::uint64_t generation) noexcept;
+    [[nodiscard]] Result<void> begin_body_timeout();
+    [[nodiscard]] Result<void> refresh_body_timeout();
+    void cancel_body_timeout() noexcept;
+    void handle_body_timeout(std::uint64_t generation) noexcept;
 
     net::EventLoop& loop_;
     const HttpRouter& router_;
@@ -94,6 +102,9 @@ private:
     std::optional<std::chrono::steady_clock::duration> header_timeout_;
     std::optional<net::TimerId> header_timer_;
     std::uint64_t header_generation_{0U};
+    std::optional<std::chrono::steady_clock::duration> body_timeout_;
+    std::optional<net::TimerId> body_timer_;
+    std::uint64_t body_generation_{0U};
     net::tcp::Buffer* continuation_input_{nullptr};
     bool continuation_pending_{false};
     bool terminal_{false};

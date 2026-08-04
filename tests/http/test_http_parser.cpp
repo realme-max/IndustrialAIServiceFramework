@@ -70,17 +70,31 @@ TEST(HttpParserTest, ParsesPostWithBinaryBodyAcrossFragments) {
     const auto headers = parse_once(parser, head);
     EXPECT_EQ(headers.disposition, ParseDisposition::NeedMore);
     EXPECT_EQ(headers.phase, ParsePhase::Body);
-    EXPECT_EQ(
-        parse_once(parser, std::string_view{"a\0", 2U}).disposition,
-        ParseDisposition::NeedMore);
-    EXPECT_EQ(
-        parse_once(parser, "b").disposition,
-        ParseDisposition::Complete);
+    EXPECT_EQ(headers.body_bytes_consumed, 0U);
+    const auto first_body =
+        parse_once(parser, std::string_view{"a\0", 2U});
+    EXPECT_EQ(first_body.disposition, ParseDisposition::NeedMore);
+    EXPECT_EQ(first_body.body_bytes_consumed, 2U);
+    const auto final_body = parse_once(parser, "b");
+    EXPECT_EQ(final_body.disposition, ParseDisposition::Complete);
+    EXPECT_EQ(final_body.body_bytes_consumed, 1U);
     EXPECT_EQ(parser.phase(), ParsePhase::Complete);
 
     auto request = parser.take_request();
     ASSERT_TRUE(request);
     EXPECT_EQ(request.value().body(), std::string("a\0b", 3U));
+}
+
+TEST(HttpParserTest, ReportsOnlyBodyBytesConsumedFromMixedInput) {
+    HttpParser parser;
+    const auto progress = parse_once(
+        parser,
+        "POST /data HTTP/1.1\r\nHost: localhost\r\n"
+        "Content-Length: 4\r\n\r\nab");
+
+    EXPECT_EQ(progress.disposition, ParseDisposition::NeedMore);
+    EXPECT_EQ(progress.phase, ParsePhase::Body);
+    EXPECT_EQ(progress.body_bytes_consumed, 2U);
 }
 
 TEST(HttpParserTest, AcceptsExplicitZeroContentLength) {

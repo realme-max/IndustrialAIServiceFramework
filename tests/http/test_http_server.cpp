@@ -50,10 +50,32 @@ public:
                HttpSession::ReceiveState::ReadingHeaders;
     }
 
+    [[nodiscard]] static bool has_body_timer(
+        const HttpSession& session) noexcept {
+        return session.body_timer_.has_value();
+    }
+
+    [[nodiscard]] static std::uint64_t body_generation(
+        const HttpSession& session) noexcept {
+        return session.body_generation_;
+    }
+
+    [[nodiscard]] static bool reading_body(
+        const HttpSession& session) noexcept {
+        return session.receive_state_ ==
+               HttpSession::ReceiveState::ReadingBody;
+    }
+
     static void handle_header_timeout(
         HttpSession& session,
         const std::uint64_t generation) noexcept {
         session.handle_header_timeout(generation);
+    }
+
+    static void handle_body_timeout(
+        HttpSession& session,
+        const std::uint64_t generation) noexcept {
+        session.handle_body_timeout(generation);
     }
 };
 
@@ -193,6 +215,8 @@ HttpServer::Ptr make_server(
     net::tcp::TcpServerOptions tcp_options =
         net::tcp::TcpServerOptions::defaults(),
     std::optional<std::chrono::steady_clock::duration> header_timeout =
+        std::nullopt,
+    std::optional<std::chrono::steady_clock::duration> body_timeout =
         std::nullopt) {
     auto result = HttpServer::create(
         loop,
@@ -201,7 +225,8 @@ HttpServer::Ptr make_server(
         std::move(tcp_options),
         std::move(router),
         std::move(limits),
-        header_timeout);
+        header_timeout,
+        body_timeout);
     EXPECT_TRUE(result);
     return result ? std::move(result).value() : nullptr;
 }
@@ -391,7 +416,9 @@ public:
     }
 
     [[nodiscard]] bool initialize(
-        std::chrono::steady_clock::duration header_timeout) {
+        std::optional<std::chrono::steady_clock::duration> header_timeout,
+        std::optional<std::chrono::steady_clock::duration> body_timeout =
+            std::nullopt) {
         loop_ = make_loop(logger_);
         if (!loop_) {
             return false;
@@ -462,7 +489,8 @@ public:
             router_,
             limits_,
             connection_,
-            header_timeout);
+            header_timeout,
+            body_timeout);
         if (!session_result) {
             ADD_FAILURE() << session_result.error().message;
             return false;
@@ -491,7 +519,19 @@ public:
     const net::tcp::TcpConnection::Ptr& connection() const noexcept {
         return connection_;
     }
+    int peer_handle() const noexcept { return peer_.get(); }
+    net::EventLoop& loop() noexcept { return *loop_; }
     int close_count() const noexcept { return close_count_; }
+
+    [[nodiscard]] bool run_shutdown_cleanup() {
+        session_->on_disconnected();
+        auto destroyed = connection_->connect_destroyed();
+        if (!destroyed) {
+            ADD_FAILURE() << destroyed.error().message;
+            return false;
+        }
+        return true;
+    }
 
 private:
     RecordingLogger logger_;
@@ -564,6 +604,165 @@ TEST(HttpSessionHeaderTimeoutTest, PeerCloseInvalidatesPendingTimeout) {
     EXPECT_EQ(
         harness.connection()->state(),
         net::tcp::TcpConnection::State::Disconnected);
+    EXPECT_TRUE(expect_close(harness.peer_handle()).empty());
+}
+
+TEST(HttpSessionBodyTimeoutTest, CompleteHeadersStartBodyTimer) {
+    DirectSessionHarness harness;
+    ASSERT_TRUE(harness.initialize(std::nullopt, std::chrono::hours{1}));
+
+    ASSERT_TRUE(harness.deliver(
+        "POST /data HTTP/1.1\r\nHost: localhost\r\n"
+        "Content-Length: 4\r\n\r\n"));
+
+    EXPECT_TRUE(HttpSessionTestAccess::reading_body(harness.session()));
+    EXPECT_TRUE(HttpSessionTestAccess::has_body_timer(harness.session()));
+    EXPECT_FALSE(HttpSessionTestAccess::has_header_timer(harness.session()));
+}
+
+TEST(HttpSessionBodyTimeoutTest, ConsumedBodyBytesRefreshTimer) {
+    DirectSessionHarness harness;
+    ASSERT_TRUE(harness.initialize(std::nullopt, std::chrono::hours{1}));
+    ASSERT_TRUE(harness.deliver(
+        "POST /data HTTP/1.1\r\nHost: localhost\r\n"
+        "Content-Length: 4\r\n\r\n"));
+    const std::uint64_t first_generation =
+        HttpSessionTestAccess::body_generation(harness.session());
+
+    ASSERT_TRUE(harness.deliver("a"));
+
+    EXPECT_TRUE(HttpSessionTestAccess::has_body_timer(harness.session()));
+    EXPECT_TRUE(HttpSessionTestAccess::reading_body(harness.session()));
+    EXPECT_NE(
+        HttpSessionTestAccess::body_generation(harness.session()),
+        first_generation);
+}
+
+TEST(HttpSessionBodyTimeoutTest, ContinuousFragmentsInvalidateOldDeadlines) {
+    DirectSessionHarness harness;
+    ASSERT_TRUE(harness.initialize(std::nullopt, std::chrono::hours{1}));
+    ASSERT_TRUE(harness.deliver(
+        "POST /data HTTP/1.1\r\nHost: localhost\r\n"
+        "Content-Length: 3\r\n\r\n"));
+
+    const std::uint64_t initial_generation =
+        HttpSessionTestAccess::body_generation(harness.session());
+    ASSERT_TRUE(harness.deliver("a"));
+    HttpSessionTestAccess::handle_body_timeout(
+        harness.session(), initial_generation);
+    ASSERT_FALSE(harness.session().terminal());
+
+    const std::uint64_t second_generation =
+        HttpSessionTestAccess::body_generation(harness.session());
+    ASSERT_TRUE(harness.deliver("b"));
+    HttpSessionTestAccess::handle_body_timeout(
+        harness.session(), second_generation);
+    ASSERT_FALSE(harness.session().terminal());
+
+    ASSERT_TRUE(harness.deliver("c"));
+    EXPECT_FALSE(HttpSessionTestAccess::has_body_timer(harness.session()));
+    EXPECT_FALSE(harness.session().terminal());
+}
+
+TEST(HttpSessionBodyTimeoutTest, BodyCompletionCancelsTimer) {
+    DirectSessionHarness harness;
+    ASSERT_TRUE(harness.initialize(std::nullopt, std::chrono::hours{1}));
+    ASSERT_TRUE(harness.deliver(
+        "POST /data HTTP/1.1\r\nHost: localhost\r\n"
+        "Content-Length: 1\r\n\r\n"));
+    ASSERT_TRUE(HttpSessionTestAccess::has_body_timer(harness.session()));
+
+    ASSERT_TRUE(harness.deliver("x"));
+
+    EXPECT_FALSE(HttpSessionTestAccess::has_body_timer(harness.session()));
+    EXPECT_FALSE(HttpSessionTestAccess::reading_body(harness.session()));
+    EXPECT_FALSE(harness.session().terminal());
+}
+
+TEST(HttpSessionBodyTimeoutTest, KeepAliveNextRequestOwnsOnlyHeaderTimer) {
+    DirectSessionHarness harness;
+    ASSERT_TRUE(harness.initialize(
+        std::chrono::hours{1}, std::chrono::hours{1}));
+    ASSERT_TRUE(harness.deliver(
+        "POST /data HTTP/1.1\r\nHost: localhost\r\n"
+        "Content-Length: 1\r\n\r\n"));
+    const std::uint64_t body_generation =
+        HttpSessionTestAccess::body_generation(harness.session());
+    ASSERT_TRUE(harness.deliver("x"));
+    ASSERT_FALSE(HttpSessionTestAccess::has_body_timer(harness.session()));
+
+    ASSERT_TRUE(harness.deliver("G"));
+    ASSERT_TRUE(HttpSessionTestAccess::has_header_timer(harness.session()));
+    ASSERT_TRUE(HttpSessionTestAccess::reading_headers(harness.session()));
+    HttpSessionTestAccess::handle_body_timeout(
+        harness.session(), body_generation);
+
+    EXPECT_FALSE(harness.session().terminal());
+    EXPECT_FALSE(HttpSessionTestAccess::has_body_timer(harness.session()));
+    EXPECT_TRUE(HttpSessionTestAccess::has_header_timer(harness.session()));
+}
+
+TEST(HttpSessionBodyTimeoutTest, PeerCloseInvalidatesPendingBodyTimeout) {
+    DirectSessionHarness harness;
+    ASSERT_TRUE(harness.initialize(std::nullopt, std::chrono::hours{1}));
+    ASSERT_TRUE(harness.deliver(
+        "POST /data HTTP/1.1\r\nHost: localhost\r\n"
+        "Content-Length: 2\r\n\r\na"));
+    const std::uint64_t stale_generation =
+        HttpSessionTestAccess::body_generation(harness.session());
+
+    ASSERT_TRUE(harness.connection()->force_close());
+    ASSERT_EQ(harness.close_count(), 1);
+    HttpSessionTestAccess::handle_body_timeout(
+        harness.session(), stale_generation);
+
+    EXPECT_EQ(harness.close_count(), 1);
+    EXPECT_TRUE(harness.session().terminal());
+    EXPECT_EQ(
+        harness.connection()->state(),
+        net::tcp::TcpConnection::State::Disconnected);
+}
+
+TEST(HttpSessionBodyTimeoutTest, ShutdownCleanupInvalidatesBodyTimeout) {
+    DirectSessionHarness harness;
+    ASSERT_TRUE(harness.initialize(std::nullopt, std::chrono::hours{1}));
+    ASSERT_TRUE(harness.deliver(
+        "POST /data HTTP/1.1\r\nHost: localhost\r\n"
+        "Content-Length: 2\r\n\r\na"));
+    const std::uint64_t stale_generation =
+        HttpSessionTestAccess::body_generation(harness.session());
+
+    ASSERT_TRUE(harness.run_shutdown_cleanup());
+    HttpSessionTestAccess::handle_body_timeout(
+        harness.session(), stale_generation);
+
+    EXPECT_TRUE(harness.session().terminal());
+    EXPECT_FALSE(HttpSessionTestAccess::has_body_timer(harness.session()));
+    EXPECT_EQ(
+        harness.connection()->state(),
+        net::tcp::TcpConnection::State::Disconnected);
+}
+
+TEST(HttpSessionBodyTimeoutTest, TimerCapacityFailureClosesWithoutResponse) {
+    DirectSessionHarness harness;
+    ASSERT_TRUE(harness.initialize(std::nullopt, std::chrono::hours{1}));
+    for (std::size_t index = 0U;
+         index < net::TimerQueueOptions::kDefaultMaxTimers;
+         ++index) {
+        ASSERT_TRUE(harness.loop().run_after(
+            std::chrono::hours{1}, [] {}));
+    }
+
+    ASSERT_TRUE(harness.deliver(
+        "POST /data HTTP/1.1\r\nHost: localhost\r\n"
+        "Content-Length: 1\r\n\r\n"));
+
+    EXPECT_TRUE(harness.session().terminal());
+    EXPECT_EQ(harness.close_count(), 1);
+    EXPECT_EQ(
+        harness.connection()->state(),
+        net::tcp::TcpConnection::State::Disconnected);
+    EXPECT_TRUE(expect_close(harness.peer_handle()).empty());
 }
 
 TEST(HttpServerTest, ServesBuiltinHealthOverLoopback) {
@@ -656,6 +855,67 @@ TEST(HttpServerTest, SlowHeaderReturns408ThenUsesDeferredCleanup) {
              response.head.find("Connection: close\r\n") ==
                  std::string::npos)) {
             error = "unexpected header timeout response";
+        }
+        if (error.empty()) {
+            error = expect_close(socket.fd.get());
+        }
+        client_promise.set_value(error);
+        loop->stop();
+    });
+
+    auto run = loop->run();
+    client.join();
+    ASSERT_TRUE(run);
+    EXPECT_TRUE(client_result.get().empty());
+    EXPECT_TRUE(server->stop());
+    EXPECT_TRUE(server->stopped());
+    EXPECT_EQ(server->session_count(), 0U);
+    server.reset();
+}
+
+TEST(HttpServerTest, InactiveBodyReturns408ThenUsesDeferredCleanup) {
+    RecordingLogger logger;
+    auto loop = make_loop(logger);
+    ASSERT_NE(loop, nullptr);
+    auto router_result = make_builtin_router(HttpLimits::defaults());
+    ASSERT_TRUE(router_result);
+    auto server = make_server(
+        *loop,
+        logger,
+        std::move(router_result).value(),
+        HttpLimits::defaults(),
+        net::tcp::TcpServerOptions::defaults(),
+        std::nullopt,
+        std::chrono::nanoseconds{1});
+    ASSERT_NE(server, nullptr);
+    ServerCleanup cleanup{server};
+    ASSERT_TRUE(server->start());
+    const auto endpoint = server->local_endpoint();
+
+    std::promise<std::string> client_promise;
+    auto client_result = client_promise.get_future();
+    std::thread client([&loop, endpoint, &client_promise] {
+        auto socket = connect_client(endpoint);
+        std::string error = socket.error;
+        if (error.empty()) {
+            error = send_all(
+                socket.fd.get(),
+                "POST /data HTTP/1.1\r\nHost: localhost\r\n"
+                "Content-Length: 2\r\n\r\na");
+        }
+        ResponseReader reader;
+        WireResponse response;
+        if (error.empty()) {
+            error = reader.read(socket.fd.get(), response);
+        }
+        if (error.empty() &&
+            (response.status != 408 ||
+             response.body != "Request Timeout\n" ||
+             response.head.find("Content-Length: 16\r\n") ==
+                 std::string::npos ||
+             response.head.find("Connection: close\r\n") ==
+                 std::string::npos)) {
+            error = "unexpected body timeout response";
         }
         if (error.empty()) {
             error = expect_close(socket.fd.get());
