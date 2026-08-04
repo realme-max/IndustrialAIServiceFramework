@@ -13,6 +13,7 @@
 
 #include "iaisf/net/channel.hpp"
 #include "iaisf/net/epoll_poller.hpp"
+#include "signal_queue.hpp"
 #include "timer_queue.hpp"
 #include "system_error.hpp"
 
@@ -97,6 +98,8 @@ EventLoop::~EventLoop() noexcept {
     }
 
     stop();
+    finalize_signal_queue();
+    signal_queue_.reset();
     finalize_timer_queue();
     timer_queue_.reset();
     if (wakeup_channel_ && wakeup_channel_->is_registered()) {
@@ -162,6 +165,7 @@ Result<void> EventLoop::run() {
             execute_deferred_cleanups();
             execute_pending_callbacks();
             execute_deferred_cleanups();
+            finalize_signal_queue();
             finalize_timer_queue();
             transition_to_stopped();
             return Result<void>::failure(std::move(poll_result).error());
@@ -176,6 +180,7 @@ Result<void> EventLoop::run() {
     drain_wakeup();
     execute_pending_callbacks();
     execute_deferred_cleanups();
+    finalize_signal_queue();
     finalize_timer_queue();
     transition_to_stopped();
     return Result<void>::success();
@@ -202,6 +207,37 @@ void EventLoop::stop() noexcept {
             safe_log(LogLevel::Error, "failed to signal EventLoop stop");
         }
     }
+}
+
+Result<void> EventLoop::enable_shutdown_signals(
+    Callback before_loop_stop) {
+    if (!is_in_loop_thread()) {
+        return Result<void>::failure(make_error(
+            ErrorCode::InvalidState,
+            "signal handling must be enabled in the EventLoop owner thread"));
+    }
+    if (state_.load(std::memory_order_acquire) != State::Created) {
+        return Result<void>::failure(make_error(
+            ErrorCode::InvalidState,
+            "signal handling must be enabled before EventLoop::run"));
+    }
+    if (signal_queue_) {
+        return Result<void>::failure(make_error(
+            ErrorCode::InvalidState,
+            "signal handling is already enabled"));
+    }
+
+    auto queue_result = detail::SignalQueue::create(
+        *this,
+        std::move(before_loop_stop),
+        [this](const char* const message) {
+            safe_log(LogLevel::Error, message);
+        });
+    if (!queue_result) {
+        return Result<void>::failure(std::move(queue_result).error());
+    }
+    signal_queue_ = std::move(queue_result).value();
+    return Result<void>::success();
 }
 
 Result<TimerId> EventLoop::run_after(
@@ -495,6 +531,16 @@ void EventLoop::execute_deferred_cleanups() noexcept {
         current->pending_ = false;
         current->function_(current->context_);
         current = next;
+    }
+}
+
+void EventLoop::finalize_signal_queue() noexcept {
+    if (!signal_queue_) {
+        return;
+    }
+    auto result = signal_queue_->shutdown();
+    if (!result) {
+        safe_log(LogLevel::Error, "failed to shut down EventLoop signal queue");
     }
 }
 
