@@ -1,6 +1,7 @@
 #include "signal_queue.hpp"
 
 #include <array>
+#include <atomic>
 #include <cerrno>
 #include <cstddef>
 #include <exception>
@@ -21,6 +22,11 @@ namespace {
 
 constexpr std::array<int, 2U> kHandledSignals{SIGINT, SIGTERM};
 constexpr std::size_t kReadBatchSize = 16U;
+
+std::atomic<SignalQueue*>& process_signal_owner() noexcept {
+    static std::atomic<SignalQueue*> owner{nullptr};
+    return owner;
+}
 
 [[nodiscard]] Result<void> initialize_empty_set(
     sigset_t& set,
@@ -77,7 +83,12 @@ Result<std::unique_ptr<SignalQueue>> SignalQueue::create(
             owner,
             std::move(before_loop_stop),
             std::move(error_notification)}};
-        auto result = queue->block_signals();
+        auto result = queue->claim_process_owner();
+        if (!result) {
+            return Result<std::unique_ptr<SignalQueue>>::failure(
+                std::move(result).error());
+        }
+        result = queue->block_signals();
         if (!result) {
             return Result<std::unique_ptr<SignalQueue>>::failure(
                 std::move(result).error());
@@ -103,6 +114,21 @@ Result<std::unique_ptr<SignalQueue>> SignalQueue::create(
             ErrorCode::InternalError,
             "unable to create signal queue"));
     }
+}
+
+Result<void> SignalQueue::claim_process_owner() {
+    SignalQueue* expected = nullptr;
+    if (!process_signal_owner().compare_exchange_strong(
+            expected,
+            this,
+            std::memory_order_acq_rel,
+            std::memory_order_acquire)) {
+        return Result<void>::failure(make_error(
+            ErrorCode::InvalidState,
+            "process already has a shutdown SignalQueue owner"));
+    }
+    process_owner_claimed_ = true;
+    return Result<void>::success();
 }
 
 Result<void> SignalQueue::block_signals() {
@@ -285,6 +311,22 @@ Result<void> SignalQueue::restore_owned_mask() {
     return Result<void>::success();
 }
 
+void SignalQueue::release_process_owner() noexcept {
+    if (!process_owner_claimed_) {
+        return;
+    }
+    SignalQueue* expected = this;
+    const bool released = process_signal_owner().compare_exchange_strong(
+        expected,
+        nullptr,
+        std::memory_order_acq_rel,
+        std::memory_order_acquire);
+    if (!released) {
+        std::terminate();
+    }
+    process_owner_claimed_ = false;
+}
+
 Result<void> SignalQueue::shutdown() {
     if (shutdown_) {
         return Result<void>::success();
@@ -315,6 +357,7 @@ Result<void> SignalQueue::shutdown() {
             before_loop_stop_ = {};
             mask_restore_safe_ = false;
             shutdown_ = true;
+            release_process_owner();
             return drain_result;
         }
         signal_fd_.reset();
@@ -325,11 +368,13 @@ Result<void> SignalQueue::shutdown() {
         if (!restore_result) {
             before_loop_stop_ = {};
             shutdown_ = true;
+            release_process_owner();
             return restore_result;
         }
     }
     before_loop_stop_ = {};
     shutdown_ = true;
+    release_process_owner();
     return Result<void>::success();
 }
 

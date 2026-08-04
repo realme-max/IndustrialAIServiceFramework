@@ -2,6 +2,7 @@
 #include <atomic>
 #include <chrono>
 #include <cstddef>
+#include <csignal>
 #include <future>
 #include <functional>
 #include <memory>
@@ -487,6 +488,67 @@ TEST(IndustrialAiServiceTest, StartAndStopAreSingleUseAndIdempotent) {
     EXPECT_TRUE(service->stop());
     EXPECT_TRUE(service->stop());
     EXPECT_FALSE(service->start());
+}
+
+TEST(IndustrialAiServiceTest, SigtermTriggersFullServiceShutdown) {
+    RecordingLogger logger;
+    auto loop = net::EventLoop::create(logger, 128U, 256U).value();
+    auto service = IndustrialAiService::create(
+                       *loop,
+                       logger,
+                       net::tcp::Ipv4Endpoint::loopback(0U),
+                       ServiceOptions::defaults().value())
+                       .value();
+    ASSERT_TRUE(service->start());
+    const auto endpoint = service->local_endpoint();
+
+    std::promise<std::string> client_promise;
+    auto client_future = client_promise.get_future();
+    std::thread client([
+        &loop,
+        endpoint,
+        &client_promise] {
+        std::string error;
+        auto socket = connect_client(endpoint);
+        WireResponse response;
+        if (!socket) {
+            error = socket.error().message;
+        }
+        ResponseReader reader;
+        if (error.empty()) {
+            error = send_all(
+                socket.value().get(),
+                "GET /health HTTP/1.1\r\nHost: localhost\r\n\r\n");
+        }
+        if (error.empty()) {
+            error = reader.read(socket.value().get(), response);
+        }
+        if (error.empty() && response.status != 200) {
+            error = "health request failed";
+        }
+        if (error.empty() && ::kill(::getpid(), SIGTERM) != 0) {
+            error = "failed to send SIGTERM";
+        }
+        if (error.empty()) {
+            error = wait_for_eof(socket.value().get());
+        }
+        const bool failed = !error.empty();
+        client_promise.set_value(std::move(error));
+        if (failed) {
+            loop->stop();
+        }
+    });
+
+    const auto run_result = loop->run();
+    client.join();
+
+    ASSERT_TRUE(run_result);
+    EXPECT_TRUE(client_future.get().empty());
+    EXPECT_EQ(loop->state(), net::EventLoop::State::Stopped);
+    EXPECT_TRUE(service->stopped());
+    EXPECT_EQ(service->session_count(), 0U);
+    EXPECT_EQ(service->connection_count(), 0U);
+    service.reset();
 }
 
 TEST(

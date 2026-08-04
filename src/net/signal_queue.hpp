@@ -48,10 +48,12 @@ private:
         ErrorNotification error_notification) noexcept;
 
     [[nodiscard]] Result<void> block_signals();
+    [[nodiscard]] Result<void> claim_process_owner();
     [[nodiscard]] Result<void> initialize_descriptor();
     [[nodiscard]] Result<void> initialize_channel();
     [[nodiscard]] Result<void> drain_descriptor(bool request_stop);
     [[nodiscard]] Result<void> restore_owned_mask();
+    void release_process_owner() noexcept;
     void handle_readable() noexcept;
     void handle_descriptor_failure() noexcept;
     void request_shutdown(const char* message) noexcept;
@@ -66,6 +68,7 @@ private:
     sigset_t owned_mask_{};
     bool mask_installed_{false};
     bool mask_restore_safe_{true};
+    bool process_owner_claimed_{false};
     bool shutdown_requested_{false};
     bool shutdown_{false};
 

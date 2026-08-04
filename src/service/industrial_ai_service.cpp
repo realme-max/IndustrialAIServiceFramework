@@ -11,6 +11,35 @@
 
 namespace iaisf::service {
 
+struct IndustrialAiService::SignalShutdownState {
+    IndustrialAiService* service{nullptr};
+};
+
+class SignalQueueRollback final {
+public:
+    explicit SignalQueueRollback(net::EventLoop& loop) noexcept
+        : loop_(loop) {}
+
+    SignalQueueRollback(const SignalQueueRollback&) = delete;
+    SignalQueueRollback& operator=(const SignalQueueRollback&) = delete;
+
+    ~SignalQueueRollback() noexcept {
+        if (!active_) {
+            return;
+        }
+        auto result = loop_.disable_shutdown_signals();
+        if (!result) {
+            std::terminate();
+        }
+    }
+
+    void dismiss() noexcept { active_ = false; }
+
+private:
+    net::EventLoop& loop_;
+    bool active_{true};
+};
+
 Result<IndustrialAiService::Ptr> IndustrialAiService::create(
     net::EventLoop& loop,
     ILogger& logger,
@@ -38,6 +67,26 @@ Result<IndustrialAiService::Ptr> IndustrialAiService::create(
     }
 
     try {
+        auto signal_shutdown_state =
+            std::make_shared<SignalShutdownState>();
+        const std::weak_ptr<SignalShutdownState> weak_signal_state =
+            signal_shutdown_state;
+        auto signal_result = loop.enable_shutdown_signals(
+            [weak_signal_state] {
+                const auto state = weak_signal_state.lock();
+                if (!state || state->service == nullptr) {
+                    return;
+                }
+                auto result = state->service->stop();
+                if (!result) {
+                    state->service->safe_log_stop_failure(result.error());
+                }
+            });
+        if (!signal_result) {
+            return Result<Ptr>::failure(std::move(signal_result).error());
+        }
+        SignalQueueRollback signal_rollback{loop};
+
         auto plugin_manager =
             std::make_shared<plugin::PluginManager>(options.plugin_limits());
         if (options.enable_echo()) {
@@ -120,7 +169,7 @@ Result<IndustrialAiService::Ptr> IndustrialAiService::create(
             return Result<Ptr>::failure(std::move(http_result).error());
         }
 
-        return Result<Ptr>::success(Ptr{new IndustrialAiService{
+        auto service = Ptr{new IndustrialAiService{
             ConstructionKey{},
             loop,
             logger,
@@ -128,7 +177,11 @@ Result<IndustrialAiService::Ptr> IndustrialAiService::create(
             std::move(adapter),
             std::move(task_manager),
             std::move(task_api),
-            std::move(http_result).value()}});
+            std::move(http_result).value(),
+            std::move(signal_shutdown_state)}};
+        service->signal_shutdown_state_->service = service.get();
+        signal_rollback.dismiss();
+        return Result<Ptr>::success(std::move(service));
     } catch (const std::bad_alloc&) {
         return Result<Ptr>::failure(make_error(
             ErrorCode::ResourceExhausted,
@@ -148,7 +201,8 @@ IndustrialAiService::IndustrialAiService(
     std::shared_ptr<plugin::PluginTaskAdapter> plugin_adapter,
     std::unique_ptr<task::TaskManager> task_manager,
     api::TaskHttpApi::Ptr task_api,
-    http::HttpServer::Ptr http_server) noexcept
+    http::HttpServer::Ptr http_server,
+    std::shared_ptr<SignalShutdownState> signal_shutdown_state) noexcept
     : loop_(loop),
       logger_(logger),
       plugin_manager_(std::move(plugin_manager)),
@@ -156,9 +210,13 @@ IndustrialAiService::IndustrialAiService(
       task_manager_(std::move(task_manager)),
       task_api_(std::move(task_api)),
       http_server_(std::move(http_server)),
+      signal_shutdown_state_(std::move(signal_shutdown_state)),
       stop_continuation_(this, &IndustrialAiService::run_stop_continuation) {}
 
 IndustrialAiService::~IndustrialAiService() noexcept {
+    if (signal_shutdown_state_) {
+        signal_shutdown_state_->service = nullptr;
+    }
     if (state_ == State::Created) {
         const auto result = stop();
         if (!result) {
