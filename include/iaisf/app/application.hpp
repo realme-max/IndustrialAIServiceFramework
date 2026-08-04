@@ -21,7 +21,7 @@ public:
     [[nodiscard]] static std::string usage_text();
 
 private:
-    int run_with_config(const std::string& path);
+    int run_with_config(const std::string& path, bool serve);
     int report_invalid_arguments(const std::string& message);
 
     std::ostream& output_;

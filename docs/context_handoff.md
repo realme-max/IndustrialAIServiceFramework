@@ -1438,3 +1438,18 @@ active HTTP 请求触发 stop 时，当前请求不保证返回 503；TcpServer/
 - 当前状态：`PHASE_7_SERVICE_INTEGRATION_COMPLETED`。尚未执行 `ctest --repeat until-fail:50`。
 
 Active stop 不保证触发请求返回 503；连接可能在响应生成前关闭，已开始发送的 response 不得截断。普通 Stopping 阶段 POST 仍返回 503。生命周期顺序：`TcpServer cleanup → HttpServer stopped → DeferredCleanup → TaskManager shutdown/join → Service Stopped`。
+
+## Phase 8C-2 Configuration System 交接（2026-08-04）
+
+- 分支：`phase/8-timer-infrastructure`；本轮不 commit/push。
+- 状态：`PHASE_8C_2_CONFIGURATION_SYSTEM_IMPLEMENTED`，远端 Linux CI 待提交后验证。
+- AppConfig 是 portable value；JSON parser 只在 config 层，core 不依赖 service。
+- 新 schema 分组：service、server/reactor/tcp、http、runtime、tasks、plugins、task_api、logging。
+- 旧顶层 `service_name/worker_threads/task_queue_capacity/log_level` 可加载；与对应新分组同时出现拒绝。
+- schema 缺失为 1；未知字段、重复 key、非严格 integer、timeout 0、malformed 和大于 1 MiB 文件拒绝。
+- RuntimeOptions 位于 service/runtime，复用 EventLoop/Timer/TCP/HTTP/ThreadPool/Task/Plugin/API 现有验证入口。
+- Timer 容量层：TCP idle 为一层；HTTP header/body 互斥合计一层；容量不足为 ConfigError。
+- `--config` 校验退出；Linux `--serve --config` 创建 EventLoop 和 IndustrialAiService，Service 自行接入 signalfd，随后 run。
+- 不可破坏：TimerQueue/EventLoop stop、TCP/HTTP timeout、DeferredCleanup、TaskManager shutdown 和 signal owner 语义。
+- 本地验证：Windows VS2022 Debug/Release `380/380`，WSL Ubuntu 24.04 GCC Debug/Release `596/596`；两平台 version/config smoke 成功，源码/测试 warning 0。
+- 当前风险：远端 CI 尚未验证；WSL 直接构建当前 Windows 挂载工作区而非另一份 Linux clone；NTFS/WSL 时间戳可能产生非编译器的 clock-skew 提示。

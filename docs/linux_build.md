@@ -576,3 +576,14 @@ failure 回滚全部实际执行。workflow 不使用 `continue-on-error`、warn
 最终 push [Linux CI run 30781932731](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30781932731) 对提交 `a44b1272bf603a17724fa17c66d60ee0e18bb918` 完成 Ubuntu 24.04.4 LTS、kernel 6.17.0-1020-azure、GCC 13.3.0、CMake 3.31.6 的 Debug/Release 验证。两套配置 configure/build 成功，CTest 均 `497/497`，Release version/config smoke 成功，项目源码与测试 warning 均为 0。
 
 ActiveHttpStop 测试在 Debug/Release 均通过。workflow 无失败或取消步骤，未使用 `continue-on-error`。尚未执行 `ctest --repeat until-fail:50`。Phase 7 状态为 `PHASE_7_SERVICE_INTEGRATION_COMPLETED`；Phase 8 尚未开始。
+
+## Phase 8C-2 本地 WSL 验证
+
+当前未提交配置系统在 WSL Ubuntu 24.04、GCC 13.3、CMake 3.28.3 上完成 Debug 与
+Release 构建和完整 CTest，均为 `596/596`；Release `--version` 与示例 `--config` smoke 成功，Linux
+进程级测试还验证 `--serve` 启动后由 SIGTERM 触发完整 Service shutdown。最终测试
+测试标签实际包括 unit 544、linux 222、service 21 和 smoke 2。
+
+本次 WSL 直接使用当前 Windows 挂载工作区，不是另一份 Linux clone。NTFS 时间戳可能
+让 make 报告 clock-skew，这不是项目编译 warning。当前工作区未提交，因此尚无对应
+GitHub Actions Debug/Release 证据，不得把本地 WSL 回归描述成远端 CI。

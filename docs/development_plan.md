@@ -525,3 +525,17 @@ Phase 8 尚未开始；不增加 timerfd、signalfd、自动超时、动态插�
 warning 修复提交 `a44b1272bf603a17724fa17c66d60ee0e18bb918` 仅修改测试变量名。最终 push run 30781932731 在 Ubuntu 24.04.4/GCC 13.3.0/CMake 3.31.6 上完成 Debug/Release configure、build 和 `497/497` CTest，version/config smoke 与 ActiveHttpStop 均通过，项目源码与测试 warning 均为 0。因此 Phase 7 状态为 `PHASE_7_SERVICE_INTEGRATION_COMPLETED`。
 
 尚未执行 `ctest --repeat until-fail:50`；Phase 8 尚未开始。
+
+## Phase 8C-2：Configuration System（已实现，CI 证据待补）
+
+- [x] Portable AppConfig 分组模型与 1 MiB 有界严格 JSON 解析
+- [x] schema version、unknown/duplicate key、严格 integer 和 timeout 校验
+- [x] legacy 顶层四字段兼容及歧义拒绝
+- [x] service/runtime RuntimeOptions 映射与现有 Options 工厂复用
+- [x] Timer 跨字段容量校验
+- [x] `iaisf_app` 组合层和 Linux `--serve --config`
+- [x] Windows 与本地 WSL Debug/Release 全量回归
+- [ ] 当前实现提交对应的 GitHub Actions Linux CI
+
+本阶段不包含热更新、YAML、环境变量覆盖、动态插件、异步日志或生产部署。下一步必须先
+审核并提交当前实现，再以 exact commit 取得 Linux CI；不得把本地 WSL 结果写成远端 CI。

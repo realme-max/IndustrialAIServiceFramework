@@ -10,7 +10,7 @@ target_compile_features(iaisf_tests PRIVATE cxx_std_17)
 target_link_libraries(
   iaisf_tests
   PRIVATE
-    iaisf::core
+    iaisf::app
     GTest::gtest
     GTest::gtest_main
 )
@@ -229,6 +229,7 @@ if(TARGET iaisf_service)
   add_executable(
     iaisf_service_tests
     service/test_industrial_ai_service.cpp
+    service/test_runtime_options.cpp
   )
   target_compile_features(iaisf_service_tests PRIVATE cxx_std_17)
   target_link_libraries(
@@ -249,6 +250,37 @@ if(TARGET iaisf_service)
     ${IAISF_SERVICE_TESTS}
     PROPERTIES
       LABELS "integration;linux;service"
+      TIMEOUT 20
+  )
+
+  add_executable(
+    iaisf_app_service_tests
+    app/test_application_service.cpp
+  )
+  target_compile_features(iaisf_app_service_tests PRIVATE cxx_std_17)
+  target_link_libraries(
+    iaisf_app_service_tests
+    PRIVATE
+      iaisf::app
+      GTest::gtest
+      GTest::gtest_main
+  )
+  target_compile_definitions(
+    iaisf_app_service_tests
+    PRIVATE
+      IAISF_SERVER_PATH="$<TARGET_FILE:iaisf_server>"
+  )
+  add_dependencies(iaisf_app_service_tests iaisf_server)
+  iaisf_enable_project_warnings(iaisf_app_service_tests)
+
+  gtest_add_tests(
+    TARGET iaisf_app_service_tests
+    TEST_LIST IAISF_APP_SERVICE_TESTS
+  )
+  set_tests_properties(
+    ${IAISF_APP_SERVICE_TESTS}
+    PROPERTIES
+      LABELS "integration;linux;service;config"
       TIMEOUT 20
   )
 endif()

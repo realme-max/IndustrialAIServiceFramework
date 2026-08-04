@@ -37,7 +37,8 @@ bool EventLoop::DeferredCleanup::pending() const noexcept {
 Result<std::unique_ptr<EventLoop>> EventLoop::create(
     ILogger& logger,
     const std::size_t max_events,
-    const std::size_t pending_callback_capacity) {
+    const std::size_t pending_callback_capacity,
+    const TimerQueueOptions timer_options) {
     if (pending_callback_capacity == 0U ||
         pending_callback_capacity > kMaximumPendingCallbacks) {
         return Result<std::unique_ptr<EventLoop>>::failure(make_error(
@@ -62,7 +63,8 @@ Result<std::unique_ptr<EventLoop>> EventLoop::create(
         logger,
         std::move(poller_result).value(),
         UniqueFd{wakeup_fd},
-        pending_callback_capacity}};
+        pending_callback_capacity,
+        timer_options}};
     auto initialization_result = loop->initialize_wakeup_channel();
     if (!initialization_result) {
         return Result<std::unique_ptr<EventLoop>>::failure(
@@ -80,12 +82,14 @@ EventLoop::EventLoop(
     ILogger& logger,
     std::unique_ptr<EpollPoller> poller,
     UniqueFd wakeup_fd,
-    const std::size_t pending_callback_capacity)
+    const std::size_t pending_callback_capacity,
+    const TimerQueueOptions timer_options)
     : logger_(logger),
       owner_thread_(std::this_thread::get_id()),
       poller_(std::move(poller)),
       wakeup_fd_(std::move(wakeup_fd)),
-      pending_callback_capacity_(pending_callback_capacity) {}
+      pending_callback_capacity_(pending_callback_capacity),
+      timer_options_(timer_options) {}
 
 EventLoop::~EventLoop() noexcept {
     const State current = state_.load(std::memory_order_acquire);
@@ -122,7 +126,7 @@ Result<void> EventLoop::initialize_wakeup_channel() {
 Result<void> EventLoop::initialize_timer_queue() {
     auto queue_result = detail::TimerQueue::create(
         *this,
-        TimerQueueOptions{},
+        timer_options_,
         [this](const char* const message, const bool request_stop) {
             safe_log(LogLevel::Error, message);
             if (request_stop) {

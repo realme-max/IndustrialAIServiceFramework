@@ -102,7 +102,7 @@ TEST(ApplicationTest, NoArgumentsReturnsZeroWithoutStartingAService) {
 
     EXPECT_EQ(application.run({}), 0);
     EXPECT_NE(output.str().find("0.1.0"), std::string::npos);
-    EXPECT_NE(output.str().find("no network service is started"), std::string::npos);
+    EXPECT_NE(output.str().find("No service mode was selected"), std::string::npos);
     EXPECT_TRUE(error.str().empty());
 }
 
@@ -186,7 +186,24 @@ TEST(ApplicationTest, RejectsExtraAndConflictingArguments) {
     EXPECT_EQ(application.run({"--config", "a.json", "extra"}), 2);
     EXPECT_EQ(application.run({"--version", "--config", "a.json"}), 2);
     EXPECT_EQ(application.run({"--help", "--config", "a.json"}), 2);
+    EXPECT_EQ(application.run({"--serve"}), 2);
+    EXPECT_EQ(application.run({"--serve", "a.json"}), 2);
+    EXPECT_EQ(application.run({"--serve", "--config"}), 2);
 }
+
+#if defined(_WIN32)
+TEST(ApplicationTest, ServeModeFailsClearlyWithoutLinuxRuntime) {
+    std::ostringstream output;
+    std::ostringstream error;
+    iaisf::Application application{output, error};
+
+    EXPECT_EQ(
+        application.run({"--serve", "--config", IAISF_EXAMPLE_CONFIG_PATH}),
+        1);
+    EXPECT_NE(error.str().find("requires the Linux service runtime"),
+              std::string::npos);
+}
+#endif
 
 TEST(ApplicationTest, VersionAndHelpDoNotRequireAConfigurationFile) {
     std::ostringstream output;

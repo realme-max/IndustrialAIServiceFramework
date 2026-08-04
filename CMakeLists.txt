@@ -48,7 +48,6 @@ configure_file(
 add_library(
   iaisf_core
   STATIC
-  src/app/application.cpp
   src/config/app_config.cpp
   src/core/error.cpp
   src/core/json_value_limits.cpp
@@ -244,6 +243,7 @@ if(IAISF_BUILD_LINUX_NETWORK)
     iaisf_service
     STATIC
     src/service/industrial_ai_service.cpp
+    src/service/runtime_options.cpp
     src/service/service_options.cpp
   )
   add_library(iaisf::service ALIAS iaisf_service)
@@ -265,9 +265,25 @@ if(IAISF_BUILD_LINUX_NETWORK)
   iaisf_enable_project_warnings(iaisf_service)
 endif()
 
+add_library(iaisf_app STATIC src/app/application.cpp)
+add_library(iaisf::app ALIAS iaisf_app)
+target_compile_features(iaisf_app PUBLIC cxx_std_17)
+target_include_directories(
+  iaisf_app
+  PUBLIC
+    "$<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>"
+    "$<BUILD_INTERFACE:${IAISF_GENERATED_INCLUDE_DIR}>"
+)
+target_link_libraries(iaisf_app PUBLIC iaisf::core)
+if(TARGET iaisf_service)
+  target_link_libraries(iaisf_app PRIVATE iaisf::service)
+  target_compile_definitions(iaisf_app PRIVATE IAISF_HAS_SERVICE_RUNTIME=1)
+endif()
+iaisf_enable_project_warnings(iaisf_app)
+
 add_executable(iaisf_server src/main.cpp)
 target_compile_features(iaisf_server PRIVATE cxx_std_17)
-target_link_libraries(iaisf_server PRIVATE iaisf::core)
+target_link_libraries(iaisf_server PRIVATE iaisf::app)
 iaisf_enable_project_warnings(iaisf_server)
 
 if(IAISF_BUILD_TESTS)
