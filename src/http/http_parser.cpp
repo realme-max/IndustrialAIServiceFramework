@@ -100,14 +100,15 @@ HttpParser::HttpParser(HttpLimits limits) : limits_(std::move(limits)) {}
 Result<ParseProgress> HttpParser::parse(std::string_view bytes) {
     if (state_ == State::Complete) {
         return Result<ParseProgress>::success(
-            {ParseDisposition::Complete, 0U, error_status_, phase()});
+            {ParseDisposition::Complete, 0U, error_status_, phase(), 0U});
     }
     if (state_ == State::Error) {
         return Result<ParseProgress>::success(
-            {ParseDisposition::Error, 0U, error_status_, phase()});
+            {ParseDisposition::Error, 0U, error_status_, phase(), 0U});
     }
 
     std::size_t consumed = 0U;
+    std::size_t body_bytes_consumed = 0U;
     try {
         while (consumed < bytes.size()) {
             if (state_ == State::Body) {
@@ -122,12 +123,14 @@ Result<ParseProgress> HttpParser::parse(std::string_view bytes) {
                         std::move(append_result).error());
                 }
                 consumed += count;
+                body_bytes_consumed += count;
                 if (state_ == State::Complete) {
                     return Result<ParseProgress>::success(
                         {ParseDisposition::Complete,
                          consumed,
                          error_status_,
-                         phase()});
+                         phase(),
+                         body_bytes_consumed});
                 }
                 continue;
             }
@@ -141,7 +144,8 @@ Result<ParseProgress> HttpParser::parse(std::string_view bytes) {
                         {ParseDisposition::Error,
                          consumed,
                          error_status_,
-                         phase()});
+                         phase(),
+                         body_bytes_consumed});
                 }
                 ++header_bytes_;
             }
@@ -157,14 +161,16 @@ Result<ParseProgress> HttpParser::parse(std::string_view bytes) {
                     {ParseDisposition::Error,
                      consumed,
                      error_status_,
-                     phase()});
+                     phase(),
+                     body_bytes_consumed});
             }
             if (state_ == State::Complete) {
                 return Result<ParseProgress>::success(
                     {ParseDisposition::Complete,
                      consumed,
                      error_status_,
-                     phase()});
+                     phase(),
+                     body_bytes_consumed});
             }
         }
     } catch (const std::bad_alloc&) {
@@ -178,7 +184,11 @@ Result<ParseProgress> HttpParser::parse(std::string_view bytes) {
     }
 
     return Result<ParseProgress>::success(
-        {ParseDisposition::NeedMore, consumed, error_status_, phase()});
+        {ParseDisposition::NeedMore,
+         consumed,
+         error_status_,
+         phase(),
+         body_bytes_consumed});
 }
 
 Result<HttpRequest> HttpParser::take_request() {

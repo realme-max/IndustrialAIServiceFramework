@@ -13,7 +13,8 @@ Result<HttpServer::Ptr> HttpServer::create(
     net::tcp::TcpServerOptions tcp_options,
     HttpRouter router,
     HttpLimits limits,
-    std::optional<std::chrono::steady_clock::duration> header_timeout) {
+    std::optional<std::chrono::steady_clock::duration> header_timeout,
+    std::optional<std::chrono::steady_clock::duration> body_timeout) {
     if (!loop.is_in_loop_thread()) {
         return Result<Ptr>::failure(make_error(
             ErrorCode::InvalidState,
@@ -29,6 +30,12 @@ Result<HttpServer::Ptr> HttpServer::create(
         return Result<Ptr>::failure(make_error(
             ErrorCode::InvalidArgument,
             "HTTP header timeout must be positive"));
+    }
+    if (body_timeout.has_value() &&
+        *body_timeout <= std::chrono::steady_clock::duration::zero()) {
+        return Result<Ptr>::failure(make_error(
+            ErrorCode::InvalidArgument,
+            "HTTP body timeout must be positive"));
     }
 
     const auto max_connections = tcp_options.max_connections();
@@ -48,7 +55,8 @@ Result<HttpServer::Ptr> HttpServer::create(
             std::move(limits),
             std::move(router),
             std::move(tcp_result).value(),
-            header_timeout}};
+            header_timeout,
+            body_timeout}};
         server->sessions_.reserve(max_connections);
         return Result<Ptr>::success(std::move(server));
     } catch (const std::bad_alloc&) {
@@ -64,13 +72,15 @@ HttpServer::HttpServer(
     HttpLimits limits,
     HttpRouter router,
     net::tcp::TcpServer::Ptr tcp_server,
-    std::optional<std::chrono::steady_clock::duration> header_timeout) noexcept
+    std::optional<std::chrono::steady_clock::duration> header_timeout,
+    std::optional<std::chrono::steady_clock::duration> body_timeout) noexcept
     : loop_(loop),
       logger_(logger),
       limits_(std::move(limits)),
       router_(std::move(router)),
       tcp_server_(std::move(tcp_server)),
-      header_timeout_(header_timeout) {}
+      header_timeout_(header_timeout),
+      body_timeout_(body_timeout) {}
 
 HttpServer::~HttpServer() noexcept {
     if ((state_ == State::Running || state_ == State::Stopping) &&
@@ -195,7 +205,8 @@ void HttpServer::handle_connection(
             router_,
             limits_,
             connection,
-            header_timeout_);
+            header_timeout_,
+            body_timeout_);
         if (!session) {
             const auto close_result = connection->force_close();
             if (!close_result) {
