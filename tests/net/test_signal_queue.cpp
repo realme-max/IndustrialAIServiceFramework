@@ -225,4 +225,20 @@ TEST(SignalQueueTest, RejectsNonOwnerAndDuplicateEnable) {
     loop->stop();
 }
 
+TEST(SignalQueueTest, TwoEventLoopsCannotBothOwnShutdownSignals) {
+    RecordingLogger logger;
+    auto first_loop = make_loop(logger);
+    auto second_loop = make_loop(logger);
+    ASSERT_NE(first_loop, nullptr);
+    ASSERT_NE(second_loop, nullptr);
+
+    ASSERT_TRUE(first_loop->enable_shutdown_signals());
+    auto second_result = second_loop->enable_shutdown_signals();
+    ASSERT_FALSE(second_result);
+    EXPECT_EQ(second_result.error().code, iaisf::ErrorCode::InvalidState);
+
+    first_loop->stop();
+    second_loop->stop();
+}
+
 }  // namespace

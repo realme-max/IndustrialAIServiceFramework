@@ -20,13 +20,16 @@ namespace iaisf::service {
  * Linux owner-thread composition root for HTTP, tasks, and static plugins.
  *
  * EventLoop and ILogger are borrowed. start()/stop() are owner-thread-only;
- * stop first closes HTTP admission, then drains and joins TaskManager. It does
- * not stop the externally owned EventLoop.
+ * creation installs the process-wide SIGINT/SIGTERM shutdown callback on the
+ * EventLoop. stop first closes HTTP admission, then drains and joins
+ * TaskManager. It does not stop the externally owned EventLoop; the signal
+ * callback invokes this stop flow before EventLoop::stop().
  */
 class IndustrialAiService final {
     struct ConstructionKey {
         explicit ConstructionKey() = default;
     };
+    struct SignalShutdownState;
 
 public:
     using Ptr = std::unique_ptr<IndustrialAiService>;
@@ -66,7 +69,8 @@ public:
         std::shared_ptr<plugin::PluginTaskAdapter> plugin_adapter,
         std::unique_ptr<task::TaskManager> task_manager,
         api::TaskHttpApi::Ptr task_api,
-        http::HttpServer::Ptr http_server) noexcept;
+        http::HttpServer::Ptr http_server,
+        std::shared_ptr<SignalShutdownState> signal_shutdown_state) noexcept;
 
     [[nodiscard]] Result<void> start();
     [[nodiscard]] Result<void> stop();
@@ -93,6 +97,7 @@ private:
     std::unique_ptr<task::TaskManager> task_manager_;
     api::TaskHttpApi::Ptr task_api_;
     http::HttpServer::Ptr http_server_;
+    std::shared_ptr<SignalShutdownState> signal_shutdown_state_;
     net::EventLoop::DeferredCleanup stop_continuation_;
     State state_{State::Created};
 };

@@ -109,6 +109,12 @@ public:
     [[nodiscard]] Result<void> enable_shutdown_signals(
         Callback before_loop_stop = {});
 
+    /**
+     * Removes the shutdown signal source during Created-state rollback.
+     * This is owner-thread-only and is not valid once run() has started.
+     */
+    [[nodiscard]] Result<void> disable_shutdown_signals();
+
     /** Owner-thread-only timer scheduling and cancellation. */
     [[nodiscard]] Result<TimerId> run_after(
         std::chrono::steady_clock::duration delay,

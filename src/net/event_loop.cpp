@@ -188,6 +188,7 @@ Result<void> EventLoop::run() {
 
 void EventLoop::stop() noexcept {
     bool should_wake = false;
+    bool should_finalize_created_signals = false;
     std::deque<Callback> cancelled_callbacks;
     {
         std::lock_guard<std::mutex> lock{pending_mutex_};
@@ -195,10 +196,16 @@ void EventLoop::stop() noexcept {
         if (current == State::Created) {
             state_.store(State::Stopped, std::memory_order_release);
             cancelled_callbacks.swap(pending_callbacks_);
+            should_finalize_created_signals = is_in_loop_thread();
         } else if (current == State::Running) {
             state_.store(State::Stopping, std::memory_order_release);
             should_wake = true;
         }
+    }
+
+    if (should_finalize_created_signals) {
+        finalize_signal_queue();
+        signal_queue_.reset();
     }
 
     if (should_wake) {
@@ -237,6 +244,28 @@ Result<void> EventLoop::enable_shutdown_signals(
         return Result<void>::failure(std::move(queue_result).error());
     }
     signal_queue_ = std::move(queue_result).value();
+    return Result<void>::success();
+}
+
+Result<void> EventLoop::disable_shutdown_signals() {
+    if (!is_in_loop_thread()) {
+        return Result<void>::failure(make_error(
+            ErrorCode::InvalidState,
+            "signal handling must be disabled in the EventLoop owner thread"));
+    }
+    if (state_.load(std::memory_order_acquire) != State::Created) {
+        return Result<void>::failure(make_error(
+            ErrorCode::InvalidState,
+            "signal handling rollback requires a Created EventLoop"));
+    }
+    if (!signal_queue_) {
+        return Result<void>::success();
+    }
+    auto result = signal_queue_->shutdown();
+    if (!result) {
+        return result;
+    }
+    signal_queue_.reset();
     return Result<void>::success();
 }
 
