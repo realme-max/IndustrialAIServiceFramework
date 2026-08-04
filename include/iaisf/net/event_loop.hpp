@@ -21,6 +21,8 @@ class Channel;
 class EpollPoller;
 
 namespace detail {
+class SignalQueue;
+class SignalQueueTestAccess;
 class TimerQueue;
 class TimerQueueTestAccess;
 }  // namespace detail
@@ -95,6 +97,18 @@ public:
     [[nodiscard]] Result<void> run();
     void stop() noexcept;
 
+    /**
+     * Enables owner-thread delivery of SIGINT and SIGTERM through signalfd.
+     *
+     * This must be called at most once, in the owner thread, while the loop is
+     * Created, and before starting threads that must inherit the blocked signal
+     * mask. before_loop_stop runs at most once in the owner thread so composed
+     * servers can begin their existing shutdown flow. EventLoop::stop() is
+     * always invoked afterward, including when the callback throws.
+     */
+    [[nodiscard]] Result<void> enable_shutdown_signals(
+        Callback before_loop_stop = {});
+
     /** Owner-thread-only timer scheduling and cancellation. */
     [[nodiscard]] Result<TimerId> run_after(
         std::chrono::steady_clock::duration delay,
@@ -127,6 +141,7 @@ public:
 
 private:
     friend struct EventLoopTestAccess;
+    friend class detail::SignalQueueTestAccess;
     friend class detail::TimerQueueTestAccess;
 
     EventLoop(
@@ -141,6 +156,7 @@ private:
     void drain_wakeup() noexcept;
     void execute_pending_callbacks() noexcept;
     void execute_deferred_cleanups() noexcept;
+    void finalize_signal_queue() noexcept;
     void finalize_timer_queue() noexcept;
     void handle_active_channels(const std::vector<Channel*>& active_channels) noexcept;
     void transition_to_stopped() noexcept;
@@ -151,6 +167,7 @@ private:
     std::unique_ptr<EpollPoller> poller_;
     UniqueFd wakeup_fd_;
     std::unique_ptr<Channel> wakeup_channel_;
+    std::unique_ptr<detail::SignalQueue> signal_queue_;
     std::unique_ptr<detail::TimerQueue> timer_queue_;
     const std::size_t pending_callback_capacity_;
 

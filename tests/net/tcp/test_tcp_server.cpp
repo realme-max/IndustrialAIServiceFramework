@@ -1,5 +1,6 @@
 #include <cerrno>
 #include <chrono>
+#include <csignal>
 #include <condition_variable>
 #include <cstddef>
 #include <cstdint>
@@ -1095,6 +1096,81 @@ TEST(TcpServerTest, StopClosesExistingConnectionsWithoutStoppingLoopItself) {
     EXPECT_TRUE(stop_error.empty());
     EXPECT_EQ(loop->state(), iaisf::net::EventLoop::State::Stopped);
     EXPECT_FALSE(server->started());
+    EXPECT_EQ(server->connection_count(), 0U);
+    server.reset();
+}
+
+TEST(TcpServerTest, SignalShutdownCleansLiveConnectionAfterActiveBatch) {
+    RecordingLogger logger;
+    auto loop = make_loop(logger);
+    ASSERT_NE(loop, nullptr);
+    auto server = create_server(
+        *loop,
+        logger,
+        TcpServerOptions::defaults());
+    ASSERT_NE(server, nullptr);
+    ServerCleanupGuard server_cleanup{server};
+    std::size_t connected_count = 0U;
+    std::size_t disconnected_count = 0U;
+    std::string callback_error;
+    const std::weak_ptr<TcpServer> weak_server = server;
+    ASSERT_TRUE(server->start(
+        [](const TcpConnection::Ptr&, Buffer& input) {
+            input.retrieve_all();
+        },
+        [
+            &loop,
+            &connected_count,
+            &disconnected_count,
+            &callback_error](const TcpConnection::Ptr& connection) {
+            if (connection->state() == TcpConnection::State::Disconnected) {
+                ++disconnected_count;
+                return;
+            }
+            ++connected_count;
+            if (::kill(::getpid(), SIGTERM) != 0) {
+                callback_error = "failed to send SIGTERM";
+                loop->stop();
+            }
+        }));
+    ASSERT_TRUE(loop->enable_shutdown_signals([
+        weak_server,
+        &callback_error] {
+        const auto locked = weak_server.lock();
+        if (!locked) {
+            callback_error = "server lifetime ended before signal shutdown";
+            return;
+        }
+        auto stop_result = locked->stop();
+        if (!stop_result) {
+            callback_error = stop_result.error().message;
+        }
+    }));
+
+    const Ipv4Endpoint endpoint = server->local_endpoint();
+    std::promise<std::string> client_promise;
+    auto client_result = client_promise.get_future();
+    std::thread client([&loop, endpoint, &client_promise] {
+        ClientSocket socket = connect_client(endpoint);
+        std::string error = socket.error;
+        if (error.empty()) {
+            error = expect_peer_close(socket.fd.get());
+        }
+        client_promise.set_value(error);
+        if (!error.empty()) {
+            loop->stop();
+        }
+    });
+
+    auto run_result = loop->run();
+    client.join();
+
+    ASSERT_TRUE(run_result);
+    EXPECT_TRUE(client_result.get().empty());
+    EXPECT_TRUE(callback_error.empty());
+    EXPECT_EQ(connected_count, 1U);
+    EXPECT_EQ(disconnected_count, 1U);
+    EXPECT_TRUE(server->stopped());
     EXPECT_EQ(server->connection_count(), 0U);
     server.reset();
 }

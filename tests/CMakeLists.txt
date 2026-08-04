@@ -141,6 +141,7 @@ if(TARGET iaisf_net)
     net/test_channel.cpp
     net/test_epoll_poller.cpp
     net/test_event_loop.cpp
+    net/test_signal_queue.cpp
     net/test_socket.cpp
     net/test_timer_queue.cpp
     net/test_unique_fd.cpp
