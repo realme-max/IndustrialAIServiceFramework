@@ -14,6 +14,8 @@ std::string_view reason_phrase(HttpStatus status) noexcept {
             return "Not Found";
         case HttpStatus::MethodNotAllowed:
             return "Method Not Allowed";
+        case HttpStatus::RequestTimeout:
+            return "Request Timeout";
         case HttpStatus::PayloadTooLarge:
             return "Payload Too Large";
         case HttpStatus::UriTooLong:

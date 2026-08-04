@@ -6,6 +6,7 @@
 #include <future>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -30,6 +31,32 @@
 #include "iaisf/net/unique_fd.hpp"
 
 namespace iaisf::http {
+
+class HttpSessionTestAccess final {
+public:
+    [[nodiscard]] static bool has_header_timer(
+        const HttpSession& session) noexcept {
+        return session.header_timer_.has_value();
+    }
+
+    [[nodiscard]] static std::uint64_t header_generation(
+        const HttpSession& session) noexcept {
+        return session.header_generation_;
+    }
+
+    [[nodiscard]] static bool reading_headers(
+        const HttpSession& session) noexcept {
+        return session.receive_state_ ==
+               HttpSession::ReceiveState::ReadingHeaders;
+    }
+
+    static void handle_header_timeout(
+        HttpSession& session,
+        const std::uint64_t generation) noexcept {
+        session.handle_header_timeout(generation);
+    }
+};
+
 namespace {
 
 class RecordingLogger final : public ILogger {
@@ -164,14 +191,17 @@ HttpServer::Ptr make_server(
     HttpRouter router,
     HttpLimits limits = HttpLimits::defaults(),
     net::tcp::TcpServerOptions tcp_options =
-        net::tcp::TcpServerOptions::defaults()) {
+        net::tcp::TcpServerOptions::defaults(),
+    std::optional<std::chrono::steady_clock::duration> header_timeout =
+        std::nullopt) {
     auto result = HttpServer::create(
         loop,
         logger,
         net::tcp::Ipv4Endpoint::loopback(0U),
         std::move(tcp_options),
         std::move(router),
-        std::move(limits));
+        std::move(limits),
+        header_timeout);
     EXPECT_TRUE(result);
     return result ? std::move(result).value() : nullptr;
 }
@@ -338,6 +368,204 @@ private:
     HttpServer::Ptr& server_;
 };
 
+class DirectSessionHarness final {
+public:
+    DirectSessionHarness()
+        : limits_(HttpLimits::defaults()), router_(limits_) {}
+
+    DirectSessionHarness(const DirectSessionHarness&) = delete;
+    DirectSessionHarness& operator=(const DirectSessionHarness&) = delete;
+
+    ~DirectSessionHarness() {
+        if (session_) {
+            session_->on_disconnected();
+        }
+        if (connection_ &&
+            connection_->state() !=
+                net::tcp::TcpConnection::State::Disconnected) {
+            auto destroyed = connection_->connect_destroyed();
+            if (!destroyed) {
+                ADD_FAILURE() << destroyed.error().message;
+            }
+        }
+    }
+
+    [[nodiscard]] bool initialize(
+        std::chrono::steady_clock::duration header_timeout) {
+        loop_ = make_loop(logger_);
+        if (!loop_) {
+            return false;
+        }
+        auto builtins = register_builtin_routes(router_);
+        if (!builtins) {
+            ADD_FAILURE() << builtins.error().message;
+            return false;
+        }
+        auto frozen = router_.freeze();
+        if (!frozen) {
+            ADD_FAILURE() << frozen.error().message;
+            return false;
+        }
+
+        int descriptors[2]{-1, -1};
+        if (::socketpair(
+                AF_UNIX,
+                SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC,
+                0,
+                descriptors) != 0) {
+            ADD_FAILURE() << "socketpair failed";
+            return false;
+        }
+        net::Socket socket{net::UniqueFd{descriptors[0]}};
+        peer_.reset(descriptors[1]);
+        auto connection_result = net::tcp::TcpConnection::create(
+            *loop_,
+            logger_,
+            1U,
+            std::move(socket),
+            net::tcp::Ipv4Endpoint::loopback(1000U),
+            net::tcp::Ipv4Endpoint::loopback(2000U),
+            64U,
+            4096U,
+            64U,
+            4096U,
+            2048U);
+        if (!connection_result) {
+            ADD_FAILURE() << connection_result.error().message;
+            return false;
+        }
+        connection_ = std::move(connection_result).value();
+        auto message = connection_->set_message_callback(
+            [](const net::tcp::TcpConnection::Ptr&, net::tcp::Buffer&) {});
+        auto connected = connection_->set_connection_callback(
+            [](const net::tcp::TcpConnection::Ptr&) {});
+        auto closed = connection_->set_close_callback(
+            [this](const net::tcp::TcpConnection::Ptr& closing) {
+                ++close_count_;
+                if (session_) {
+                    session_->on_disconnected();
+                }
+                auto destroyed = closing->connect_destroyed();
+                EXPECT_TRUE(destroyed);
+            });
+        if (!message || !connected || !closed) {
+            ADD_FAILURE() << "connection callback setup failed";
+            return false;
+        }
+        auto established = connection_->connect_established();
+        if (!established) {
+            ADD_FAILURE() << established.error().message;
+            return false;
+        }
+        auto session_result = HttpSession::create(
+            *loop_,
+            router_,
+            limits_,
+            connection_,
+            header_timeout);
+        if (!session_result) {
+            ADD_FAILURE() << session_result.error().message;
+            return false;
+        }
+        session_ = std::move(session_result).value();
+        return true;
+    }
+
+    [[nodiscard]] bool deliver(std::string_view bytes) {
+        auto buffer_result = net::tcp::Buffer::create(64U, 4096U);
+        if (!buffer_result) {
+            ADD_FAILURE() << buffer_result.error().message;
+            return false;
+        }
+        auto buffer = std::move(buffer_result).value();
+        auto appended = buffer.append(bytes.data(), bytes.size());
+        if (!appended) {
+            ADD_FAILURE() << appended.error().message;
+            return false;
+        }
+        session_->on_message(connection_, buffer);
+        return true;
+    }
+
+    HttpSession& session() noexcept { return *session_; }
+    const net::tcp::TcpConnection::Ptr& connection() const noexcept {
+        return connection_;
+    }
+    int close_count() const noexcept { return close_count_; }
+
+private:
+    RecordingLogger logger_;
+    std::unique_ptr<net::EventLoop> loop_;
+    HttpLimits limits_;
+    HttpRouter router_;
+    net::tcp::TcpConnection::Ptr connection_;
+    net::UniqueFd peer_;
+    HttpSession::Ptr session_;
+    int close_count_{0};
+};
+
+TEST(HttpSessionHeaderTimeoutTest, CompleteHeadersCancelTheTimer) {
+    DirectSessionHarness harness;
+    ASSERT_TRUE(harness.initialize(std::chrono::hours{1}));
+    ASSERT_FALSE(HttpSessionTestAccess::has_header_timer(harness.session()));
+
+    ASSERT_TRUE(harness.deliver(
+        "GET /health HTTP/1.1\r\nHost: localhost\r\n\r\n"));
+
+    EXPECT_FALSE(HttpSessionTestAccess::has_header_timer(harness.session()));
+    EXPECT_FALSE(harness.session().terminal());
+    EXPECT_EQ(
+        harness.connection()->state(),
+        net::tcp::TcpConnection::State::Connected);
+}
+
+TEST(HttpSessionHeaderTimeoutTest, StaleGenerationCannotCloseANewRequest) {
+    DirectSessionHarness harness;
+    ASSERT_TRUE(harness.initialize(std::chrono::hours{1}));
+
+    ASSERT_TRUE(harness.deliver("G"));
+    ASSERT_TRUE(HttpSessionTestAccess::has_header_timer(harness.session()));
+    const std::uint64_t stale_generation =
+        HttpSessionTestAccess::header_generation(harness.session());
+
+    ASSERT_TRUE(harness.deliver(
+        "ET /health HTTP/1.1\r\nHost: localhost\r\n\r\n"));
+    ASSERT_FALSE(HttpSessionTestAccess::has_header_timer(harness.session()));
+    ASSERT_TRUE(harness.deliver("G"));
+    ASSERT_TRUE(HttpSessionTestAccess::reading_headers(harness.session()));
+    ASSERT_NE(
+        HttpSessionTestAccess::header_generation(harness.session()),
+        stale_generation);
+
+    HttpSessionTestAccess::handle_header_timeout(
+        harness.session(), stale_generation);
+
+    EXPECT_FALSE(harness.session().terminal());
+    EXPECT_TRUE(HttpSessionTestAccess::has_header_timer(harness.session()));
+    EXPECT_EQ(
+        harness.connection()->state(),
+        net::tcp::TcpConnection::State::Connected);
+}
+
+TEST(HttpSessionHeaderTimeoutTest, PeerCloseInvalidatesPendingTimeout) {
+    DirectSessionHarness harness;
+    ASSERT_TRUE(harness.initialize(std::chrono::hours{1}));
+    ASSERT_TRUE(harness.deliver("G"));
+    const std::uint64_t stale_generation =
+        HttpSessionTestAccess::header_generation(harness.session());
+
+    ASSERT_TRUE(harness.connection()->force_close());
+    ASSERT_EQ(harness.close_count(), 1);
+    HttpSessionTestAccess::handle_header_timeout(
+        harness.session(), stale_generation);
+
+    EXPECT_EQ(harness.close_count(), 1);
+    EXPECT_TRUE(harness.session().terminal());
+    EXPECT_EQ(
+        harness.connection()->state(),
+        net::tcp::TcpConnection::State::Disconnected);
+}
+
 TEST(HttpServerTest, ServesBuiltinHealthOverLoopback) {
     RecordingLogger logger;
     auto loop = make_loop(logger);
@@ -373,6 +601,61 @@ TEST(HttpServerTest, ServesBuiltinHealthOverLoopback) {
             (response.status != 200 ||
              response.body != "{\"status\":\"ok\"}")) {
             error = "unexpected health response";
+        }
+        if (error.empty()) {
+            error = expect_close(socket.fd.get());
+        }
+        client_promise.set_value(error);
+        loop->stop();
+    });
+
+    auto run = loop->run();
+    client.join();
+    ASSERT_TRUE(run);
+    EXPECT_TRUE(client_result.get().empty());
+    EXPECT_TRUE(server->stop());
+    EXPECT_TRUE(server->stopped());
+    EXPECT_EQ(server->session_count(), 0U);
+    server.reset();
+}
+
+TEST(HttpServerTest, SlowHeaderReturns408ThenUsesDeferredCleanup) {
+    RecordingLogger logger;
+    auto loop = make_loop(logger);
+    ASSERT_NE(loop, nullptr);
+    auto router_result = make_builtin_router(HttpLimits::defaults());
+    ASSERT_TRUE(router_result);
+    auto server = make_server(
+        *loop,
+        logger,
+        std::move(router_result).value(),
+        HttpLimits::defaults(),
+        net::tcp::TcpServerOptions::defaults(),
+        std::chrono::nanoseconds{1});
+    ASSERT_NE(server, nullptr);
+    ServerCleanup cleanup{server};
+    ASSERT_TRUE(server->start());
+    const auto endpoint = server->local_endpoint();
+
+    std::promise<std::string> client_promise;
+    auto client_result = client_promise.get_future();
+    std::thread client([&loop, endpoint, &client_promise] {
+        auto socket = connect_client(endpoint);
+        std::string error = socket.error;
+        if (error.empty()) {
+            error = send_all(socket.fd.get(), "G");
+        }
+        ResponseReader reader;
+        WireResponse response;
+        if (error.empty()) {
+            error = reader.read(socket.fd.get(), response);
+        }
+        if (error.empty() &&
+            (response.status != 408 ||
+             response.body != "Request Timeout\n" ||
+             response.head.find("Connection: close\r\n") ==
+                 std::string::npos)) {
+            error = "unexpected header timeout response";
         }
         if (error.empty()) {
             error = expect_close(socket.fd.get());

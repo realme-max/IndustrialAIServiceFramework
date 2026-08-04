@@ -67,15 +67,16 @@ TEST(HttpParserTest, ParsesPostWithBinaryBodyAcrossFragments) {
     const std::string head{
         "POST /data HTTP/1.1\r\nHost: localhost\r\n"
         "Content-Length: 3\r\n\r\n"};
-    EXPECT_EQ(
-        parse_once(parser, head).disposition,
-        ParseDisposition::NeedMore);
+    const auto headers = parse_once(parser, head);
+    EXPECT_EQ(headers.disposition, ParseDisposition::NeedMore);
+    EXPECT_EQ(headers.phase, ParsePhase::Body);
     EXPECT_EQ(
         parse_once(parser, std::string_view{"a\0", 2U}).disposition,
         ParseDisposition::NeedMore);
     EXPECT_EQ(
         parse_once(parser, "b").disposition,
         ParseDisposition::Complete);
+    EXPECT_EQ(parser.phase(), ParsePhase::Complete);
 
     auto request = parser.take_request();
     ASSERT_TRUE(request);

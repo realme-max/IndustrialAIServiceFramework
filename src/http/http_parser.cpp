@@ -100,11 +100,11 @@ HttpParser::HttpParser(HttpLimits limits) : limits_(std::move(limits)) {}
 Result<ParseProgress> HttpParser::parse(std::string_view bytes) {
     if (state_ == State::Complete) {
         return Result<ParseProgress>::success(
-            {ParseDisposition::Complete, 0U, error_status_});
+            {ParseDisposition::Complete, 0U, error_status_, phase()});
     }
     if (state_ == State::Error) {
         return Result<ParseProgress>::success(
-            {ParseDisposition::Error, 0U, error_status_});
+            {ParseDisposition::Error, 0U, error_status_, phase()});
     }
 
     std::size_t consumed = 0U;
@@ -124,7 +124,10 @@ Result<ParseProgress> HttpParser::parse(std::string_view bytes) {
                 consumed += count;
                 if (state_ == State::Complete) {
                     return Result<ParseProgress>::success(
-                        {ParseDisposition::Complete, consumed, error_status_});
+                        {ParseDisposition::Complete,
+                         consumed,
+                         error_status_,
+                         phase()});
                 }
                 continue;
             }
@@ -135,7 +138,10 @@ Result<ParseProgress> HttpParser::parse(std::string_view bytes) {
                         HttpStatus::RequestHeaderFieldsTooLarge);
                     ++consumed;
                     return Result<ParseProgress>::success(
-                        {ParseDisposition::Error, consumed, error_status_});
+                        {ParseDisposition::Error,
+                         consumed,
+                         error_status_,
+                         phase()});
                 }
                 ++header_bytes_;
             }
@@ -148,11 +154,17 @@ Result<ParseProgress> HttpParser::parse(std::string_view bytes) {
             }
             if (state_ == State::Error) {
                 return Result<ParseProgress>::success(
-                    {ParseDisposition::Error, consumed, error_status_});
+                    {ParseDisposition::Error,
+                     consumed,
+                     error_status_,
+                     phase()});
             }
             if (state_ == State::Complete) {
                 return Result<ParseProgress>::success(
-                    {ParseDisposition::Complete, consumed, error_status_});
+                    {ParseDisposition::Complete,
+                     consumed,
+                     error_status_,
+                     phase()});
             }
         }
     } catch (const std::bad_alloc&) {
@@ -166,7 +178,7 @@ Result<ParseProgress> HttpParser::parse(std::string_view bytes) {
     }
 
     return Result<ParseProgress>::success(
-        {ParseDisposition::NeedMore, consumed, error_status_});
+        {ParseDisposition::NeedMore, consumed, error_status_, phase()});
 }
 
 Result<HttpRequest> HttpParser::take_request() {
@@ -197,6 +209,21 @@ ParseDisposition HttpParser::disposition() const noexcept {
         return ParseDisposition::Error;
     }
     return ParseDisposition::NeedMore;
+}
+
+ParsePhase HttpParser::phase() const noexcept {
+    switch (state_) {
+        case State::RequestLine:
+        case State::Headers:
+            return ParsePhase::Headers;
+        case State::Body:
+            return ParsePhase::Body;
+        case State::Complete:
+            return ParsePhase::Complete;
+        case State::Error:
+            return ParsePhase::Error;
+    }
+    return ParsePhase::Error;
 }
 
 HttpStatus HttpParser::error_status() const noexcept {

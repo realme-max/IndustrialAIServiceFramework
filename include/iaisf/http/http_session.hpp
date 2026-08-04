@@ -1,6 +1,9 @@
 #pragma once
 
+#include <chrono>
+#include <cstdint>
 #include <memory>
+#include <optional>
 
 #include "iaisf/core/result.hpp"
 #include "iaisf/http/http_limits.hpp"
@@ -11,6 +14,8 @@
 #include "iaisf/net/tcp/tcp_connection.hpp"
 
 namespace iaisf::http {
+
+class HttpSessionTestAccess;
 
 /**
  * Owner-thread-only HTTP protocol state for one TCP connection.
@@ -30,7 +35,9 @@ public:
         net::EventLoop& loop,
         const HttpRouter& router,
         HttpLimits limits,
-        const ConnectionPtr& connection);
+        const ConnectionPtr& connection,
+        std::optional<std::chrono::steady_clock::duration> header_timeout =
+            std::nullopt);
 
     HttpSession(const HttpSession&) = delete;
     HttpSession& operator=(const HttpSession&) = delete;
@@ -47,11 +54,19 @@ public:
     [[nodiscard]] bool continuation_pending() const noexcept;
 
 private:
+    enum class ReceiveState {
+        AwaitingRequest,
+        ReadingHeaders,
+        AfterHeaders,
+        Terminal,
+    };
+
     HttpSession(
         net::EventLoop& loop,
         const HttpRouter& router,
         HttpLimits limits,
-        const ConnectionPtr& connection);
+        const ConnectionPtr& connection,
+        std::optional<std::chrono::steady_clock::duration> header_timeout);
 
     void dispatch_available(
         const ConnectionPtr& connection,
@@ -67,15 +82,24 @@ private:
         const ConnectionPtr& connection,
         HttpStatus status) noexcept;
     void close_without_response(const ConnectionPtr& connection) noexcept;
+    [[nodiscard]] Result<void> begin_header_timeout();
+    void cancel_header_timeout() noexcept;
+    void handle_header_timeout(std::uint64_t generation) noexcept;
 
     net::EventLoop& loop_;
     const HttpRouter& router_;
     HttpLimits limits_;
     HttpParser parser_;
     std::weak_ptr<net::tcp::TcpConnection> connection_;
+    std::optional<std::chrono::steady_clock::duration> header_timeout_;
+    std::optional<net::TimerId> header_timer_;
+    std::uint64_t header_generation_{0U};
     net::tcp::Buffer* continuation_input_{nullptr};
     bool continuation_pending_{false};
     bool terminal_{false};
+    ReceiveState receive_state_{ReceiveState::AwaitingRequest};
+
+    friend class HttpSessionTestAccess;
 };
 
 }  // namespace iaisf::http

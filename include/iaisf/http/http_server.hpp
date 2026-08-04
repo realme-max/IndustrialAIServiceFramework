@@ -1,8 +1,10 @@
 #pragma once
 
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <unordered_map>
 
 #include "iaisf/core/result.hpp"
@@ -33,7 +35,9 @@ public:
         const net::tcp::Ipv4Endpoint& bind_endpoint,
         net::tcp::TcpServerOptions tcp_options,
         HttpRouter router,
-        HttpLimits limits = HttpLimits::defaults());
+        HttpLimits limits = HttpLimits::defaults(),
+        std::optional<std::chrono::steady_clock::duration> header_timeout =
+            std::nullopt);
 
     HttpServer(const HttpServer&) = delete;
     HttpServer& operator=(const HttpServer&) = delete;
@@ -63,7 +67,9 @@ private:
         ILogger& logger,
         HttpLimits limits,
         HttpRouter router,
-        net::tcp::TcpServer::Ptr tcp_server) noexcept;
+        net::tcp::TcpServer::Ptr tcp_server,
+        std::optional<std::chrono::steady_clock::duration>
+            header_timeout) noexcept;
 
     void handle_connection(
         const net::tcp::TcpConnection::Ptr& connection) noexcept;
@@ -76,6 +82,7 @@ private:
     HttpLimits limits_;
     HttpRouter router_;
     net::tcp::TcpServer::Ptr tcp_server_;
+    std::optional<std::chrono::steady_clock::duration> header_timeout_;
     std::unordered_map<std::uint64_t, HttpSession::Ptr> sessions_;
     State state_{State::Created};
 };

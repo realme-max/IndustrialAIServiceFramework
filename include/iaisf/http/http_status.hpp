@@ -10,6 +10,7 @@ enum class HttpStatus : int {
     BadRequest = 400,
     NotFound = 404,
     MethodNotAllowed = 405,
+    RequestTimeout = 408,
     PayloadTooLarge = 413,
     UriTooLong = 414,
     UnsupportedMediaType = 415,
