@@ -1,5 +1,6 @@
 #include "iaisf/http/http_session.hpp"
 
+#include <limits>
 #include <new>
 #include <string_view>
 #include <utility>
@@ -10,7 +11,8 @@ Result<HttpSession::Ptr> HttpSession::create(
     net::EventLoop& loop,
     const HttpRouter& router,
     HttpLimits limits,
-    const ConnectionPtr& connection) {
+    const ConnectionPtr& connection,
+    std::optional<std::chrono::steady_clock::duration> header_timeout) {
     if (!loop.is_in_loop_thread()) {
         return Result<Ptr>::failure(make_error(
             ErrorCode::InvalidState,
@@ -21,13 +23,20 @@ Result<HttpSession::Ptr> HttpSession::create(
             ErrorCode::InvalidArgument,
             "HttpSession requires a frozen router and connection"));
     }
+    if (header_timeout.has_value() &&
+        *header_timeout <= std::chrono::steady_clock::duration::zero()) {
+        return Result<Ptr>::failure(make_error(
+            ErrorCode::InvalidArgument,
+            "HTTP header timeout must be positive"));
+    }
     try {
         return Result<Ptr>::success(std::shared_ptr<HttpSession>{
             new HttpSession{
                 loop,
                 router,
                 std::move(limits),
-                connection}});
+                connection,
+                header_timeout}});
     } catch (const std::bad_alloc&) {
         return Result<Ptr>::failure(make_error(
             ErrorCode::ResourceExhausted,
@@ -39,12 +48,14 @@ HttpSession::HttpSession(
     net::EventLoop& loop,
     const HttpRouter& router,
     HttpLimits limits,
-    const ConnectionPtr& connection)
+    const ConnectionPtr& connection,
+    std::optional<std::chrono::steady_clock::duration> header_timeout)
     : loop_(loop),
       router_(router),
       limits_(std::move(limits)),
       parser_(limits_),
-      connection_(connection) {}
+      connection_(connection),
+      header_timeout_(header_timeout) {}
 
 void HttpSession::on_message(
     const ConnectionPtr& connection,
@@ -63,7 +74,9 @@ void HttpSession::on_message(
 }
 
 void HttpSession::on_disconnected() noexcept {
+    cancel_header_timeout();
     terminal_ = true;
+    receive_state_ = ReceiveState::Terminal;
     continuation_pending_ = false;
     continuation_input_ = nullptr;
     connection_.reset();
@@ -84,6 +97,14 @@ void HttpSession::dispatch_available(
     while (!terminal_ &&
            dispatched < limits_.max_requests_per_dispatch() &&
            input.readable_bytes() > 0U) {
+        if (receive_state_ == ReceiveState::AwaitingRequest) {
+            auto timer_result = begin_header_timeout();
+            if (!timer_result) {
+                input.retrieve_all();
+                close_without_response(connection);
+                return;
+            }
+        }
         const std::string_view bytes{
             input.peek(),
             input.readable_bytes()};
@@ -94,6 +115,11 @@ void HttpSession::dispatch_available(
             return;
         }
         const auto progress = progress_result.value();
+        if (receive_state_ == ReceiveState::ReadingHeaders &&
+            progress.phase != ParsePhase::Headers) {
+            cancel_header_timeout();
+            receive_state_ = ReceiveState::AfterHeaders;
+        }
         if (progress.consumed > 0U) {
             auto retrieve_result = input.retrieve(progress.consumed);
             if (!retrieve_result) {
@@ -118,6 +144,7 @@ void HttpSession::dispatch_available(
             return;
         }
         auto request = std::move(request_result).value();
+        receive_state_ = ReceiveState::AwaitingRequest;
         auto response_result = router_.dispatch(request);
         if (!response_result) {
             input.retrieve_all();
@@ -136,6 +163,14 @@ void HttpSession::dispatch_available(
     }
 
     if (!terminal_ && input.readable_bytes() > 0U) {
+        if (receive_state_ == ReceiveState::AwaitingRequest) {
+            auto timer_result = begin_header_timeout();
+            if (!timer_result) {
+                input.retrieve_all();
+                close_without_response(connection);
+                return;
+            }
+        }
         schedule_continuation(connection, input);
     }
 }
@@ -204,6 +239,8 @@ void HttpSession::send_response(
         return;
     }
     if (close_after_response) {
+        cancel_header_timeout();
+        receive_state_ = ReceiveState::Terminal;
         terminal_ = true;
         auto close_result = connection->close_after_write();
         if (!close_result) {
@@ -221,6 +258,8 @@ void HttpSession::send_error(
     if (terminal_) {
         return;
     }
+    cancel_header_timeout();
+    receive_state_ = ReceiveState::Terminal;
     HttpResponse response;
     try {
         response = HttpResponse::error(status, true);
@@ -252,7 +291,9 @@ void HttpSession::send_error(
 
 void HttpSession::close_without_response(
     const ConnectionPtr& connection) noexcept {
+    cancel_header_timeout();
     terminal_ = true;
+    receive_state_ = ReceiveState::Terminal;
     continuation_pending_ = false;
     continuation_input_ = nullptr;
     if (connection) {
@@ -261,6 +302,95 @@ void HttpSession::close_without_response(
             terminal_ = true;
         }
     }
+}
+
+Result<void> HttpSession::begin_header_timeout() {
+    if (receive_state_ != ReceiveState::AwaitingRequest ||
+        header_timer_.has_value()) {
+        return Result<void>::failure(make_error(
+            ErrorCode::InvalidState,
+            "HTTP header timeout cannot start in the current state"));
+    }
+    if (!header_timeout_.has_value()) {
+        receive_state_ = ReceiveState::ReadingHeaders;
+        return Result<void>::success();
+    }
+    if (header_generation_ ==
+        std::numeric_limits<std::uint64_t>::max()) {
+        return Result<void>::failure(make_error(
+            ErrorCode::ResourceExhausted,
+            "HTTP header timeout generation is exhausted"));
+    }
+
+    ++header_generation_;
+    const std::uint64_t generation = header_generation_;
+    try {
+        const std::weak_ptr<HttpSession> weak_session = weak_from_this();
+        auto timer_result = loop_.run_after(
+            *header_timeout_,
+            [weak_session, generation] {
+                if (const auto session = weak_session.lock()) {
+                    session->handle_header_timeout(generation);
+                }
+            });
+        if (!timer_result) {
+            return Result<void>::failure(std::move(timer_result).error());
+        }
+        header_timer_ = std::move(timer_result).value();
+        receive_state_ = ReceiveState::ReadingHeaders;
+        return Result<void>::success();
+    } catch (const std::bad_alloc&) {
+        return Result<void>::failure(make_error(
+            ErrorCode::ResourceExhausted,
+            "HTTP header timeout callback allocation failed"));
+    } catch (...) {
+        return Result<void>::failure(make_error(
+            ErrorCode::InternalError,
+            "HTTP header timeout scheduling failed"));
+    }
+}
+
+void HttpSession::cancel_header_timeout() noexcept {
+    if (!header_timer_.has_value()) {
+        return;
+    }
+    const net::TimerId timer = *header_timer_;
+    header_timer_.reset();
+    if (header_generation_ !=
+        std::numeric_limits<std::uint64_t>::max()) {
+        ++header_generation_;
+    }
+    try {
+        auto cancel_result = loop_.cancel_timer(timer);
+        static_cast<void>(cancel_result);
+    } catch (...) {
+        // Generation invalidation is the safety boundary. Cancellation is a
+        // best-effort resource optimization during protocol state changes.
+    }
+}
+
+void HttpSession::handle_header_timeout(
+    const std::uint64_t generation) noexcept {
+    if (!header_timer_.has_value() ||
+        generation != header_generation_ || terminal_ ||
+        receive_state_ != ReceiveState::ReadingHeaders) {
+        return;
+    }
+    header_timer_.reset();
+    if (header_generation_ !=
+        std::numeric_limits<std::uint64_t>::max()) {
+        ++header_generation_;
+    }
+    continuation_pending_ = false;
+    continuation_input_ = nullptr;
+
+    const auto connection = connection_.lock();
+    if (!connection) {
+        terminal_ = true;
+        receive_state_ = ReceiveState::Terminal;
+        return;
+    }
+    send_error(connection, HttpStatus::RequestTimeout);
 }
 
 }  // namespace iaisf::http

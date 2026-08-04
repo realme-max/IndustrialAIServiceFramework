@@ -20,10 +20,18 @@ enum class ParseDisposition {
     Error,
 };
 
+enum class ParsePhase {
+    Headers,
+    Body,
+    Complete,
+    Error,
+};
+
 struct ParseProgress {
     ParseDisposition disposition{ParseDisposition::NeedMore};
     std::size_t consumed{0U};
     HttpStatus error_status{HttpStatus::BadRequest};
+    ParsePhase phase{ParsePhase::Headers};
 };
 
 /**
@@ -40,6 +48,7 @@ public:
     [[nodiscard]] Result<ParseProgress> parse(std::string_view bytes);
     [[nodiscard]] Result<HttpRequest> take_request();
     [[nodiscard]] ParseDisposition disposition() const noexcept;
+    [[nodiscard]] ParsePhase phase() const noexcept;
     [[nodiscard]] HttpStatus error_status() const noexcept;
 
 private:
