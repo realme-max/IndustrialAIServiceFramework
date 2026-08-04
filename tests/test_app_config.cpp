@@ -85,11 +85,12 @@ void expect_config_error(const std::string_view json) {
 TEST(AppConfigTest, ProvidesSafeDefaults) {
     const iaisf::AppConfig config = iaisf::default_app_config();
 
-    EXPECT_EQ(config.service_name, "IndustrialAIServiceFramework");
-    EXPECT_GE(config.worker_threads, 1U);
-    EXPECT_LE(config.worker_threads, iaisf::kMaxWorkerThreads);
-    EXPECT_EQ(config.task_queue_capacity, 1024U);
-    EXPECT_EQ(config.log_level, iaisf::LogLevel::Info);
+    EXPECT_EQ(config.schema_version, 1U);
+    EXPECT_EQ(config.service.name, "IndustrialAIServiceFramework");
+    EXPECT_GE(config.runtime.worker_threads, 1U);
+    EXPECT_LE(config.runtime.worker_threads, iaisf::kMaxWorkerThreads);
+    EXPECT_EQ(config.runtime.task_queue_capacity, 1024U);
+    EXPECT_EQ(config.logging.level, iaisf::LogLevel::Info);
     EXPECT_TRUE(iaisf::validate_app_config(config));
 }
 
@@ -98,10 +99,10 @@ TEST(AppConfigTest, LoadsTheRealExampleConfiguration) {
         iaisf::load_app_config(std::filesystem::path{IAISF_EXAMPLE_CONFIG_PATH});
 
     ASSERT_TRUE(result.has_value()) << result.error().message;
-    EXPECT_EQ(result.value().service_name, "IndustrialAIServiceFramework");
-    EXPECT_EQ(result.value().worker_threads, 4U);
-    EXPECT_EQ(result.value().task_queue_capacity, 1024U);
-    EXPECT_EQ(result.value().log_level, iaisf::LogLevel::Info);
+    EXPECT_EQ(result.value().service.name, "IndustrialAIServiceFramework");
+    EXPECT_EQ(result.value().runtime.worker_threads, 4U);
+    EXPECT_EQ(result.value().runtime.task_queue_capacity, 1024U);
+    EXPECT_EQ(result.value().logging.level, iaisf::LogLevel::Info);
 }
 
 TEST(AppConfigTest, LoadsACompleteValidConfiguration) {
@@ -113,10 +114,35 @@ TEST(AppConfigTest, LoadsACompleteValidConfiguration) {
 
     const auto result = iaisf::load_app_config(file.path());
     ASSERT_TRUE(result.has_value()) << result.error().message;
-    EXPECT_EQ(result.value().service_name, "factory-service");
-    EXPECT_EQ(result.value().worker_threads, 8U);
-    EXPECT_EQ(result.value().task_queue_capacity, 2048U);
-    EXPECT_EQ(result.value().log_level, iaisf::LogLevel::Debug);
+    EXPECT_EQ(result.value().service.name, "factory-service");
+    EXPECT_EQ(result.value().runtime.worker_threads, 8U);
+    EXPECT_EQ(result.value().runtime.task_queue_capacity, 2048U);
+    EXPECT_EQ(result.value().logging.level, iaisf::LogLevel::Debug);
+}
+
+TEST(AppConfigTest, LoadsLegacyFlatConfiguration) {
+    const ScopedConfigFile file{R"({
+        "service_name": "legacy-service",
+        "worker_threads": 3,
+        "task_queue_capacity": 77,
+        "log_level": "warn"
+    })"};
+
+    const auto result = iaisf::load_app_config(file.path());
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+    EXPECT_EQ(result.value().service.name, "legacy-service");
+    EXPECT_EQ(result.value().runtime.worker_threads, 3U);
+    EXPECT_EQ(result.value().runtime.task_queue_capacity, 77U);
+    EXPECT_EQ(result.value().logging.level, iaisf::LogLevel::Warn);
+}
+
+TEST(AppConfigTest, RejectsAmbiguousLegacyAndGroupedFields) {
+    expect_config_error(
+        R"({"service_name":"legacy","service":{"name":"grouped"}})");
+    expect_config_error(
+        R"({"worker_threads":2,"runtime":{"task_queue_capacity":8}})");
+    expect_config_error(
+        R"({"log_level":"info","logging":{"level":"debug"}})");
 }
 
 TEST(AppConfigTest, ReportsMissingFileAsIoErrorWithoutLeakingItsPath) {
@@ -206,20 +232,21 @@ TEST(AppConfigTest, UsesDefaultsForMissingGroupsAndFields) {
     ASSERT_TRUE(default_result.has_value()) << default_result.error().message;
 
     const iaisf::AppConfig defaults = iaisf::default_app_config();
-    EXPECT_EQ(default_result.value().service_name, defaults.service_name);
-    EXPECT_EQ(default_result.value().worker_threads, defaults.worker_threads);
+    EXPECT_EQ(default_result.value().service.name, defaults.service.name);
+    EXPECT_EQ(default_result.value().runtime.worker_threads,
+              defaults.runtime.worker_threads);
     EXPECT_EQ(
-        default_result.value().task_queue_capacity,
-        defaults.task_queue_capacity);
-    EXPECT_EQ(default_result.value().log_level, defaults.log_level);
+        default_result.value().runtime.task_queue_capacity,
+        defaults.runtime.task_queue_capacity);
+    EXPECT_EQ(default_result.value().logging.level, defaults.logging.level);
 
     const ScopedConfigFile partial{R"({"runtime": {"worker_threads": 2}})"};
     const auto partial_result = iaisf::load_app_config(partial.path());
     ASSERT_TRUE(partial_result.has_value()) << partial_result.error().message;
-    EXPECT_EQ(partial_result.value().worker_threads, 2U);
+    EXPECT_EQ(partial_result.value().runtime.worker_threads, 2U);
     EXPECT_EQ(
-        partial_result.value().task_queue_capacity,
-        defaults.task_queue_capacity);
+        partial_result.value().runtime.task_queue_capacity,
+        defaults.runtime.task_queue_capacity);
 }
 
 TEST(AppConfigTest, ProducesStableResultsAcrossRepeatedLoads) {
@@ -233,12 +260,114 @@ TEST(AppConfigTest, ProducesStableResultsAcrossRepeatedLoads) {
     const auto second = iaisf::load_app_config(file.path());
     ASSERT_TRUE(first.has_value()) << first.error().message;
     ASSERT_TRUE(second.has_value()) << second.error().message;
-    EXPECT_EQ(first.value().service_name, second.value().service_name);
-    EXPECT_EQ(first.value().worker_threads, second.value().worker_threads);
+    EXPECT_EQ(first.value().service.name, second.value().service.name);
+    EXPECT_EQ(first.value().runtime.worker_threads,
+              second.value().runtime.worker_threads);
     EXPECT_EQ(
-        first.value().task_queue_capacity,
-        second.value().task_queue_capacity);
-    EXPECT_EQ(first.value().log_level, second.value().log_level);
+        first.value().runtime.task_queue_capacity,
+        second.value().runtime.task_queue_capacity);
+    EXPECT_EQ(first.value().logging.level, second.value().logging.level);
+}
+
+TEST(AppConfigTest, LoadsCompletePhase8Configuration) {
+    const ScopedConfigFile file{R"({
+      "schema_version": 1,
+      "service": {"name": "configured-service"},
+      "server": {
+        "host": "127.0.0.1",
+        "port": 18080,
+        "reactor": {
+          "max_events": 512,
+          "pending_callback_capacity": 2048,
+          "max_timers": 4096
+        },
+        "tcp": {
+          "listen_backlog": 64,
+          "max_connections": 100,
+          "input_initial_capacity_bytes": 4096,
+          "input_maximum_capacity_bytes": 2097152,
+          "output_initial_capacity_bytes": 4096,
+          "output_high_water_mark_bytes": 524288,
+          "output_maximum_capacity_bytes": 2097152,
+          "socket_send_buffer_bytes": 65536,
+          "idle_timeout_ms": 30000
+        }
+      },
+      "http": {
+        "header_timeout_ms": 5000,
+        "body_timeout_ms": 10000,
+        "limits": {"max_routes": 512}
+      },
+      "runtime": {"worker_threads": 8, "task_queue_capacity": 2048},
+      "tasks": {"max_repository_tasks": 200000},
+      "plugins": {
+        "echo": {"enabled": false},
+        "mock_vision": {"enabled": true},
+        "limits": {"max_plugins": 64}
+      },
+      "task_api": {"max_error_message_bytes": 512},
+      "logging": {"level": "debug"}
+    })"};
+
+    const auto result = iaisf::load_app_config(file.path());
+    ASSERT_TRUE(result) << result.error().message;
+    EXPECT_EQ(result.value().server.host, "127.0.0.1");
+    EXPECT_EQ(result.value().server.port, 18080U);
+    EXPECT_EQ(result.value().server.reactor.max_timers, 4096U);
+    EXPECT_EQ(result.value().server.tcp.idle_timeout_ms, 30000);
+    EXPECT_EQ(result.value().http.header_timeout_ms, 5000);
+    EXPECT_EQ(result.value().http.body_timeout_ms, 10000);
+    EXPECT_FALSE(result.value().plugins.enable_echo);
+    EXPECT_TRUE(result.value().plugins.enable_mock_vision);
+}
+
+TEST(AppConfigTest, DefaultsMissingSchemaVersionAndRejectsOtherVersions) {
+    const ScopedConfigFile compatible{"{}"};
+    const auto loaded = iaisf::load_app_config(compatible.path());
+    ASSERT_TRUE(loaded);
+    EXPECT_EQ(loaded.value().schema_version, 1U);
+
+    expect_config_error(R"({"schema_version": 2})");
+    expect_config_error(R"({"schema_version": 1.0})");
+    expect_config_error(R"({"schema_version": "1"})");
+    expect_config_error(R"({"schema_version": true})");
+}
+
+TEST(AppConfigTest, RejectsDuplicateObjectKeys) {
+    expect_config_error(
+        R"({"runtime":{"worker_threads":2,"worker_threads":3}})");
+    expect_config_error(R"({"service":{},"service":{}})");
+}
+
+TEST(AppConfigTest, RejectsStrictIntegerTypeViolationsInExtendedGroups) {
+    expect_config_error(R"({"server":{"port":8080.0}})");
+    expect_config_error(R"({"server":{"reactor":{"max_events":true}}})");
+    expect_config_error(
+        R"({"server":{"tcp":{"max_connections":"1024"}}})");
+    expect_config_error(R"({"tasks":{"max_repository_tasks":1.5}})");
+    expect_config_error(R"({"plugins":{"echo":{"enabled":1}}})");
+}
+
+TEST(AppConfigTest, TimeoutFieldsAcceptNullOrPositiveIntegersOnly) {
+    const ScopedConfigFile disabled{R"({
+      "server":{"tcp":{"idle_timeout_ms":null}},
+      "http":{"header_timeout_ms":null,"body_timeout_ms":null}
+    })"};
+    ASSERT_TRUE(iaisf::load_app_config(disabled.path()));
+
+    expect_config_error(R"({"server":{"tcp":{"idle_timeout_ms":0}}})");
+    expect_config_error(R"({"http":{"header_timeout_ms":0}})");
+    expect_config_error(R"({"http":{"body_timeout_ms":-1}})");
+    expect_config_error(R"({"http":{"body_timeout_ms":"100"}})");
+}
+
+TEST(AppConfigTest, RejectsConfigurationLargerThanOneMiB) {
+    const std::string oversized(
+        iaisf::kMaxConfigurationFileBytes + 1U, ' ');
+    const ScopedConfigFile file{oversized};
+    const auto result = iaisf::load_app_config(file.path());
+    ASSERT_FALSE(result);
+    EXPECT_EQ(result.error().code, iaisf::ErrorCode::ConfigError);
 }
 
 }  // namespace

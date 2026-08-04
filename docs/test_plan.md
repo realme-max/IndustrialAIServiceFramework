@@ -870,3 +870,15 @@ Phase 0 的非运行验证项：
 实际标签数量：HTTP 106、integration 82、linux 127、plugin 92、service 15、smoke 2、task 99、task_api 46、tcp 51、unit 464。Release version/config smoke 成功；ActiveHttpStop 测试 Debug/Release 均通过。尚未执行 `ctest --repeat until-fail:50`，不得将本次 CI 描述为 50 次稳定性验证。
 
 最终状态：`PHASE_7_SERVICE_INTEGRATION_COMPLETED`。此前 run 30779555703 的 `-Wshadow` 已由提交 `a44b1272bf603a17724fa17c66d60ee0e18bb918` 修复。
+
+## Phase 8C-2 Configuration System 本地验证
+
+覆盖矩阵：默认与完整配置、旧顶层配置兼容、schema 缺失/错误、unknown/duplicate key、
+严格 integer/bool、timeout null/正数/0、malformed JSON、1 MiB 文件上限、RuntimeOptions
+完整映射、TCP/HTTP timeout、Timer 容量不足、`--config` 立即退出、Linux 实际
+`--serve` 进程启动和 SIGTERM 完整 Service shutdown。
+
+最终回归为 Windows VS2022 Debug/Release `380/380`，本地 WSL Ubuntu 24.04 GCC
+Debug/Release `596/596`；两平台 version/config smoke 成功，项目源码与测试编译
+warning 为 0。WSL 直接构建当前 Windows 挂载工作区，未使用另一份 Linux clone，也不
+冒充 GitHub Actions。当前实现尚未获得 exact commit 的远端 Linux CI。

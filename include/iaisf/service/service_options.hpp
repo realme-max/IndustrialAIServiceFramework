@@ -1,5 +1,8 @@
 #pragma once
 
+#include <chrono>
+#include <optional>
+
 #include "iaisf/api/task_api_limits.hpp"
 #include "iaisf/core/result.hpp"
 #include "iaisf/http/http_limits.hpp"
@@ -21,7 +24,11 @@ public:
         plugin::PluginLimits plugin_limits,
         api::TaskApiLimits api_limits,
         bool enable_echo = true,
-        bool enable_mock_vision = true);
+        bool enable_mock_vision = true,
+        std::optional<std::chrono::milliseconds> http_header_timeout =
+            std::nullopt,
+        std::optional<std::chrono::milliseconds> http_body_timeout =
+            std::nullopt);
     [[nodiscard]] static Result<ServiceOptions> defaults();
 
     [[nodiscard]] const net::tcp::TcpServerOptions& tcp_options() const noexcept;
@@ -32,6 +39,10 @@ public:
     [[nodiscard]] const api::TaskApiLimits& api_limits() const noexcept;
     [[nodiscard]] bool enable_echo() const noexcept;
     [[nodiscard]] bool enable_mock_vision() const noexcept;
+    [[nodiscard]] std::optional<std::chrono::milliseconds>
+    http_header_timeout() const noexcept;
+    [[nodiscard]] std::optional<std::chrono::milliseconds>
+    http_body_timeout() const noexcept;
 
 private:
     ServiceOptions(
@@ -42,7 +53,9 @@ private:
         plugin::PluginLimits plugin_limits,
         api::TaskApiLimits api_limits,
         bool enable_echo,
-        bool enable_mock_vision) noexcept;
+        bool enable_mock_vision,
+        std::optional<std::chrono::milliseconds> http_header_timeout,
+        std::optional<std::chrono::milliseconds> http_body_timeout) noexcept;
 
     net::tcp::TcpServerOptions tcp_options_;
     http::HttpLimits http_limits_;
@@ -52,6 +65,8 @@ private:
     api::TaskApiLimits api_limits_;
     bool enable_echo_;
     bool enable_mock_vision_;
+    std::optional<std::chrono::milliseconds> http_header_timeout_;
+    std::optional<std::chrono::milliseconds> http_body_timeout_;
 };
 
 }  // namespace iaisf::service

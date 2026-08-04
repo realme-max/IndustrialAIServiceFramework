@@ -86,7 +86,8 @@ public:
     [[nodiscard]] static Result<std::unique_ptr<EventLoop>> create(
         ILogger& logger,
         std::size_t max_events = 256U,
-        std::size_t pending_callback_capacity = 1024U);
+        std::size_t pending_callback_capacity = 1024U,
+        TimerQueueOptions timer_options = {});
 
     EventLoop(const EventLoop&) = delete;
     EventLoop& operator=(const EventLoop&) = delete;
@@ -154,7 +155,8 @@ private:
         ILogger& logger,
         std::unique_ptr<EpollPoller> poller,
         UniqueFd wakeup_fd,
-        std::size_t pending_callback_capacity);
+        std::size_t pending_callback_capacity,
+        TimerQueueOptions timer_options);
 
     [[nodiscard]] Result<void> initialize_wakeup_channel();
     [[nodiscard]] Result<void> initialize_timer_queue();
@@ -176,6 +178,7 @@ private:
     std::unique_ptr<detail::SignalQueue> signal_queue_;
     std::unique_ptr<detail::TimerQueue> timer_queue_;
     const std::size_t pending_callback_capacity_;
+    const TimerQueueOptions timer_options_;
 
     mutable std::mutex pending_mutex_;
     std::deque<Callback> pending_callbacks_;

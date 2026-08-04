@@ -1,13 +1,86 @@
 {
+  "schema_version": 1,
   "service": {
     "name": "IndustrialAIServiceFramework"
+  },
+  "server": {
+    "host": "0.0.0.0",
+    "port": 8080,
+    "reactor": {
+      "max_events": 256,
+      "pending_callback_capacity": 1024,
+      "max_timers": 4096
+    },
+    "tcp": {
+      "listen_backlog": 128,
+      "max_connections": 1024,
+      "input_initial_capacity_bytes": 4096,
+      "input_maximum_capacity_bytes": 2097152,
+      "output_initial_capacity_bytes": 4096,
+      "output_high_water_mark_bytes": 524288,
+      "output_maximum_capacity_bytes": 2097152,
+      "socket_send_buffer_bytes": null,
+      "idle_timeout_ms": 30000
+    }
+  },
+  "http": {
+    "header_timeout_ms": 10000,
+    "body_timeout_ms": 30000,
+    "limits": {
+      "max_request_line_bytes": 16384,
+      "max_method_bytes": 32,
+      "max_target_bytes": 8192,
+      "max_header_line_bytes": 8192,
+      "max_header_bytes": 32768,
+      "max_header_count": 100,
+      "max_body_bytes": 1048576,
+      "max_response_body_bytes": 1048576,
+      "max_routes": 256,
+      "max_requests_per_dispatch": 16
+    }
   },
   "runtime": {
     "worker_threads": 4,
     "task_queue_capacity": 1024
   },
+  "tasks": {
+    "max_repository_tasks": 100000,
+    "max_operation_bytes": 256,
+    "max_input_bytes": 524288,
+    "max_result_bytes": 524288,
+    "max_error_message_bytes": 1024,
+    "max_json_depth": 64,
+    "max_json_elements": 100000,
+    "max_json_string_bytes": 524288
+  },
+  "plugins": {
+    "echo": {
+      "enabled": true
+    },
+    "mock_vision": {
+      "enabled": true
+    },
+    "limits": {
+      "max_plugins": 128,
+      "max_operation_bytes": 128,
+      "max_name_bytes": 128,
+      "max_version_bytes": 64,
+      "max_description_bytes": 1024,
+      "max_error_message_bytes": 1024,
+      "max_input_bytes": 524288,
+      "max_output_bytes": 524288,
+      "max_json_depth": 64,
+      "max_json_elements": 100000,
+      "max_string_bytes": 524288,
+      "max_capabilities": 64,
+      "max_capability_bytes": 128
+    }
+  },
+  "task_api": {
+    "max_error_message_bytes": 256,
+    "max_status_url_bytes": 128
+  },
   "logging": {
     "level": "info"
   }
 }
-

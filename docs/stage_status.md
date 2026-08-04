@@ -3,19 +3,20 @@
 ## 当前结论
 
 ```text
-PHASE_7_SERVICE_INTEGRATION_COMPLETED
+PHASE_8C_2_CONFIGURATION_SYSTEM_IMPLEMENTED
 ```
 
-- 当前阶段：Phase 7 Service Integration and Task HTTP API
-- 实现状态：跨平台 Task API、末段参数路由、静态插件组合和 Linux Service 生命周期已实现
-- Windows 验证：Visual Studio 2022 x64 Debug/Release 均为 370/370
-- Linux CI 验证：最终 push run 30781932731 已完成 Debug/Release 497/497，项目源码与测试 warning 均为 0
-- 日期：2026-08-03（Asia/Shanghai）
-- 下一阶段：Phase 8 尚未开始
+- 当前阶段：Phase 8C-2 Configuration System
+- 实现状态：portable AppConfig、RuntimeOptions 映射、Service 配置注入和 Linux `--serve` 已实现
+- Windows 验证：Visual Studio 2022 x64 Debug/Release 均为 380/380
+- WSL 验证：Ubuntu 24.04 GCC Debug/Release 均为 596/596；当前实现尚无 GitHub Actions CI
+- 日期：2026-08-04（Asia/Shanghai）
+- 下一步：审核并提交 Phase 8C-2，再取得 exact commit 的远端 Linux CI
 
-Phase 6 已实现显式静态注册、Frozen 并发 registry、Echo/MockVision、异常隔离及
-TaskValidator/PluginTaskAdapter；Phase 7 已在可组合 C++ 库中增加 Task HTTP API。
-`iaisf_server` 仍不启动监听或加载插件。动态插件、自动超时、定时器和异步日志未实现。
+Phase 8A/8B/8C-1 已提供 timerfd、TCP/HTTP timeout 和 signalfd；Phase 8C-2 在不改变
+这些生命周期语义的前提下增加一次性本地 JSON 配置和应用组合。Linux
+`iaisf_server --serve --config` 会启动静态 Echo/MockVision、Task HTTP API 与监听；
+动态插件、任务自动 timeout、热更新和异步文件日志仍未实现。
 
 Phase 7 新增 `iaisf_task_api`（跨平台）和 `iaisf_service`（Linux-only）。
 Windows Debug/Release 均为 370/370，Task API 46/46；Linux Service 15 个 CTest
@@ -880,3 +881,15 @@ Active HTTP stop 契约：触发 stop 的当前请求不保证 503，连接可�
 Active stop 语义：触发 stop 的当前请求不保证 503，连接可能在响应生成前关闭，已开始发送的 response 不得截断；普通 Stopping 阶段 POST 仍为 503。生命周期顺序为 `TcpServer cleanup → HttpServer stopped → DeferredCleanup → TaskManager shutdown/join → Service Stopped`。
 
 当前未实现：常驻 `--serve` CLI、timerfd/signalfd、自动任务超时、动态插件、真实 AI/GPU、数据库、异步日志和 benchmark。Phase 8 尚未开始。
+
+## Phase 8C-2 Configuration System（2026-08-04）
+
+状态：`PHASE_8C_2_CONFIGURATION_SYSTEM_IMPLEMENTED`。
+
+- Portable AppConfig、严格 JSON schema v1、legacy 顶层配置兼容已实现。
+- RuntimeOptions 复用现有 Options 校验，并完成 EventLoop/Timer/TCP/HTTP/Task/Plugin/API 映射。
+- Linux `--serve --config` 已组合 Service、静态插件、HTTP/TCP 和 signalfd 完整停止链路。
+- Windows VS2022 Debug/Release `380/380`，本地 WSL Ubuntu 24.04 GCC Debug/Release `596/596`；两平台 version/config smoke 成功。
+- 配置专项实际包括 AppConfig 22 项、RuntimeOptions 5 项和 Linux `--serve`/SIGTERM 进程集成 1 项；需求列出的 16 类场景均有覆盖。
+- 项目源码 warning 0、项目测试 warning 0；当前未提交实现尚无 GitHub Actions CI 证据。
+- 未实现：热更新、YAML、环境变量覆盖、动态插件、异步文件日志、数据库、真实 AI/GPU 和 benchmark。

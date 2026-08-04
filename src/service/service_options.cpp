@@ -1,6 +1,8 @@
 #include "iaisf/service/service_options.hpp"
 
+#include <algorithm>
 #include <limits>
+#include <thread>
 #include <utility>
 
 #include "iaisf/core/error.hpp"
@@ -66,7 +68,9 @@ Result<ServiceOptions> ServiceOptions::create(
     plugin::PluginLimits plugin_limits,
     api::TaskApiLimits api_limits,
     const bool enable_echo,
-    const bool enable_mock_vision) {
+    const bool enable_mock_vision,
+    const std::optional<std::chrono::milliseconds> http_header_timeout,
+    const std::optional<std::chrono::milliseconds> http_body_timeout) {
     auto valid = validate_cross_limits(
         tcp_options,
         http_limits,
@@ -77,6 +81,14 @@ Result<ServiceOptions> ServiceOptions::create(
     if (!valid) {
         return Result<ServiceOptions>::failure(std::move(valid).error());
     }
+    if ((http_header_timeout.has_value() &&
+         *http_header_timeout <= std::chrono::milliseconds::zero()) ||
+        (http_body_timeout.has_value() &&
+         *http_body_timeout <= std::chrono::milliseconds::zero())) {
+        return Result<ServiceOptions>::failure(make_error(
+            ErrorCode::InvalidArgument,
+            "HTTP timeout values must be positive when enabled"));
+    }
     return Result<ServiceOptions>::success(ServiceOptions{
         std::move(tcp_options),
         std::move(http_limits),
@@ -85,7 +97,9 @@ Result<ServiceOptions> ServiceOptions::create(
         std::move(plugin_limits),
         std::move(api_limits),
         enable_echo,
-        enable_mock_vision});
+        enable_mock_vision,
+        http_header_timeout,
+        http_body_timeout});
 }
 
 Result<ServiceOptions> ServiceOptions::defaults() {
@@ -125,10 +139,15 @@ Result<ServiceOptions> ServiceOptions::defaults() {
             ErrorCode::InternalError,
             "built-in service defaults are invalid"));
     }
+    const unsigned int detected_threads = std::thread::hardware_concurrency();
+    const std::size_t worker_threads = std::clamp<std::size_t>(
+        detected_threads == 0U ? 1U : static_cast<std::size_t>(detected_threads),
+        1U,
+        task::BoundedThreadPool::kMaximumWorkerCount);
     return create(
         std::move(tcp).value(),
         http::HttpLimits::defaults(),
-        task::ThreadPoolOptions{},
+        task::ThreadPoolOptions{worker_threads, 1024U},
         std::move(task_limits_result).value(),
         std::move(plugin_limits_result).value(),
         api::TaskApiLimits::defaults());
@@ -142,7 +161,9 @@ ServiceOptions::ServiceOptions(
     plugin::PluginLimits plugin_limits,
     api::TaskApiLimits api_limits,
     const bool enable_echo,
-    const bool enable_mock_vision) noexcept
+    const bool enable_mock_vision,
+    const std::optional<std::chrono::milliseconds> http_header_timeout,
+    const std::optional<std::chrono::milliseconds> http_body_timeout) noexcept
     : tcp_options_(std::move(tcp_options)),
       http_limits_(std::move(http_limits)),
       pool_options_(pool_options),
@@ -150,7 +171,9 @@ ServiceOptions::ServiceOptions(
       plugin_limits_(std::move(plugin_limits)),
       api_limits_(std::move(api_limits)),
       enable_echo_(enable_echo),
-      enable_mock_vision_(enable_mock_vision) {}
+      enable_mock_vision_(enable_mock_vision),
+      http_header_timeout_(http_header_timeout),
+      http_body_timeout_(http_body_timeout) {}
 
 const net::tcp::TcpServerOptions& ServiceOptions::tcp_options() const noexcept {
     return tcp_options_;
@@ -175,6 +198,16 @@ bool ServiceOptions::enable_echo() const noexcept {
 }
 bool ServiceOptions::enable_mock_vision() const noexcept {
     return enable_mock_vision_;
+}
+
+std::optional<std::chrono::milliseconds>
+ServiceOptions::http_header_timeout() const noexcept {
+    return http_header_timeout_;
+}
+
+std::optional<std::chrono::milliseconds>
+ServiceOptions::http_body_timeout() const noexcept {
+    return http_body_timeout_;
 }
 
 }  // namespace iaisf::service

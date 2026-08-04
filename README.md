@@ -2,7 +2,7 @@
 
 面向工业 AI 应用的 C++ 高性能任务服务框架。
 
-> 当前结论：`PHASE_7_SERVICE_INTEGRATION_COMPLETED`。warning 修复后的 Linux push CI 已通过 Debug/Release 全部测试，项目源码与测试 warning 均为 0。
+> 当前结论：`PHASE_8C_2_CONFIGURATION_SYSTEM_IMPLEMENTED`。Phase 8C-2 已完成严格 JSON 配置、运行时映射和基础 `--serve` 组合；Windows 与本地 WSL Debug/Release 回归通过，尚未记录当前未提交改动对应的 GitHub Actions CI。
 
 ## 项目定位
 
@@ -10,9 +10,25 @@
 
 框架层只负责网络、协议、路由、任务调度、插件管理、状态、日志、配置和错误处理。焊缝、点云、机器人等领域语义只能进入插件层。
 
-当前 `iaisf_server` 仍只验证 CLI 和配置后退出。Phase 7 已提供可组合的跨平台
-Task HTTP API 和 Linux-only `IndustrialAiService` 组合根，但没有 `--serve` 或 CLI
-插件加载；调用方必须显式拥有 EventLoop/Logger 并构造 Service。
+当前 `iaisf_server --config <path>` 严格校验配置后退出；Linux 上
+`iaisf_server --serve --config <path>` 会由 `iaisf_app` 组合 EventLoop、静态插件、
+HTTP/TCP Service 和 signalfd 停止链路并进入事件循环。Windows 保留配置校验，但
+对 `--serve` 返回明确的不支持错误。
+
+## Phase 8C-2 配置系统
+
+- `AppConfig` 是不含 fd、Socket、EventLoop 或 Linux endpoint 的可移植值对象。
+- JSON schema version 当前固定为 1；缺失时按 1 处理，未知字段、重复 key、类型混用、
+  非正 timeout 和超过 1 MiB 的配置文件均 fail-closed。
+- 新分组 schema 覆盖 Service、Reactor、TCP、HTTP、Runtime、Task、Plugin、Task API
+  和 Logging；旧顶层 `service_name`、`worker_threads`、`task_queue_capacity`、
+  `log_level` 仍兼容，新旧同组写法同时出现会被拒绝。
+- `make_runtime_options()` 位于 service/runtime 层，通过现有 Options 工厂完成校验，
+  不让 core、TCP、HTTP、Task 或 Plugin 直接解析 JSON。
+- 启用连接 idle timeout 和 HTTP timeout 时，会校验 Timer 容量至少覆盖
+  `max_connections × timer_layers`；Header/Body timer 互斥，只计一层。
+
+完整字段与启动说明见 [配置系统](docs/configuration.md)。
 
 ## Phase 1 已实现
 
@@ -431,6 +447,7 @@ Licensed under the Apache License 2.0. See [LICENSE](LICENSE).
 ## 文档
 
 - [总体架构](docs/architecture.md)
+- [配置系统](docs/configuration.md)
 - [Linux 构建](docs/linux_build.md)
 - [分阶段计划](docs/development_plan.md)
 - [协议设计](docs/protocol.md)

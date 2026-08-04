@@ -164,7 +164,9 @@ Result<IndustrialAiService::Ptr> IndustrialAiService::create(
             bind_endpoint,
             options.tcp_options(),
             std::move(router),
-            options.http_limits());
+            options.http_limits(),
+            options.http_header_timeout(),
+            options.http_body_timeout());
         if (!http_result) {
             return Result<Ptr>::failure(std::move(http_result).error());
         }

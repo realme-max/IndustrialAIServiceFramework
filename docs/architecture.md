@@ -1003,3 +1003,31 @@ DeferredCleanup 必须在阻塞任务 shutdown 之前完成；不得在 cleanup 
 最终 push [Linux CI run 30781932731](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30781932731)（attempt 1，`success`）对应提交 `a44b1272bf603a17724fa17c66d60ee0e18bb918`，Debug/Release checkout 均一致。Ubuntu 24.04.4 LTS、kernel 6.17.0-1020-azure、GCC 13.3.0、CMake 3.31.6；Debug/Release configure、build、CTest 均通过 `497/497`，项目源码与测试 warning 均为 0，Release version/config smoke 成功。
 
 `IndustrialAiServiceTest.ActiveHttpStopWaitsForDeferredCleanupBeforeJoiningTasks` 在两种配置均通过。active HTTP 请求触发 stop 时不保证 503，cleanup 可能先关闭连接，已开始发送的 response 不得截断；普通 Stopping 阶段新 POST 仍映射为 503。生命周期顺序为 `TcpServer cleanup → HttpServer stopped → DeferredCleanup → TaskManager shutdown/join → Service Stopped`。尚未执行 `ctest --repeat until-fail:50`。
+
+## Phase 8C-2 配置组合边界
+
+配置对象属于 portable core value 层，只包含资源无关的值；JSON 只在 config parser
+读取一次。service/runtime 的 `make_runtime_options()` 是唯一的配置到 Linux/service
+Options 转换边界，并复用各组件现有工厂验证。`iaisf_app` 依赖 core 和 Linux service，
+`iaisf_core` 不反向依赖 service。TCP、HTTP、Task、Plugin 不读取 JSON，也不持有
+AppConfig。
+
+```text
+JSON file -> AppConfig (portable)
+                 |
+                 v
+       make_runtime_options (service/runtime)
+                 |
+       +---------+---------+----------+
+       v                   v          v
+ EventLoop/Timer       TCP/HTTP    ServiceOptions
+                 \       |       /
+                  \      v      /
+                    iaisf_app
+                        |
+               IndustrialAiService
+```
+
+EventLoop 只增加构造期 TimerQueueOptions 注入，TimerQueue、stop 和 active-batch 生命周期
+语义未改变。ServiceOptions 只携带已验证的 HTTP timeout 值；HttpSession 与 TcpConnection
+原有 timeout 所有权、generation 和 weak_ptr 规则未改变。
