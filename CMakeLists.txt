@@ -85,6 +85,39 @@ target_link_libraries(iaisf_logging PUBLIC iaisf::core Threads::Threads)
 iaisf_enable_project_warnings(iaisf_logging)
 
 add_library(
+  iaisf_metrics
+  STATIC
+  src/metrics/metrics.cpp
+  src/metrics/prometheus_formatter.cpp
+)
+add_library(iaisf::metrics ALIAS iaisf_metrics)
+target_compile_features(iaisf_metrics PUBLIC cxx_std_17)
+target_include_directories(
+  iaisf_metrics
+  PUBLIC
+    "$<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>"
+    "$<BUILD_INTERFACE:${IAISF_GENERATED_INCLUDE_DIR}>"
+)
+target_link_libraries(iaisf_metrics PUBLIC iaisf::core Threads::Threads)
+iaisf_enable_project_warnings(iaisf_metrics)
+target_link_libraries(iaisf_logging PUBLIC iaisf::metrics)
+
+add_library(
+  iaisf_health
+  STATIC
+  src/health/health_checker.cpp
+)
+add_library(iaisf::health ALIAS iaisf_health)
+target_compile_features(iaisf_health PUBLIC cxx_std_17)
+target_include_directories(
+  iaisf_health
+  PUBLIC
+    "$<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>"
+    "$<BUILD_INTERFACE:${IAISF_GENERATED_INCLUDE_DIR}>"
+)
+iaisf_enable_project_warnings(iaisf_health)
+
+add_library(
   iaisf_task
   STATIC
   src/task/task_executor.cpp
@@ -106,10 +139,26 @@ target_link_libraries(
   iaisf_task
   PUBLIC
     iaisf::core
+    iaisf::metrics
     nlohmann_json::nlohmann_json
     Threads::Threads
 )
 iaisf_enable_project_warnings(iaisf_task)
+
+add_library(iaisf_diagnostics STATIC src/diagnostics/runtime_diagnostics.cpp)
+add_library(iaisf::diagnostics ALIAS iaisf_diagnostics)
+target_compile_features(iaisf_diagnostics PUBLIC cxx_std_17)
+target_include_directories(
+  iaisf_diagnostics
+  PUBLIC
+    "$<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>"
+    "$<BUILD_INTERFACE:${IAISF_GENERATED_INCLUDE_DIR}>"
+)
+target_link_libraries(
+  iaisf_diagnostics
+  PUBLIC iaisf::core iaisf::health iaisf::task iaisf::logging iaisf::metrics
+)
+iaisf_enable_project_warnings(iaisf_diagnostics)
 
 add_library(
   iaisf_plugin
@@ -142,6 +191,7 @@ add_library(
   iaisf_http_core
   STATIC
   src/http/builtin_routes.cpp
+  src/http/health_routes.cpp
   src/http/http_limits.cpp
   src/http/http_parser.cpp
   src/http/http_request.cpp
@@ -157,7 +207,7 @@ target_include_directories(
     "$<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>"
     "$<BUILD_INTERFACE:${IAISF_GENERATED_INCLUDE_DIR}>"
 )
-target_link_libraries(iaisf_http_core PUBLIC iaisf::core)
+target_link_libraries(iaisf_http_core PUBLIC iaisf::core iaisf::metrics iaisf::health)
 iaisf_enable_project_warnings(iaisf_http_core)
 
 add_library(
@@ -183,6 +233,18 @@ target_link_libraries(
     iaisf::plugin
 )
 iaisf_enable_project_warnings(iaisf_task_api)
+
+add_library(iaisf_diagnostics_http STATIC src/http/diagnostics_routes.cpp)
+add_library(iaisf::diagnostics_http ALIAS iaisf_diagnostics_http)
+target_compile_features(iaisf_diagnostics_http PUBLIC cxx_std_17)
+target_include_directories(
+  iaisf_diagnostics_http
+  PUBLIC
+    "$<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>"
+    "$<BUILD_INTERFACE:${IAISF_GENERATED_INCLUDE_DIR}>"
+)
+target_link_libraries(iaisf_diagnostics_http PUBLIC iaisf::http_core iaisf::diagnostics)
+iaisf_enable_project_warnings(iaisf_diagnostics_http)
 
 if(IAISF_BUILD_LINUX_NETWORK)
   add_library(
@@ -211,6 +273,7 @@ if(IAISF_BUILD_LINUX_NETWORK)
     iaisf_net
     PUBLIC
       iaisf::core
+      iaisf::metrics
     PRIVATE
       Threads::Threads
   )
@@ -279,6 +342,9 @@ if(IAISF_BUILD_LINUX_NETWORK)
       iaisf::task_api
       iaisf::task
       iaisf::plugin
+      iaisf::health
+      iaisf::diagnostics_http
+      iaisf::diagnostics
   )
   iaisf_enable_project_warnings(iaisf_service)
 endif()
@@ -292,7 +358,7 @@ target_include_directories(
     "$<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>"
     "$<BUILD_INTERFACE:${IAISF_GENERATED_INCLUDE_DIR}>"
 )
-target_link_libraries(iaisf_app PUBLIC iaisf::core iaisf::logging)
+target_link_libraries(iaisf_app PUBLIC iaisf::core iaisf::logging iaisf::metrics)
 if(TARGET iaisf_service)
   target_link_libraries(iaisf_app PRIVATE iaisf::service)
   target_compile_definitions(iaisf_app PRIVATE IAISF_HAS_SERVICE_RUNTIME=1)

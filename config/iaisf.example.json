@@ -82,5 +82,13 @@
   },
   "logging": {
     "level": "info"
+  },
+  "metrics": {
+    "enabled": true,
+    "endpoint": "/metrics"
+  },
+  "diagnostics": {
+    "enabled": false,
+    "endpoint": "/debug/status"
   }
 }

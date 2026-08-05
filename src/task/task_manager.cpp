@@ -8,6 +8,25 @@
 namespace iaisf::task {
 namespace {
 
+template <typename Metric, typename Create, typename Get>
+std::shared_ptr<Metric> metric_or_existing(
+    Create&& create,
+    Get&& get) noexcept {
+    try {
+        auto created = create();
+        if (created) {
+            return created.value();
+        }
+        auto existing = get();
+        if (existing) {
+            return existing.value();
+        }
+    } catch (...) {
+        // Metrics are observational and never affect task admission.
+    }
+    return {};
+}
+
 TaskSubmitOutcome rejected(
     const TaskSubmitFailure failure,
     Error error) {
@@ -28,13 +47,15 @@ Result<std::unique_ptr<TaskManager>> TaskManager::create(
     const ThreadPoolOptions pool_options,
     TaskLimits limits,
     ILogger& logger,
-    TaskHandler handler) {
+    TaskHandler handler,
+    MetricsRegistry* const metrics) {
     return create(
         pool_options,
         std::move(limits),
         logger,
         TaskValidator{},
-        std::move(handler));
+        std::move(handler),
+        metrics);
 }
 
 Result<std::unique_ptr<TaskManager>> TaskManager::create(
@@ -42,7 +63,8 @@ Result<std::unique_ptr<TaskManager>> TaskManager::create(
     TaskLimits limits,
     ILogger& logger,
     TaskValidator validator,
-    TaskHandler handler) {
+    TaskHandler handler,
+    MetricsRegistry* const metrics) {
     if (!handler) {
         return Result<std::unique_ptr<TaskManager>>::failure(make_error(
             ErrorCode::InvalidArgument,
@@ -62,7 +84,8 @@ Result<std::unique_ptr<TaskManager>> TaskManager::create(
             std::move(limits),
             logger,
             std::move(validator),
-            std::move(handler));
+            std::move(handler),
+            metrics);
         return Result<std::unique_ptr<TaskManager>>::success(std::move(manager));
     } catch (const std::bad_alloc&) {
         return Result<std::unique_ptr<TaskManager>>::failure(make_error(
@@ -81,11 +104,24 @@ TaskManager::TaskManager(
     TaskLimits limits,
     ILogger& logger,
     TaskValidator validator,
-    TaskHandler handler)
+    TaskHandler handler,
+    MetricsRegistry* const metrics)
     : validator_(std::move(validator)),
       repository_(std::move(limits)),
-      executor_(repository_, logger, std::move(handler)),
-      pool_(std::move(pool)) {}
+      executor_(repository_, logger, std::move(handler), metrics),
+      pool_(std::move(pool)),
+      metrics_(metrics) {
+    initialize_metrics();
+}
+
+void TaskManager::initialize_metrics() noexcept {
+    if (metrics_ == nullptr) {
+        return;
+    }
+    submitted_metric_ = metric_or_existing<Counter>(
+        [this] { return metrics_->create_counter("tasks_submitted_total"); },
+        [this] { return metrics_->get_counter("tasks_submitted_total"); });
+}
 
 TaskManager::SubmissionGuard::SubmissionGuard(TaskManager& manager) noexcept
     : manager_(manager) {}
@@ -167,6 +203,9 @@ TaskSubmitOutcome TaskManager::submit_admitted(const TaskRequest& request) {
             }};
         auto submitted = pool_->try_submit(std::move(work));
         if (submitted) {
+            if (submitted_metric_) {
+                submitted_metric_->increment();
+            }
             return accepted(id);
         }
 

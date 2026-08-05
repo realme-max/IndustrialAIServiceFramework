@@ -28,7 +28,11 @@ public:
         std::optional<std::chrono::milliseconds> http_header_timeout =
             std::nullopt,
         std::optional<std::chrono::milliseconds> http_body_timeout =
-            std::nullopt);
+            std::nullopt,
+        bool metrics_enabled = false,
+        std::string metrics_endpoint = "/metrics",
+        bool diagnostics_enabled = false,
+        std::string diagnostics_endpoint = "/debug/status");
     [[nodiscard]] static Result<ServiceOptions> defaults();
 
     [[nodiscard]] const net::tcp::TcpServerOptions& tcp_options() const noexcept;
@@ -43,6 +47,10 @@ public:
     http_header_timeout() const noexcept;
     [[nodiscard]] std::optional<std::chrono::milliseconds>
     http_body_timeout() const noexcept;
+    [[nodiscard]] bool metrics_enabled() const noexcept;
+    [[nodiscard]] const std::string& metrics_endpoint() const noexcept;
+    [[nodiscard]] bool diagnostics_enabled() const noexcept;
+    [[nodiscard]] const std::string& diagnostics_endpoint() const noexcept;
 
 private:
     ServiceOptions(
@@ -55,7 +63,11 @@ private:
         bool enable_echo,
         bool enable_mock_vision,
         std::optional<std::chrono::milliseconds> http_header_timeout,
-        std::optional<std::chrono::milliseconds> http_body_timeout) noexcept;
+        std::optional<std::chrono::milliseconds> http_body_timeout,
+        bool metrics_enabled,
+        std::string metrics_endpoint,
+        bool diagnostics_enabled,
+        std::string diagnostics_endpoint) noexcept;
 
     net::tcp::TcpServerOptions tcp_options_;
     http::HttpLimits http_limits_;
@@ -67,6 +79,10 @@ private:
     bool enable_mock_vision_;
     std::optional<std::chrono::milliseconds> http_header_timeout_;
     std::optional<std::chrono::milliseconds> http_body_timeout_;
+    bool metrics_enabled_{false};
+    std::string metrics_endpoint_;
+    bool diagnostics_enabled_{false};
+    std::string diagnostics_endpoint_;
 };
 
 }  // namespace iaisf::service

@@ -5,6 +5,7 @@
 #include <string_view>
 
 #include "iaisf/logging/logger.hpp"
+#include "iaisf/metrics/metrics.hpp"
 #include "iaisf/task/task_repository.hpp"
 #include "iaisf/task/task_types.hpp"
 
@@ -18,7 +19,11 @@ namespace iaisf::task {
  */
 class TaskExecutor {
 public:
-    TaskExecutor(TaskRepository& repository, ILogger& logger, TaskHandler handler);
+    TaskExecutor(
+        TaskRepository& repository,
+        ILogger& logger,
+        TaskHandler handler,
+        MetricsRegistry* metrics = nullptr);
 
     TaskExecutor(const TaskExecutor&) = delete;
     TaskExecutor& operator=(const TaskExecutor&) = delete;
@@ -31,12 +36,18 @@ public:
 
 private:
     void complete_with_error(TaskId id, Error error) noexcept;
-    void observe_transition(const Result<TransitionOutcome>& transition) noexcept;
+    void observe_transition(
+        const Result<TransitionOutcome>& transition,
+        bool success) noexcept;
     void safe_log(std::string_view message) noexcept;
 
     TaskRepository& repository_;
     ILogger& logger_;
     TaskHandler handler_;
+    MetricsRegistry* const metrics_{nullptr};
+    std::shared_ptr<Counter> completed_metric_;
+    std::shared_ptr<Counter> failed_metric_;
+    std::shared_ptr<Gauge> running_metric_;
     std::atomic<std::size_t> late_completion_count_{0};
     std::atomic<std::size_t> handler_exception_count_{0};
     std::atomic<std::size_t> logger_failure_count_{0};

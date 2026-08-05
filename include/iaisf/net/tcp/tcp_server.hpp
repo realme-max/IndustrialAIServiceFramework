@@ -100,7 +100,8 @@ public:
         EventLoop& loop,
         ILogger& logger,
         const Ipv4Endpoint& bind_endpoint,
-        TcpServerOptions options);
+        TcpServerOptions options,
+        MetricsRegistry* metrics = nullptr);
 
     TcpServer(const TcpServer&) = delete;
     TcpServer& operator=(const TcpServer&) = delete;
@@ -144,7 +145,10 @@ private:
         EventLoop& loop,
         ILogger& logger,
         TcpServerOptions options,
-        std::unique_ptr<Acceptor> acceptor) noexcept;
+        std::unique_ptr<Acceptor> acceptor,
+        MetricsRegistry* metrics) noexcept;
+
+    void initialize_metrics() noexcept;
 
     void handle_new_connection(Socket socket, const Ipv4Endpoint& peer);
     void schedule_remove_connection(const ConnectionPtr& connection) noexcept;
@@ -158,6 +162,8 @@ private:
     ILogger& logger_;
     TcpServerOptions options_;
     std::unique_ptr<Acceptor> acceptor_;
+    MetricsRegistry* const metrics_{nullptr};
+    std::shared_ptr<Counter> accepted_metric_;
     std::unordered_map<std::uint64_t, ConnectionPtr> connections_;
     std::vector<ConnectionPtr> pending_removals_;
     std::vector<ConnectionPtr> stop_snapshot_;

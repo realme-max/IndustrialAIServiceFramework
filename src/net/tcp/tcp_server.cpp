@@ -7,8 +7,32 @@
 #include <utility>
 
 #include "iaisf/core/error.hpp"
+#include "iaisf/metrics/metrics.hpp"
 
 namespace iaisf::net::tcp {
+
+namespace {
+
+template <typename Metric, typename Create, typename Get>
+std::shared_ptr<Metric> metric_or_existing(
+    Create&& create,
+    Get&& get) noexcept {
+    try {
+        auto created = create();
+        if (created) {
+            return created.value();
+        }
+        auto existing = get();
+        if (existing) {
+            return existing.value();
+        }
+    } catch (...) {
+        // Metrics are observational and never affect acceptance or cleanup.
+    }
+    return {};
+}
+
+}  // namespace
 
 static_assert(
     TcpServerOptions::kMaximumBufferBytes ==
@@ -161,7 +185,8 @@ Result<TcpServer::Ptr> TcpServer::create(
     EventLoop& loop,
     ILogger& logger,
     const Ipv4Endpoint& bind_endpoint,
-    TcpServerOptions options) {
+    TcpServerOptions options,
+    MetricsRegistry* const metrics) {
     if (!loop.is_in_loop_thread()) {
         return Result<Ptr>::failure(make_error(
             ErrorCode::InvalidState,
@@ -181,7 +206,9 @@ Result<TcpServer::Ptr> TcpServer::create(
             loop,
             logger,
             std::move(options),
-            std::move(acceptor_result).value()}};
+            std::move(acceptor_result).value(),
+            metrics}};
+        server->initialize_metrics();
         server->pending_removals_.reserve(
             server->options_.max_connections());
         server->stop_snapshot_.reserve(
@@ -198,12 +225,23 @@ TcpServer::TcpServer(
     EventLoop& loop,
     ILogger& logger,
     TcpServerOptions options,
-    std::unique_ptr<Acceptor> acceptor) noexcept
+    std::unique_ptr<Acceptor> acceptor,
+    MetricsRegistry* const metrics) noexcept
     : loop_(loop),
       logger_(logger),
       options_(std::move(options)),
       acceptor_(std::move(acceptor)),
+      metrics_(metrics),
       deferred_cleanup_(this, &TcpServer::run_deferred_cleanup) {}
+
+void TcpServer::initialize_metrics() noexcept {
+    if (metrics_ == nullptr) {
+        return;
+    }
+    accepted_metric_ = metric_or_existing<Counter>(
+        [this] { return metrics_->create_counter("tcp_connections_accepted_total"); },
+        [this] { return metrics_->get_counter("tcp_connections_accepted_total"); });
+}
 
 TcpServer::~TcpServer() noexcept {
     if (!loop_.is_in_loop_thread()) {
@@ -404,13 +442,17 @@ void TcpServer::handle_new_connection(
         options_.output_initial_capacity(),
         options_.output_maximum_capacity(),
         options_.output_high_water_mark(),
-        options_.idle_timeout());
+        options_.idle_timeout(),
+        metrics_);
     if (!connection_result) {
         ++rejected_connection_count_;
         safe_log(LogLevel::Error, connection_result.error().message);
         return;
     }
     ConnectionPtr connection = std::move(connection_result).value();
+    if (accepted_metric_) {
+        accepted_metric_->increment();
+    }
 
     auto callback_result =
         connection->set_message_callback(message_callback_);

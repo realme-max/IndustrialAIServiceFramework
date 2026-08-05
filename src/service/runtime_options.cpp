@@ -168,7 +168,9 @@ Result<RuntimeOptions> make_runtime_options(const AppConfig &config) {
         std::move(api).value(), config.plugins.enable_echo,
         config.plugins.enable_mock_vision,
         as_timeout(config.http.header_timeout_ms),
-        as_timeout(config.http.body_timeout_ms));
+        as_timeout(config.http.body_timeout_ms), config.metrics.enabled,
+        config.metrics.endpoint, config.diagnostics.enabled,
+        config.diagnostics.endpoint);
     if (!service) {
         return config_failure<RuntimeOptions>(service.error());
     }

@@ -14,7 +14,8 @@ Result<HttpServer::Ptr> HttpServer::create(
     HttpRouter router,
     HttpLimits limits,
     std::optional<std::chrono::steady_clock::duration> header_timeout,
-    std::optional<std::chrono::steady_clock::duration> body_timeout) {
+    std::optional<std::chrono::steady_clock::duration> body_timeout,
+    MetricsRegistry* const metrics) {
     if (!loop.is_in_loop_thread()) {
         return Result<Ptr>::failure(make_error(
             ErrorCode::InvalidState,
@@ -43,7 +44,8 @@ Result<HttpServer::Ptr> HttpServer::create(
         loop,
         logger,
         bind_endpoint,
-        std::move(tcp_options));
+        std::move(tcp_options),
+        metrics);
     if (!tcp_result) {
         return Result<Ptr>::failure(std::move(tcp_result).error());
     }
@@ -56,7 +58,8 @@ Result<HttpServer::Ptr> HttpServer::create(
             std::move(router),
             std::move(tcp_result).value(),
             header_timeout,
-            body_timeout}};
+            body_timeout,
+            metrics}};
         server->sessions_.reserve(max_connections);
         return Result<Ptr>::success(std::move(server));
     } catch (const std::bad_alloc&) {
@@ -73,14 +76,16 @@ HttpServer::HttpServer(
     HttpRouter router,
     net::tcp::TcpServer::Ptr tcp_server,
     std::optional<std::chrono::steady_clock::duration> header_timeout,
-    std::optional<std::chrono::steady_clock::duration> body_timeout) noexcept
+    std::optional<std::chrono::steady_clock::duration> body_timeout,
+    MetricsRegistry* const metrics) noexcept
     : loop_(loop),
       logger_(logger),
       limits_(std::move(limits)),
       router_(std::move(router)),
       tcp_server_(std::move(tcp_server)),
       header_timeout_(header_timeout),
-      body_timeout_(body_timeout) {}
+      body_timeout_(body_timeout),
+      metrics_(metrics) {}
 
 HttpServer::~HttpServer() noexcept {
     if ((state_ == State::Running || state_ == State::Stopping) &&
@@ -206,7 +211,8 @@ void HttpServer::handle_connection(
             limits_,
             connection,
             header_timeout_,
-            body_timeout_);
+            body_timeout_,
+            metrics_);
         if (!session) {
             const auto close_result = connection->force_close();
             if (!close_result) {

@@ -39,7 +39,8 @@ public:
         std::optional<std::chrono::steady_clock::duration> header_timeout =
             std::nullopt,
         std::optional<std::chrono::steady_clock::duration> body_timeout =
-            std::nullopt);
+            std::nullopt,
+        MetricsRegistry* metrics = nullptr);
 
     HttpServer(const HttpServer&) = delete;
     HttpServer& operator=(const HttpServer&) = delete;
@@ -73,7 +74,8 @@ private:
         std::optional<std::chrono::steady_clock::duration>
             header_timeout,
         std::optional<std::chrono::steady_clock::duration>
-            body_timeout) noexcept;
+            body_timeout,
+        MetricsRegistry* metrics) noexcept;
 
     void handle_connection(
         const net::tcp::TcpConnection::Ptr& connection) noexcept;
@@ -88,6 +90,7 @@ private:
     net::tcp::TcpServer::Ptr tcp_server_;
     std::optional<std::chrono::steady_clock::duration> header_timeout_;
     std::optional<std::chrono::steady_clock::duration> body_timeout_;
+    MetricsRegistry* const metrics_{nullptr};
     std::unordered_map<std::uint64_t, HttpSession::Ptr> sessions_;
     State state_{State::Created};
 };

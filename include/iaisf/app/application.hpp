@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "iaisf/logging/async_logger.hpp"
+#include "iaisf/metrics/metrics.hpp"
 
 namespace iaisf {
 
@@ -25,6 +26,8 @@ private:
 
     std::ostream& output_;
     std::ostream& error_output_;
+    // Metrics are application-owned; individual services do not own a global registry.
+    MetricsRegistry metrics_registry_;
     // Runtime logging is owned by the application and outlives the service.
     std::unique_ptr<AsyncLogger> runtime_logger_;
 };

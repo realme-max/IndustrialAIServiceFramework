@@ -46,6 +46,25 @@ void increment_drop(AsyncLoggerStats& stats, const LogLevel level) noexcept {
     }
 }
 
+template <typename Metric, typename Create, typename Get>
+std::shared_ptr<Metric> metric_or_existing(
+    Create&& create,
+    Get&& get) noexcept {
+    try {
+        auto created = create();
+        if (created) {
+            return created.value();
+        }
+        auto existing = get();
+        if (existing) {
+            return existing.value();
+        }
+    } catch (...) {
+        // Metrics are observational and never affect logging.
+    }
+    return {};
+}
+
 [[nodiscard]] bool is_utf8_continuation(const unsigned char value) noexcept {
     return (value & 0xC0U) == 0x80U;
 }
@@ -224,8 +243,11 @@ std::string format_record(const LogRecord& record, const std::size_t maximum_byt
 
 struct AsyncLogger::Impl {
     explicit Impl(AsyncLoggerOptions logger_options,
-                  std::vector<std::unique_ptr<ILogSink>> logger_sinks)
-        : options(std::move(logger_options)), sinks(std::move(logger_sinks)) {}
+                  std::vector<std::unique_ptr<ILogSink>> logger_sinks,
+                  MetricsRegistry* const metrics_registry)
+        : options(std::move(logger_options)),
+          sinks(std::move(logger_sinks)),
+          metrics(metrics_registry) {}
 
     AsyncLoggerOptions options;
     std::vector<std::unique_ptr<ILogSink>> sinks;
@@ -241,6 +263,10 @@ struct AsyncLogger::Impl {
     std::uint64_t flushed_sequence{0};
     std::uint64_t next_sequence{kFirstSequence};
     AsyncLoggerStats logger_stats;
+    MetricsRegistry* const metrics{nullptr};
+    std::shared_ptr<Counter> accepted_metric;
+    std::shared_ptr<Counter> dropped_metric;
+    std::shared_ptr<Counter> sink_failures_metric;
     std::optional<Error> terminal_error;
     bool error_seen{false};
     std::chrono::steady_clock::time_point last_flush{
@@ -255,6 +281,50 @@ struct AsyncLogger::Impl {
         } catch (...) {
             // A logger must not terminate the writer while reporting an error.
         }
+    }
+
+    void record_drop(const LogLevel level) noexcept {
+        increment_drop(logger_stats, level);
+        if (dropped_metric) {
+            dropped_metric->increment();
+        }
+    }
+
+    void record_sink_failure(
+        const ErrorCode code,
+        const std::string_view message) noexcept {
+        ++logger_stats.sink_failures;
+        if (sink_failures_metric) {
+            sink_failures_metric->increment();
+        }
+        remember_error(code, message);
+    }
+
+    void initialize_metrics() noexcept {
+        if (metrics == nullptr) {
+            return;
+        }
+        accepted_metric = metric_or_existing<Counter>(
+            [this] {
+                return metrics->create_counter("logger_records_accepted_total");
+            },
+            [this] {
+                return metrics->get_counter("logger_records_accepted_total");
+            });
+        dropped_metric = metric_or_existing<Counter>(
+            [this] {
+                return metrics->create_counter("logger_records_dropped_total");
+            },
+            [this] {
+                return metrics->get_counter("logger_records_dropped_total");
+            });
+        sink_failures_metric = metric_or_existing<Counter>(
+            [this] {
+                return metrics->create_counter("logger_sink_failures_total");
+            },
+            [this] {
+                return metrics->get_counter("logger_sink_failures_total");
+            });
     }
 };
 
@@ -286,8 +356,11 @@ Result<AsyncLoggerOptions> AsyncLoggerOptions::create(
 
 AsyncLogger::AsyncLogger(
     AsyncLoggerOptions options,
-    std::vector<std::unique_ptr<ILogSink>> sinks)
-    : impl_(std::make_unique<Impl>(std::move(options), std::move(sinks))) {
+    std::vector<std::unique_ptr<ILogSink>> sinks,
+    MetricsRegistry* const metrics)
+    : impl_(std::make_unique<Impl>(
+          std::move(options), std::move(sinks), metrics)) {
+    impl_->initialize_metrics();
     impl_->writer = std::thread([this]() {
         auto& state = *impl_;
 #if defined(__linux__)
@@ -354,19 +427,19 @@ AsyncLogger::AsyncLogger(
                                 const auto result = sink->write(record, formatted);
                                 if (!result) {
                                     std::lock_guard<std::mutex> lock{state.mutex};
-                                    ++state.logger_stats.sink_failures;
-                                    state.remember_error(result.error().code, kSinkFailure);
+                                    state.record_sink_failure(
+                                        result.error().code, kSinkFailure);
                                 }
                             } catch (...) {
                                 std::lock_guard<std::mutex> lock{state.mutex};
-                                ++state.logger_stats.sink_failures;
-                                state.remember_error(ErrorCode::InternalError, kSinkFailure);
+                                state.record_sink_failure(
+                                    ErrorCode::InternalError, kSinkFailure);
                             }
                         }
                     } catch (...) {
                         std::lock_guard<std::mutex> lock{state.mutex};
-                        ++state.logger_stats.sink_failures;
-                        state.remember_error(ErrorCode::InternalError, kWorkerFailure);
+                        state.record_sink_failure(
+                            ErrorCode::InternalError, kWorkerFailure);
                     }
                 }
 
@@ -376,13 +449,13 @@ AsyncLogger::AsyncLogger(
                             const auto result = sink->flush();
                             if (!result) {
                                 std::lock_guard<std::mutex> lock{state.mutex};
-                                ++state.logger_stats.sink_failures;
-                                state.remember_error(result.error().code, kSinkFailure);
+                                state.record_sink_failure(
+                                    result.error().code, kSinkFailure);
                             }
                         } catch (...) {
                             std::lock_guard<std::mutex> lock{state.mutex};
-                            ++state.logger_stats.sink_failures;
-                            state.remember_error(ErrorCode::InternalError, kSinkFailure);
+                            state.record_sink_failure(
+                                ErrorCode::InternalError, kSinkFailure);
                         }
                     }
                     state.last_flush = std::chrono::steady_clock::now();
@@ -412,13 +485,13 @@ AsyncLogger::AsyncLogger(
                             const auto result = sink->flush();
                             if (!result) {
                                 std::lock_guard<std::mutex> lock{state.mutex};
-                                ++state.logger_stats.sink_failures;
-                                state.remember_error(result.error().code, kSinkFailure);
+                                state.record_sink_failure(
+                                    result.error().code, kSinkFailure);
                             }
                         } catch (...) {
                             std::lock_guard<std::mutex> lock{state.mutex};
-                            ++state.logger_stats.sink_failures;
-                            state.remember_error(ErrorCode::InternalError, kSinkFailure);
+                            state.record_sink_failure(
+                                ErrorCode::InternalError, kSinkFailure);
                         }
                     }
                     std::lock_guard<std::mutex> lock{state.mutex};
@@ -441,7 +514,8 @@ AsyncLogger::AsyncLogger(
 
 Result<std::unique_ptr<AsyncLogger>> AsyncLogger::create(
     AsyncLoggerOptions options,
-    std::vector<std::unique_ptr<ILogSink>> sinks) {
+    std::vector<std::unique_ptr<ILogSink>> sinks,
+    MetricsRegistry* const metrics) {
     if (options.queue_capacity == 0U || options.reserved_critical_capacity > options.queue_capacity ||
         options.batch_size == 0U || options.batch_size > options.queue_capacity ||
         options.max_component_bytes == 0U || options.max_message_bytes == 0U ||
@@ -453,7 +527,8 @@ Result<std::unique_ptr<AsyncLogger>> AsyncLogger::create(
     }
     try {
         auto logger = std::unique_ptr<AsyncLogger>{
-            new AsyncLogger{std::move(options), std::move(sinks)}};
+            new AsyncLogger{
+                std::move(options), std::move(sinks), metrics}};
         return Result<std::unique_ptr<AsyncLogger>>::success(std::move(logger));
     } catch (const std::bad_alloc&) {
         return Result<std::unique_ptr<AsyncLogger>>::failure(
@@ -488,7 +563,7 @@ void AsyncLogger::log(
         std::lock_guard<std::mutex> lock{state.mutex};
         if (state.logger_state != AsyncLoggerState::Running || state.worker_drained) {
             ++state.logger_stats.rejected_after_shutdown;
-            increment_drop(state.logger_stats, level);
+            state.record_drop(level);
             return;
         }
         if (!should_log(level, state.options.threshold)) {
@@ -501,7 +576,7 @@ void AsyncLogger::log(
         const bool critical = level == LogLevel::Warn || level == LogLevel::Error;
         if (state.queue.size() >= state.options.queue_capacity ||
             (!critical && state.queue.size() >= normal_limit)) {
-            increment_drop(state.logger_stats, level);
+            state.record_drop(level);
             return;
         }
 
@@ -509,10 +584,13 @@ void AsyncLogger::log(
         ++state.next_sequence;
         state.queue.push_back(std::move(record));
         ++state.logger_stats.accepted;
+        if (state.accepted_metric) {
+            state.accepted_metric->increment();
+        }
         state.condition.notify_one();
     } catch (...) {
         std::lock_guard<std::mutex> lock{state.mutex};
-        increment_drop(state.logger_stats, level);
+        state.record_drop(level);
     }
 }
 
@@ -636,6 +714,28 @@ AsyncLoggerState AsyncLogger::state() const noexcept {
 AsyncLoggerStats AsyncLogger::stats() const noexcept {
     std::lock_guard<std::mutex> lock{impl_->mutex};
     return impl_->logger_stats;
+}
+
+LogDiagnosticsSnapshot AsyncLogger::diagnostics_snapshot() const noexcept {
+    const auto value = stats();
+    LogDiagnosticsSnapshot snapshot;
+    switch (state()) {
+    case AsyncLoggerState::Running:
+        snapshot.state = LogDiagnosticsState::Running;
+        break;
+    case AsyncLoggerState::Draining:
+        snapshot.state = LogDiagnosticsState::Draining;
+        break;
+    case AsyncLoggerState::Stopped:
+        snapshot.state = LogDiagnosticsState::Stopped;
+        break;
+    }
+    snapshot.accepted = value.accepted;
+    snapshot.filtered = value.filtered;
+    snapshot.dropped = value.dropped;
+    snapshot.rejected_after_shutdown = value.rejected_after_shutdown;
+    snapshot.sink_failures = value.sink_failures;
+    return snapshot;
 }
 
 }  // namespace iaisf

@@ -16,6 +16,16 @@ namespace iaisf::net {
 class EventLoop;
 class Channel;
 
+}  // namespace iaisf::net
+
+namespace iaisf {
+class MetricsRegistry;
+class Counter;
+class Gauge;
+}
+
+namespace iaisf::net {
+
 namespace detail {
 
 struct TimerIdLess final {
@@ -42,7 +52,8 @@ public:
     [[nodiscard]] static Result<std::unique_ptr<TimerQueue>> create(
         EventLoop& owner,
         const TimerQueueOptions& options,
-        EventNotification notification);
+        EventNotification notification,
+        MetricsRegistry* metrics = nullptr);
 
     TimerQueue(const TimerQueue&) = delete;
     TimerQueue& operator=(const TimerQueue&) = delete;
@@ -109,9 +120,11 @@ private:
         EventLoop& owner,
         TimerQueueOptions options,
         UniqueFd timer_fd,
-        EventNotification notification) noexcept;
+        EventNotification notification,
+        MetricsRegistry* metrics) noexcept;
 
     [[nodiscard]] Result<void> initialize_channel();
+    void initialize_metrics() noexcept;
     [[nodiscard]] Result<TimerId> add(
         TimePoint deadline,
         const TimerCallback& callback,
@@ -130,12 +143,18 @@ private:
     void dispatch_expired() noexcept;
     void fail_closed(const char* message) noexcept;
     void notify(const char* message, bool request_stop) noexcept;
+    void refresh_active_metric() noexcept;
 
     EventLoop& owner_;
     TimerQueueOptions options_;
     UniqueFd timer_fd_;
     std::unique_ptr<Channel> timer_channel_;
     EventNotification notification_;
+    MetricsRegistry* const metrics_{nullptr};
+    std::shared_ptr<Counter> created_metric_;
+    std::shared_ptr<Counter> cancelled_metric_;
+    std::shared_ptr<Counter> expired_metric_;
+    std::shared_ptr<Gauge> active_metric_;
     ScheduleMap schedule_;
     IdIndex id_index_;
     std::vector<TimerId> expired_batch_;

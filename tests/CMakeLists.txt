@@ -32,6 +32,7 @@ set_tests_properties(${IAISF_UNIT_TESTS} PROPERTIES LABELS unit)
 add_executable(
   iaisf_logging_tests
   log/test_async_logger.cpp
+  log/test_logger_metrics.cpp
   log/test_rolling_file_sink.cpp
   log/test_logging_config.cpp
 )
@@ -55,11 +56,107 @@ set_tests_properties(
 )
 
 add_executable(
+  iaisf_metrics_tests
+  metrics/test_metrics.cpp
+  metrics/test_metrics_formatter.cpp
+)
+target_compile_features(iaisf_metrics_tests PRIVATE cxx_std_17)
+target_link_libraries(
+  iaisf_metrics_tests
+  PRIVATE
+    iaisf::metrics
+    GTest::gtest
+    GTest::gtest_main
+    Threads::Threads
+)
+iaisf_enable_project_warnings(iaisf_metrics_tests)
+
+gtest_add_tests(
+  TARGET iaisf_metrics_tests
+  TEST_LIST IAISF_METRICS_TESTS
+)
+set_tests_properties(
+  ${IAISF_METRICS_TESTS}
+  PROPERTIES
+    LABELS "unit;metrics"
+    TIMEOUT 20
+)
+
+add_executable(
+  iaisf_health_tests
+  health/test_health_checker.cpp
+)
+target_compile_features(iaisf_health_tests PRIVATE cxx_std_17)
+target_link_libraries(
+  iaisf_health_tests
+  PRIVATE
+    iaisf::health
+    GTest::gtest
+    GTest::gtest_main
+    Threads::Threads
+)
+iaisf_enable_project_warnings(iaisf_health_tests)
+
+gtest_add_tests(
+  TARGET iaisf_health_tests
+  TEST_LIST IAISF_HEALTH_TESTS
+)
+set_tests_properties(
+  ${IAISF_HEALTH_TESTS}
+  PROPERTIES
+    LABELS "unit;health"
+    TIMEOUT 10
+)
+
+add_executable(
+  iaisf_diagnostics_tests
+  diagnostics/test_runtime_diagnostics.cpp
+)
+target_compile_features(iaisf_diagnostics_tests PRIVATE cxx_std_17)
+target_link_libraries(
+  iaisf_diagnostics_tests
+  PRIVATE
+    iaisf::diagnostics
+    GTest::gtest
+    GTest::gtest_main
+    Threads::Threads
+)
+iaisf_enable_project_warnings(iaisf_diagnostics_tests)
+gtest_add_tests(TARGET iaisf_diagnostics_tests TEST_LIST IAISF_DIAGNOSTICS_TESTS)
+set_tests_properties(
+  ${IAISF_DIAGNOSTICS_TESTS}
+  PROPERTIES LABELS "unit;diagnostics" TIMEOUT 10
+)
+
+add_executable(
+  iaisf_diagnostics_http_tests
+  http/test_diagnostics_endpoint.cpp
+)
+target_compile_features(iaisf_diagnostics_http_tests PRIVATE cxx_std_17)
+target_link_libraries(
+  iaisf_diagnostics_http_tests
+  PRIVATE
+    iaisf::diagnostics_http
+    GTest::gtest
+    GTest::gtest_main
+)
+iaisf_enable_project_warnings(iaisf_diagnostics_http_tests)
+gtest_add_tests(
+  TARGET iaisf_diagnostics_http_tests TEST_LIST IAISF_DIAGNOSTICS_HTTP_TESTS
+)
+set_tests_properties(
+  ${IAISF_DIAGNOSTICS_HTTP_TESTS}
+  PROPERTIES LABELS "unit;http;diagnostics" TIMEOUT 10
+)
+
+add_executable(
   iaisf_http_core_tests
   http/test_http_limits.cpp
   http/test_http_parser.cpp
   http/test_http_request_response.cpp
   http/test_http_router.cpp
+  http/test_health_endpoint.cpp
+  http/test_metrics_endpoint.cpp
 )
 target_compile_features(iaisf_http_core_tests PRIVATE cxx_std_17)
 target_link_libraries(
@@ -87,6 +184,7 @@ add_executable(
   task/test_task_executor.cpp
   task/test_task_limits.cpp
   task/test_task_manager.cpp
+  task/test_task_metrics.cpp
   task/test_task_repository.cpp
   task/test_task_types.cpp
   task/test_thread_pool.cpp
@@ -206,6 +304,7 @@ if(TARGET iaisf_tcp)
     net/tcp/test_acceptor.cpp
     net/tcp/test_buffer.cpp
     net/tcp/test_ipv4_endpoint.cpp
+    net/tcp/test_tcp_metrics.cpp
     net/tcp/test_tcp_connection.cpp
     net/tcp/test_tcp_server.cpp
   )
@@ -233,6 +332,7 @@ if(TARGET iaisf_http)
   add_executable(
     iaisf_http_tests
     http/test_http_server.cpp
+    http/test_http_metrics.cpp
   )
   target_compile_features(iaisf_http_tests PRIVATE cxx_std_17)
   target_link_libraries(
@@ -258,6 +358,7 @@ if(TARGET iaisf_service)
   add_executable(
     iaisf_service_tests
     service/test_industrial_ai_service.cpp
+    service/test_health_lifecycle.cpp
     service/test_runtime_options.cpp
   )
   target_compile_features(iaisf_service_tests PRIVATE cxx_std_17)

@@ -5,8 +5,11 @@
 
 #include "iaisf/api/task_http_api.hpp"
 #include "iaisf/core/result.hpp"
+#include "iaisf/diagnostics/runtime_diagnostics.hpp"
 #include "iaisf/http/http_server.hpp"
+#include "iaisf/health/health_checker.hpp"
 #include "iaisf/logging/logger.hpp"
+#include "iaisf/logging/log_diagnostics.hpp"
 #include "iaisf/net/event_loop.hpp"
 #include "iaisf/net/tcp/ipv4_endpoint.hpp"
 #include "iaisf/plugin/plugin_manager.hpp"
@@ -46,14 +49,16 @@ public:
         net::EventLoop& loop,
         ILogger& logger,
         const net::tcp::Ipv4Endpoint& bind_endpoint,
-        ServiceOptions options);
+        ServiceOptions options,
+        const ILogDiagnostics* logger_diagnostics = nullptr);
     [[nodiscard]] static Result<Ptr> create(
         net::EventLoop& loop,
         ILogger& logger,
         const net::tcp::Ipv4Endpoint& bind_endpoint,
         ServiceOptions options,
         std::vector<std::shared_ptr<const plugin::IAlgorithmPlugin>>
-            static_plugins);
+            static_plugins,
+        const ILogDiagnostics* logger_diagnostics = nullptr);
 
     IndustrialAiService(const IndustrialAiService&) = delete;
     IndustrialAiService& operator=(const IndustrialAiService&) = delete;
@@ -70,6 +75,8 @@ public:
         std::unique_ptr<task::TaskManager> task_manager,
         api::TaskHttpApi::Ptr task_api,
         http::HttpServer::Ptr http_server,
+        std::shared_ptr<health::HealthChecker> health_checker,
+        std::shared_ptr<diagnostics::RuntimeDiagnostics> diagnostics,
         std::shared_ptr<SignalShutdownState> signal_shutdown_state) noexcept;
 
     [[nodiscard]] Result<void> start();
@@ -81,6 +88,8 @@ public:
     [[nodiscard]] const task::TaskManager& task_manager() const noexcept;
     [[nodiscard]] std::size_t session_count() const noexcept;
     [[nodiscard]] std::size_t connection_count() const noexcept;
+    /** Returns the lock-free health snapshot for this service lifecycle. */
+    [[nodiscard]] health::HealthStatus health_status() const noexcept;
 
 private:
     [[nodiscard]] Result<void> advance_stop();
@@ -96,6 +105,8 @@ private:
     std::shared_ptr<plugin::PluginTaskAdapter> plugin_adapter_;
     std::unique_ptr<task::TaskManager> task_manager_;
     api::TaskHttpApi::Ptr task_api_;
+    std::shared_ptr<health::HealthChecker> health_checker_;
+    std::shared_ptr<diagnostics::RuntimeDiagnostics> diagnostics_;
     http::HttpServer::Ptr http_server_;
     std::shared_ptr<SignalShutdownState> signal_shutdown_state_;
     net::EventLoop::DeferredCleanup stop_continuation_;

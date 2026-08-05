@@ -6,6 +6,7 @@
 
 #include "iaisf/core/error.hpp"
 #include "iaisf/http/builtin_routes.hpp"
+#include "iaisf/http/diagnostics_routes.hpp"
 #include "iaisf/plugin/echo_plugin.hpp"
 #include "iaisf/plugin/mock_vision_plugin.hpp"
 
@@ -44,13 +45,14 @@ Result<IndustrialAiService::Ptr> IndustrialAiService::create(
     net::EventLoop& loop,
     ILogger& logger,
     const net::tcp::Ipv4Endpoint& bind_endpoint,
-    ServiceOptions options) {
+    ServiceOptions options,
+    const ILogDiagnostics* const logger_diagnostics) {
     return create(
         loop,
         logger,
         bind_endpoint,
         std::move(options),
-        {});
+        {}, logger_diagnostics);
 }
 
 Result<IndustrialAiService::Ptr> IndustrialAiService::create(
@@ -59,7 +61,8 @@ Result<IndustrialAiService::Ptr> IndustrialAiService::create(
     const net::tcp::Ipv4Endpoint& bind_endpoint,
     ServiceOptions options,
     std::vector<std::shared_ptr<const plugin::IAlgorithmPlugin>>
-        static_plugins) {
+        static_plugins,
+    const ILogDiagnostics* const logger_diagnostics) {
     if (!loop.is_in_loop_thread()) {
         return Result<Ptr>::failure(make_error(
             ErrorCode::InvalidState,
@@ -86,6 +89,8 @@ Result<IndustrialAiService::Ptr> IndustrialAiService::create(
             return Result<Ptr>::failure(std::move(signal_result).error());
         }
         SignalQueueRollback signal_rollback{loop};
+
+        auto health_checker = std::make_shared<health::HealthChecker>();
 
         auto plugin_manager =
             std::make_shared<plugin::PluginManager>(options.plugin_limits());
@@ -127,11 +132,28 @@ Result<IndustrialAiService::Ptr> IndustrialAiService::create(
             options.task_limits(),
             logger,
             adapter->make_validator(),
-            adapter->make_handler());
+            adapter->make_handler(),
+            loop.metrics_registry());
         if (!task_result) {
             return Result<Ptr>::failure(std::move(task_result).error());
         }
         auto task_manager = std::move(task_result).value();
+
+        std::shared_ptr<diagnostics::RuntimeDiagnostics> diagnostics;
+        if (options.diagnostics_enabled()) {
+            auto* const metrics = loop.metrics_registry();
+            if (metrics == nullptr) {
+                return Result<Ptr>::failure(make_error(
+                    ErrorCode::InvalidState,
+                    "diagnostics endpoint requires an application metrics registry"));
+            }
+            auto diagnostics_result = diagnostics::RuntimeDiagnostics::create(
+                health_checker, *task_manager, *metrics, logger_diagnostics);
+            if (!diagnostics_result) {
+                return Result<Ptr>::failure(std::move(diagnostics_result).error());
+            }
+            diagnostics = std::move(diagnostics_result).value();
+        }
 
         auto api_result = api::TaskHttpApi::create(
             *task_manager,
@@ -145,13 +167,36 @@ Result<IndustrialAiService::Ptr> IndustrialAiService::create(
         auto task_api = std::move(api_result).value();
 
         http::HttpRouter router{options.http_limits()};
-        auto builtins = http::register_builtin_routes(router);
+        auto builtins = http::register_builtin_routes(
+            router,
+            std::weak_ptr<const health::HealthChecker>{health_checker});
         if (!builtins) {
             return Result<Ptr>::failure(std::move(builtins).error());
         }
         auto task_routes = task_api->register_routes(router);
         if (!task_routes) {
             return Result<Ptr>::failure(std::move(task_routes).error());
+        }
+        if (options.metrics_enabled()) {
+            auto* const metrics = loop.metrics_registry();
+            if (metrics == nullptr) {
+                return Result<Ptr>::failure(make_error(
+                    ErrorCode::InvalidState,
+                    "metrics endpoint requires an application metrics registry"));
+            }
+            auto metrics_route = http::register_metrics_route(
+                router, *metrics, options.metrics_endpoint());
+            if (!metrics_route) {
+                return Result<Ptr>::failure(std::move(metrics_route).error());
+            }
+        }
+        if (options.diagnostics_enabled()) {
+            auto diagnostics_route = http::register_diagnostics_route(
+                router, std::weak_ptr<const diagnostics::RuntimeDiagnostics>{diagnostics},
+                options.diagnostics_endpoint(), options.http_limits().max_response_body_bytes());
+            if (!diagnostics_route) {
+                return Result<Ptr>::failure(std::move(diagnostics_route).error());
+            }
         }
         auto router_frozen = router.freeze();
         if (!router_frozen) {
@@ -166,7 +211,8 @@ Result<IndustrialAiService::Ptr> IndustrialAiService::create(
             std::move(router),
             options.http_limits(),
             options.http_header_timeout(),
-            options.http_body_timeout());
+            options.http_body_timeout(),
+            loop.metrics_registry());
         if (!http_result) {
             return Result<Ptr>::failure(std::move(http_result).error());
         }
@@ -180,6 +226,8 @@ Result<IndustrialAiService::Ptr> IndustrialAiService::create(
             std::move(task_manager),
             std::move(task_api),
             std::move(http_result).value(),
+            std::move(health_checker),
+            std::move(diagnostics),
             std::move(signal_shutdown_state)}};
         service->signal_shutdown_state_->service = service.get();
         signal_rollback.dismiss();
@@ -204,6 +252,8 @@ IndustrialAiService::IndustrialAiService(
     std::unique_ptr<task::TaskManager> task_manager,
     api::TaskHttpApi::Ptr task_api,
     http::HttpServer::Ptr http_server,
+    std::shared_ptr<health::HealthChecker> health_checker,
+    std::shared_ptr<diagnostics::RuntimeDiagnostics> diagnostics,
     std::shared_ptr<SignalShutdownState> signal_shutdown_state) noexcept
     : loop_(loop),
       logger_(logger),
@@ -211,6 +261,8 @@ IndustrialAiService::IndustrialAiService(
       plugin_adapter_(std::move(plugin_adapter)),
       task_manager_(std::move(task_manager)),
       task_api_(std::move(task_api)),
+      health_checker_(std::move(health_checker)),
+      diagnostics_(std::move(diagnostics)),
       http_server_(std::move(http_server)),
       signal_shutdown_state_(std::move(signal_shutdown_state)),
       stop_continuation_(this, &IndustrialAiService::run_stop_continuation) {}
@@ -228,6 +280,7 @@ IndustrialAiService::~IndustrialAiService() noexcept {
     if (!stopped()) {
         std::terminate();
     }
+    (void)health_checker_->transition_to(health::HealthPhase::Stopped);
 }
 
 Result<void> IndustrialAiService::start() {
@@ -243,13 +296,28 @@ Result<void> IndustrialAiService::start() {
     }
     auto result = http_server_->start();
     if (!result) {
+        (void)health_checker_->transition_to(health::HealthPhase::Stopping);
         state_ = State::StoppingHttp;
         task_api_->stop_admission();
         auto rolled_back = advance_stop();
         if (!rolled_back) {
             return rolled_back;
         }
+        if (state_ == State::Stopped) {
+            (void)health_checker_->transition_to(health::HealthPhase::Stopped);
+        }
         return result;
+    }
+    const auto health_transition = health_checker_->transition_to(
+        health::HealthPhase::Running);
+    if (health_transition == health::HealthTransitionOutcome::InvalidTransition) {
+        (void)health_checker_->transition_to(health::HealthPhase::Stopping);
+        state_ = State::StoppingHttp;
+        task_api_->stop_admission();
+        (void)advance_stop();
+        return Result<void>::failure(make_error(
+            ErrorCode::InternalError,
+            "health checker rejected service startup"));
     }
     state_ = State::Running;
     return Result<void>::success();
@@ -265,6 +333,7 @@ Result<void> IndustrialAiService::stop() {
         return Result<void>::success();
     }
     if (state_ == State::Created || state_ == State::Running) {
+        (void)health_checker_->transition_to(health::HealthPhase::Stopping);
         state_ = State::StoppingHttp;
         task_api_->stop_admission();
     }
@@ -302,6 +371,7 @@ Result<void> IndustrialAiService::advance_stop() {
                 ErrorCode::InternalError,
                 "task manager shutdown returned before workers stopped"));
         }
+        (void)health_checker_->transition_to(health::HealthPhase::Stopped);
         state_ = State::Stopped;
     }
     return Result<void>::success();
@@ -373,6 +443,10 @@ std::size_t IndustrialAiService::session_count() const noexcept {
 
 std::size_t IndustrialAiService::connection_count() const noexcept {
     return http_server_->connection_count();
+}
+
+health::HealthStatus IndustrialAiService::health_status() const noexcept {
+    return health_checker_->snapshot();
 }
 
 }  // namespace iaisf::service

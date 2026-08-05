@@ -12,6 +12,7 @@
 #include <unistd.h>
 
 #include "iaisf/core/error.hpp"
+#include "iaisf/metrics/metrics.hpp"
 #include "iaisf/net/channel.hpp"
 #include "iaisf/net/event_loop.hpp"
 #include "system_error.hpp"
@@ -34,11 +35,13 @@ TimerQueue::TimerQueue(
     EventLoop& owner,
     TimerQueueOptions options,
     UniqueFd timer_fd,
-    EventNotification notification) noexcept
+    EventNotification notification,
+    MetricsRegistry* const metrics) noexcept
     : owner_(owner),
       options_(std::move(options)),
       timer_fd_(std::move(timer_fd)),
-      notification_(std::move(notification)) {}
+      notification_(std::move(notification)),
+      metrics_(metrics) {}
 
 TimerQueue::~TimerQueue() noexcept {
     try {
@@ -54,7 +57,8 @@ TimerQueue::~TimerQueue() noexcept {
 Result<std::unique_ptr<TimerQueue>> TimerQueue::create(
     EventLoop& owner,
     const TimerQueueOptions& options,
-    EventNotification notification) {
+    EventNotification notification,
+    MetricsRegistry* const metrics) {
     auto validated_options = TimerQueueOptions::create(options.max_timers);
     if (!validated_options) {
         return Result<std::unique_ptr<TimerQueue>>::failure(
@@ -80,8 +84,10 @@ Result<std::unique_ptr<TimerQueue>> TimerQueue::create(
             owner,
             std::move(validated_options).value(),
             std::move(timer_fd),
-            std::move(notification)}};
+            std::move(notification),
+            metrics}};
         queue->expired_batch_.reserve(queue->options_.max_timers);
+        queue->initialize_metrics();
         auto channel_result = queue->initialize_channel();
         if (!channel_result) {
             return Result<std::unique_ptr<TimerQueue>>::failure(
@@ -96,6 +102,54 @@ Result<std::unique_ptr<TimerQueue>> TimerQueue::create(
         return Result<std::unique_ptr<TimerQueue>>::failure(make_error(
             ErrorCode::InternalError,
             "unable to create timer queue"));
+    }
+}
+
+namespace {
+
+template <typename Metric, typename Create, typename Get>
+std::shared_ptr<Metric> metric_or_existing(
+    Create&& create,
+    Get&& get) noexcept {
+    try {
+        auto created = create();
+        if (created) {
+            return created.value();
+        }
+        auto existing = get();
+        if (existing) {
+            return existing.value();
+        }
+    } catch (...) {
+        // Metrics are observational and must not affect timer scheduling.
+    }
+    return {};
+}
+
+}  // namespace
+
+void TimerQueue::initialize_metrics() noexcept {
+    if (metrics_ == nullptr) {
+        return;
+    }
+    created_metric_ = metric_or_existing<Counter>(
+        [this] { return metrics_->create_counter("timers_created_total"); },
+        [this] { return metrics_->get_counter("timers_created_total"); });
+    cancelled_metric_ = metric_or_existing<Counter>(
+        [this] { return metrics_->create_counter("timers_cancelled_total"); },
+        [this] { return metrics_->get_counter("timers_cancelled_total"); });
+    expired_metric_ = metric_or_existing<Counter>(
+        [this] { return metrics_->create_counter("timers_expired_total"); },
+        [this] { return metrics_->get_counter("timers_expired_total"); });
+    active_metric_ = metric_or_existing<Gauge>(
+        [this] { return metrics_->create_gauge("timers_active"); },
+        [this] { return metrics_->get_gauge("timers_active"); });
+    refresh_active_metric();
+}
+
+void TimerQueue::refresh_active_metric() noexcept {
+    if (active_metric_) {
+        active_metric_->set(static_cast<std::int64_t>(id_index_.size()));
     }
 }
 
@@ -268,6 +322,7 @@ Result<TimerId> TimerQueue::add(
         if (!arm_result) {
             id_index_.erase(candidate);
             schedule_.erase(schedule_iterator);
+            refresh_active_metric();
             fail_closed("failed to arm timerfd after scheduling a timer");
             return Result<TimerId>::failure(std::move(arm_result).error());
         }
@@ -278,6 +333,10 @@ Result<TimerId> TimerQueue::add(
     } else {
         ++next_sequence_;
     }
+    if (created_metric_) {
+        created_metric_->increment();
+    }
+    refresh_active_metric();
     return Result<TimerId>::success(candidate);
 }
 
@@ -325,12 +384,20 @@ Result<TimerCancelOutcome> TimerQueue::cancel(const TimerId id) {
                         std::move(arm_result).error());
                 }
             }
+            if (cancelled_metric_) {
+                cancelled_metric_->increment();
+            }
+            refresh_active_metric();
             return Result<TimerCancelOutcome>::success(
                 TimerCancelOutcome::Cancelled);
         }
 
         case TimerRecordState::PendingDispatch:
             id_index_.erase(record_iterator);
+            if (cancelled_metric_) {
+                cancelled_metric_->increment();
+            }
+            refresh_active_metric();
             return Result<TimerCancelOutcome>::success(
                 TimerCancelOutcome::Cancelled);
 
@@ -541,6 +608,7 @@ void TimerQueue::dispatch_expired() noexcept {
                     id_index_.erase(pending);
                 }
             }
+            refresh_active_metric();
             return;
         }
 
@@ -566,6 +634,10 @@ void TimerQueue::dispatch_expired() noexcept {
             callback = std::move(record.callback);
         }
 
+        if (expired_metric_) {
+            expired_metric_->increment();
+        }
+
         bool callback_failed = false;
         try {
             callback();
@@ -586,6 +658,7 @@ void TimerQueue::dispatch_expired() noexcept {
             record.cancel_requested || shutdown_ || faulted_ ||
             owner_.state() != EventLoop::State::Running) {
             id_index_.erase(record_iterator);
+            refresh_active_metric();
             continue;
         }
 
@@ -595,6 +668,7 @@ void TimerQueue::dispatch_expired() noexcept {
             Clock::now());
         if (!deadline_result) {
             id_index_.erase(record_iterator);
+            refresh_active_metric();
             fail_closed("repeating timer deadline overflowed");
             return;
         }
@@ -607,16 +681,19 @@ void TimerQueue::dispatch_expired() noexcept {
                 id);
             if (!schedule_result.second) {
                 id_index_.erase(record_iterator);
+                refresh_active_metric();
                 fail_closed("repeating timer schedule key collided");
                 return;
             }
             schedule_iterator = schedule_result.first;
         } catch (const std::exception&) {
             id_index_.erase(record_iterator);
+            refresh_active_metric();
             fail_closed("unable to reschedule repeating timer");
             return;
         } catch (...) {
             id_index_.erase(record_iterator);
+            refresh_active_metric();
             fail_closed("unable to reschedule repeating timer");
             return;
         }
@@ -631,6 +708,7 @@ void TimerQueue::dispatch_expired() noexcept {
             if (!arm_result) {
                 schedule_.erase(schedule_iterator);
                 id_index_.erase(record_iterator);
+                refresh_active_metric();
                 fail_closed("failed to rearm repeating timer");
                 return;
             }
@@ -662,6 +740,7 @@ Result<void> TimerQueue::shutdown() {
     schedule_.clear();
     id_index_.clear();
     expired_batch_.clear();
+    refresh_active_metric();
 
     std::optional<Error> first_error;
     if (timer_fd_.valid()) {

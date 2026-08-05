@@ -10,7 +10,9 @@
 
 #include "iaisf/core/result.hpp"
 #include "iaisf/logging/logger.hpp"
+#include "iaisf/logging/log_diagnostics.hpp"
 #include "iaisf/logging/log_sink.hpp"
+#include "iaisf/metrics/metrics.hpp"
 
 namespace iaisf {
 
@@ -64,11 +66,12 @@ struct AsyncLoggerStats {
  * space. One owned writer thread drains the queue and is the only caller of
  * sinks. AsyncLogger must outlive all producer calls and its sinks.
  */
-class AsyncLogger final : public ILogger {
+class AsyncLogger final : public ILogger, public ILogDiagnostics {
 public:
     [[nodiscard]] static Result<std::unique_ptr<AsyncLogger>> create(
         AsyncLoggerOptions options,
-        std::vector<std::unique_ptr<ILogSink>> sinks);
+        std::vector<std::unique_ptr<ILogSink>> sinks,
+        MetricsRegistry* metrics = nullptr);
 
     ~AsyncLogger() noexcept override;
 
@@ -92,9 +95,13 @@ public:
     [[nodiscard]] LogLevel threshold() const noexcept;
     [[nodiscard]] AsyncLoggerState state() const noexcept;
     [[nodiscard]] AsyncLoggerStats stats() const noexcept;
+    [[nodiscard]] LogDiagnosticsSnapshot diagnostics_snapshot() const noexcept override;
 
 private:
-    AsyncLogger(AsyncLoggerOptions options, std::vector<std::unique_ptr<ILogSink>> sinks);
+    AsyncLogger(
+        AsyncLoggerOptions options,
+        std::vector<std::unique_ptr<ILogSink>> sinks,
+        MetricsRegistry* metrics);
 
     struct Impl;
     std::unique_ptr<Impl> impl_;
