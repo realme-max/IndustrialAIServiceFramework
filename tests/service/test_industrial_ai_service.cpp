@@ -743,6 +743,8 @@ TEST(IndustrialAiServiceTest, StartFailureIsTerminalAndFullyRolledBack) {
     loop->stop();
     EXPECT_FALSE(service->start());
     EXPECT_TRUE(service->stopped());
+    EXPECT_EQ(service->health_status().phase, health::HealthPhase::Stopped);
+    EXPECT_FALSE(service->health_status().ready);
     EXPECT_TRUE(service->task_manager().stopped());
     EXPECT_EQ(service->session_count(), 0U);
     EXPECT_EQ(service->connection_count(), 0U);
@@ -767,7 +769,10 @@ TEST(IndustrialAiServiceTest, ServesHealthOverLoopback) {
     EXPECT_TRUE(result.loop_result);
     EXPECT_TRUE(result.client_error.empty()) << result.client_error;
     EXPECT_EQ(result.response.status, 200);
-    EXPECT_EQ(result.response.body, "{\"status\":\"ok\"}");
+    EXPECT_EQ(
+        result.response.body,
+        "{\"status\":\"ok\",\"live\":true,\"ready\":true,"
+        "\"phase\":\"running\"}");
 }
 
 TEST(IndustrialAiServiceTest, ServesVersionOverLoopback) {

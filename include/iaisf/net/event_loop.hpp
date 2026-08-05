@@ -12,6 +12,7 @@
 
 #include "iaisf/core/result.hpp"
 #include "iaisf/logging/logger.hpp"
+#include "iaisf/metrics/metrics.hpp"
 #include "iaisf/net/timer.hpp"
 #include "iaisf/net/unique_fd.hpp"
 
@@ -39,6 +40,8 @@ class TimerQueueTestAccess;
  * Application work uses queue_in_loop(). Framework-owned lifecycle objects use
  * an embedded DeferredCleanup node so cleanup cannot be rejected by the
  * application queue capacity and cannot allocate while being scheduled.
+ * The optional MetricsRegistry is borrowed for observational counters and
+ * gauges; its owner must outlive this EventLoop.
  */
 class EventLoop final {
 public:
@@ -87,7 +90,8 @@ public:
         ILogger& logger,
         std::size_t max_events = 256U,
         std::size_t pending_callback_capacity = 1024U,
-        TimerQueueOptions timer_options = {});
+        TimerQueueOptions timer_options = {},
+        MetricsRegistry* metrics = nullptr);
 
     EventLoop(const EventLoop&) = delete;
     EventLoop& operator=(const EventLoop&) = delete;
@@ -127,6 +131,10 @@ public:
 
     [[nodiscard]] bool is_in_loop_thread() const noexcept;
     [[nodiscard]] State state() const noexcept;
+    /** Returns the optional application-owned metrics registry (borrowed). */
+    [[nodiscard]] MetricsRegistry* metrics_registry() const noexcept {
+        return metrics_;
+    }
 
     [[nodiscard]] Result<void> update_channel(Channel& channel);
     [[nodiscard]] Result<void> remove_channel(Channel& channel);
@@ -156,10 +164,12 @@ private:
         std::unique_ptr<EpollPoller> poller,
         UniqueFd wakeup_fd,
         std::size_t pending_callback_capacity,
-        TimerQueueOptions timer_options);
+        TimerQueueOptions timer_options,
+        MetricsRegistry* metrics);
 
     [[nodiscard]] Result<void> initialize_wakeup_channel();
     [[nodiscard]] Result<void> initialize_timer_queue();
+    void initialize_metrics() noexcept;
     [[nodiscard]] Result<void> signal_wakeup();
     void drain_wakeup() noexcept;
     void execute_pending_callbacks() noexcept;
@@ -179,6 +189,11 @@ private:
     std::unique_ptr<detail::TimerQueue> timer_queue_;
     const std::size_t pending_callback_capacity_;
     const TimerQueueOptions timer_options_;
+    MetricsRegistry* const metrics_{nullptr};
+    std::shared_ptr<Counter> iterations_metric_;
+    std::shared_ptr<Counter> callbacks_executed_metric_;
+    std::shared_ptr<Gauge> pending_callbacks_metric_;
+    std::shared_ptr<Gauge> active_channels_metric_;
 
     mutable std::mutex pending_mutex_;
     std::deque<Callback> pending_callbacks_;

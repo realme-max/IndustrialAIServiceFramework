@@ -39,7 +39,8 @@ public:
         std::optional<std::chrono::steady_clock::duration> header_timeout =
             std::nullopt,
         std::optional<std::chrono::steady_clock::duration> body_timeout =
-            std::nullopt);
+            std::nullopt,
+        MetricsRegistry* metrics = nullptr);
 
     HttpSession(const HttpSession&) = delete;
     HttpSession& operator=(const HttpSession&) = delete;
@@ -70,7 +71,10 @@ private:
         HttpLimits limits,
         const ConnectionPtr& connection,
         std::optional<std::chrono::steady_clock::duration> header_timeout,
-        std::optional<std::chrono::steady_clock::duration> body_timeout);
+        std::optional<std::chrono::steady_clock::duration> body_timeout,
+        MetricsRegistry* metrics);
+
+    void initialize_metrics() noexcept;
 
     void dispatch_available(
         const ConnectionPtr& connection,
@@ -105,6 +109,11 @@ private:
     std::optional<std::chrono::steady_clock::duration> body_timeout_;
     std::optional<net::TimerId> body_timer_;
     std::uint64_t body_generation_{0U};
+    MetricsRegistry* const metrics_{nullptr};
+    std::shared_ptr<Counter> requests_metric_;
+    std::shared_ptr<Counter> responses_metric_;
+    std::shared_ptr<Counter> timeout_408_metric_;
+    std::shared_ptr<Counter> parse_errors_metric_;
     net::tcp::Buffer* continuation_input_{nullptr};
     bool continuation_pending_{false};
     bool terminal_{false};

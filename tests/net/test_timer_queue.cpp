@@ -19,6 +19,7 @@
 
 #include "iaisf/core/error.hpp"
 #include "iaisf/logging/logger.hpp"
+#include "iaisf/metrics/metrics.hpp"
 #include "iaisf/net/event_loop.hpp"
 #include "iaisf/net/timer.hpp"
 #include "timer_queue.hpp"
@@ -72,6 +73,7 @@ public:
 
 struct QueueStorage final {
     RecordingLogger logger;
+    iaisf::MetricsRegistry metrics;
     std::size_t notification_count{0U};
     std::unique_ptr<iaisf::net::EventLoop> loop;
     std::unique_ptr<TimerQueue> queue;
@@ -92,6 +94,14 @@ public:
 
     [[nodiscard]] TimerQueue& operator*() const noexcept {
         return *storage_->queue;
+    }
+
+    [[nodiscard]] iaisf::MetricsRegistry& metrics() const noexcept {
+        return storage_->metrics;
+    }
+
+    [[nodiscard]] iaisf::net::EventLoop& loop() const noexcept {
+        return *storage_->loop;
     }
 
 private:
@@ -119,7 +129,8 @@ QueueHandle make_queue(
         options_result.value(),
         [storage_pointer](const char*, bool) {
             ++storage_pointer->notification_count;
-        });
+        },
+        &storage->metrics);
     EXPECT_TRUE(queue_result);
     if (!queue_result) {
         return QueueHandle{nullptr};
@@ -1219,6 +1230,54 @@ TEST(TimerFdIntegrationTest, NonOwnerThreadCannotScheduleRepeatingTimer) {
 
     ASSERT_FALSE(result);
     EXPECT_EQ(result.error().code, ErrorCode::InvalidState);
+}
+
+TEST(TimerQueueRuntimeMetricsTest, TracksCreateCancelExpireAndActiveTimers) {
+    auto queue = make_queue(4U);
+    ASSERT_TRUE(queue);
+
+    auto created = queue.metrics().get_counter("timers_created_total");
+    auto cancelled = queue.metrics().get_counter("timers_cancelled_total");
+    auto expired = queue.metrics().get_counter("timers_expired_total");
+    auto active = queue.metrics().get_gauge("timers_active");
+    ASSERT_TRUE(created);
+    ASSERT_TRUE(cancelled);
+    ASSERT_TRUE(expired);
+    ASSERT_TRUE(active);
+    EXPECT_EQ(created.value()->snapshot(), 0U);
+    EXPECT_EQ(cancelled.value()->snapshot(), 0U);
+    EXPECT_EQ(expired.value()->snapshot(), 0U);
+    EXPECT_EQ(active.value()->snapshot(), 0);
+
+    auto cancellable = queue->run_after(1h, [] {});
+    ASSERT_TRUE(cancellable);
+    EXPECT_EQ(created.value()->snapshot(), 1U);
+    EXPECT_EQ(active.value()->snapshot(), 1);
+
+    auto cancel_result = queue->cancel(cancellable.value());
+    ASSERT_TRUE(cancel_result);
+    EXPECT_EQ(
+        cancel_result.value(), TimerCancelOutcome::Cancelled);
+    EXPECT_EQ(cancelled.value()->snapshot(), 1U);
+    EXPECT_EQ(active.value()->snapshot(), 0);
+
+    bool callback_ran = false;
+    auto expiring = queue->run_after(0ms, [&callback_ran, &queue] {
+        callback_ran = true;
+        queue.loop().stop();
+    });
+    ASSERT_TRUE(expiring);
+    EXPECT_EQ(created.value()->snapshot(), 2U);
+    EXPECT_EQ(active.value()->snapshot(), 1);
+
+    auto run_result = queue.loop().run();
+    ASSERT_TRUE(run_result);
+    EXPECT_TRUE(callback_ran);
+    EXPECT_EQ(expired.value()->snapshot(), 1U);
+    EXPECT_EQ(active.value()->snapshot(), 0);
+
+    ASSERT_TRUE(queue->shutdown());
+    EXPECT_EQ(active.value()->snapshot(), 0);
 }
 
 }  // namespace

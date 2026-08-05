@@ -19,6 +19,30 @@
 
 namespace iaisf::net {
 
+namespace {
+
+template <typename Metric, typename Create, typename Get>
+std::shared_ptr<Metric> metric_or_existing(
+    Create&& create,
+    Get&& get) noexcept {
+    try {
+        auto created = create();
+        if (created) {
+            return created.value();
+        }
+        auto existing = get();
+        if (existing) {
+            return existing.value();
+        }
+    } catch (...) {
+        // Metrics are observational. A metrics allocation or lookup failure
+        // must never change EventLoop behavior.
+    }
+    return {};
+}
+
+}  // namespace
+
 EventLoop::DeferredCleanup::DeferredCleanup(
     void* const context,
     const Function function) noexcept
@@ -38,7 +62,8 @@ Result<std::unique_ptr<EventLoop>> EventLoop::create(
     ILogger& logger,
     const std::size_t max_events,
     const std::size_t pending_callback_capacity,
-    const TimerQueueOptions timer_options) {
+    const TimerQueueOptions timer_options,
+    MetricsRegistry* const metrics) {
     if (pending_callback_capacity == 0U ||
         pending_callback_capacity > kMaximumPendingCallbacks) {
         return Result<std::unique_ptr<EventLoop>>::failure(make_error(
@@ -64,7 +89,9 @@ Result<std::unique_ptr<EventLoop>> EventLoop::create(
         std::move(poller_result).value(),
         UniqueFd{wakeup_fd},
         pending_callback_capacity,
-        timer_options}};
+        timer_options,
+        metrics}};
+    loop->initialize_metrics();
     auto initialization_result = loop->initialize_wakeup_channel();
     if (!initialization_result) {
         return Result<std::unique_ptr<EventLoop>>::failure(
@@ -83,13 +110,15 @@ EventLoop::EventLoop(
     std::unique_ptr<EpollPoller> poller,
     UniqueFd wakeup_fd,
     const std::size_t pending_callback_capacity,
-    const TimerQueueOptions timer_options)
+    const TimerQueueOptions timer_options,
+    MetricsRegistry* const metrics)
     : logger_(logger),
       owner_thread_(std::this_thread::get_id()),
       poller_(std::move(poller)),
       wakeup_fd_(std::move(wakeup_fd)),
       pending_callback_capacity_(pending_callback_capacity),
-      timer_options_(timer_options) {}
+      timer_options_(timer_options),
+      metrics_(metrics) {}
 
 EventLoop::~EventLoop() noexcept {
     const State current = state_.load(std::memory_order_acquire);
@@ -110,6 +139,8 @@ EventLoop::~EventLoop() noexcept {
         auto remove_result = poller_->remove(*wakeup_channel_);
         if (!remove_result) {
             safe_log(LogLevel::Error, "failed to remove EventLoop wakeup channel");
+        } else if (active_channels_metric_) {
+            active_channels_metric_->decrement();
         }
     }
     wakeup_channel_.reset();
@@ -123,6 +154,28 @@ Result<void> EventLoop::initialize_wakeup_channel() {
     return update_channel(*wakeup_channel_);
 }
 
+void EventLoop::initialize_metrics() noexcept {
+    if (metrics_ == nullptr) {
+        return;
+    }
+    iterations_metric_ = metric_or_existing<Counter>(
+        [this] { return metrics_->create_counter("event_loop_iterations_total"); },
+        [this] { return metrics_->get_counter("event_loop_iterations_total"); });
+    callbacks_executed_metric_ = metric_or_existing<Counter>(
+        [this] {
+            return metrics_->create_counter("event_loop_callbacks_executed_total");
+        },
+        [this] {
+            return metrics_->get_counter("event_loop_callbacks_executed_total");
+        });
+    pending_callbacks_metric_ = metric_or_existing<Gauge>(
+        [this] { return metrics_->create_gauge("event_loop_pending_callbacks"); },
+        [this] { return metrics_->get_gauge("event_loop_pending_callbacks"); });
+    active_channels_metric_ = metric_or_existing<Gauge>(
+        [this] { return metrics_->create_gauge("event_loop_channels_active"); },
+        [this] { return metrics_->get_gauge("event_loop_channels_active"); });
+}
+
 Result<void> EventLoop::initialize_timer_queue() {
     auto queue_result = detail::TimerQueue::create(
         *this,
@@ -132,7 +185,8 @@ Result<void> EventLoop::initialize_timer_queue() {
             if (request_stop) {
                 stop();
             }
-        });
+        },
+        metrics_);
     if (!queue_result) {
         return Result<void>::failure(std::move(queue_result).error());
     }
@@ -161,6 +215,9 @@ Result<void> EventLoop::run() {
     active_channels.reserve(poller_->max_events());
 
     while (state_.load(std::memory_order_acquire) == State::Running) {
+        if (iterations_metric_) {
+            iterations_metric_->increment();
+        }
         auto poll_result = poller_->poll(-1, active_channels);
         if (!poll_result) {
             safe_log(LogLevel::Error, "epoll_wait failed; EventLoop is stopping");
@@ -200,6 +257,9 @@ void EventLoop::stop() noexcept {
         if (current == State::Created) {
             state_.store(State::Stopped, std::memory_order_release);
             cancelled_callbacks.swap(pending_callbacks_);
+            if (pending_callbacks_metric_) {
+                pending_callbacks_metric_->set(0);
+            }
             should_finalize_created_signals = is_in_loop_thread();
         } else if (current == State::Running) {
             state_.store(State::Stopping, std::memory_order_release);
@@ -374,12 +434,20 @@ Result<void> EventLoop::update_channel(Channel& channel) {
                 ErrorCode::InvalidState,
                 "channel removal must be deferred until the active batch completes"));
         }
-        return poller_->remove(channel);
+        auto result = poller_->remove(channel);
+        if (result && active_channels_metric_) {
+            active_channels_metric_->decrement();
+        }
+        return result;
     }
     if (channel.is_registered()) {
         return poller_->update(channel);
     }
-    return poller_->add(channel);
+    auto result = poller_->add(channel);
+    if (result && active_channels_metric_) {
+        active_channels_metric_->increment();
+    }
+    return result;
 }
 
 Result<void> EventLoop::remove_channel(Channel& channel) {
@@ -398,7 +466,11 @@ Result<void> EventLoop::remove_channel(Channel& channel) {
             ErrorCode::InvalidState,
             "channel removal must be deferred until the active batch completes"));
     }
-    return poller_->remove(channel);
+    auto result = poller_->remove(channel);
+    if (result && active_channels_metric_) {
+        active_channels_metric_->decrement();
+    }
+    return result;
 }
 
 Result<void> EventLoop::queue_in_loop(Callback callback) {
@@ -427,12 +499,20 @@ Result<void> EventLoop::queue_in_loop(Callback callback) {
             ErrorCode::ResourceExhausted,
             "pending callback allocation failed"));
     }
+    if (pending_callbacks_metric_) {
+        pending_callbacks_metric_->set(
+            static_cast<std::int64_t>(pending_callbacks_.size()));
+    }
     // The queue mutex is intentionally held through the nonblocking eventfd
     // write. This makes acceptance atomic with rollback: a returned failure
     // cannot leave this callback visible to the EventLoop.
     auto wakeup_result = signal_wakeup();
     if (!wakeup_result) {
         pending_callbacks_.pop_back();
+        if (pending_callbacks_metric_) {
+            pending_callbacks_metric_->set(
+                static_cast<std::int64_t>(pending_callbacks_.size()));
+        }
         return wakeup_result;
     }
     return Result<void>::success();
@@ -540,9 +620,15 @@ void EventLoop::execute_pending_callbacks() noexcept {
     {
         std::lock_guard<std::mutex> lock{pending_mutex_};
         callbacks.swap(pending_callbacks_);
+        if (pending_callbacks_metric_) {
+            pending_callbacks_metric_->set(0);
+        }
     }
 
     for (auto& callback : callbacks) {
+        if (callbacks_executed_metric_) {
+            callbacks_executed_metric_->increment();
+        }
         try {
             callback();
         } catch (const std::exception&) {

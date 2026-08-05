@@ -20,6 +20,8 @@ inline constexpr std::size_t kMaxLogBatchSize = 1'000'000U;
 inline constexpr std::uint64_t kMaxLogFlushIntervalMs = 60ULL * 60ULL * 1000ULL;
 inline constexpr std::uintmax_t kMaxLogFileBytes = 1ULL * 1024ULL * 1024ULL * 1024ULL;
 inline constexpr std::size_t kMaxLogArchives = 1000U;
+inline constexpr std::size_t kMaxMetricsEndpointBytes = 128U;
+inline constexpr std::size_t kMaxDiagnosticsEndpointBytes = 128U;
 
 struct ServiceConfig {
     std::string name;
@@ -133,6 +135,16 @@ struct LoggingConfig {
     LoggingFileConfig file;
 };
 
+struct MetricsConfig {
+    bool enabled{true};
+    std::string endpoint{"/metrics"};
+};
+
+struct DiagnosticsConfig {
+    bool enabled{false};
+    std::string endpoint{"/debug/status"};
+};
+
 /** Portable, resource-free application configuration value. */
 struct AppConfig {
     std::uint32_t schema_version{};
@@ -144,6 +156,8 @@ struct AppConfig {
     PluginConfig plugins;
     TaskApiConfig task_api;
     LoggingConfig logging;
+    MetricsConfig metrics;
+    DiagnosticsConfig diagnostics;
 };
 
 [[nodiscard]] AppConfig default_app_config();

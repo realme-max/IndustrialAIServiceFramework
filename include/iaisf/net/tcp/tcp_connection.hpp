@@ -64,7 +64,8 @@ public:
         std::size_t output_maximum_capacity,
         std::size_t output_high_water_mark,
         std::optional<std::chrono::steady_clock::duration> idle_timeout =
-            std::nullopt);
+            std::nullopt,
+        MetricsRegistry* metrics = nullptr);
 
     TcpConnection(const TcpConnection&) = delete;
     TcpConnection& operator=(const TcpConnection&) = delete;
@@ -119,9 +120,11 @@ private:
         Buffer input_buffer,
         Buffer output_buffer,
         std::size_t output_high_water_mark,
-        std::optional<std::chrono::steady_clock::duration> idle_timeout)
+        std::optional<std::chrono::steady_clock::duration> idle_timeout,
+        MetricsRegistry* metrics)
         noexcept;
 
+    void initialize_metrics() noexcept;
     void handle_read();
     void handle_write();
     void handle_error();
@@ -147,6 +150,10 @@ private:
     Buffer output_buffer_;
     const std::size_t output_high_water_mark_;
     const std::optional<std::chrono::steady_clock::duration> idle_timeout_;
+    MetricsRegistry* const metrics_{nullptr};
+    std::shared_ptr<Counter> closed_metric_;
+    std::shared_ptr<Counter> idle_timeout_metric_;
+    std::shared_ptr<Gauge> active_metric_;
 
     State state_{State::Connecting};
     std::optional<TimerId> idle_timer_;
@@ -156,6 +163,7 @@ private:
     bool close_after_write_requested_{false};
     bool write_shutdown_{false};
     bool close_notified_{false};
+    bool active_metric_counted_{false};
     bool high_water_above_{false};
     std::size_t logger_failure_count_{0U};
 

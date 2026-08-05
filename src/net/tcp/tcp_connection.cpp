@@ -13,11 +13,31 @@
 
 #include "../system_error.hpp"
 #include "iaisf/core/error.hpp"
+#include "iaisf/metrics/metrics.hpp"
 
 namespace iaisf::net::tcp {
 namespace {
 
 constexpr std::size_t kReadChunkSize = 64U * 1024U;
+
+template <typename Metric, typename Create, typename Get>
+std::shared_ptr<Metric> metric_or_existing(
+    Create&& create,
+    Get&& get) noexcept {
+    try {
+        auto created = create();
+        if (created) {
+            return created.value();
+        }
+        auto existing = get();
+        if (existing) {
+            return existing.value();
+        }
+    } catch (...) {
+        // Metrics are observational and never affect connection lifecycle.
+    }
+    return {};
+}
 
 }  // namespace
 
@@ -33,7 +53,8 @@ Result<TcpConnection::Ptr> TcpConnection::create(
     const std::size_t output_initial_capacity,
     const std::size_t output_maximum_capacity,
     const std::size_t output_high_water_mark,
-    const std::optional<std::chrono::steady_clock::duration> idle_timeout) {
+    const std::optional<std::chrono::steady_clock::duration> idle_timeout,
+    MetricsRegistry* const metrics) {
     if (!loop.is_in_loop_thread()) {
         return Result<Ptr>::failure(make_error(
             ErrorCode::InvalidState,
@@ -80,7 +101,7 @@ Result<TcpConnection::Ptr> TcpConnection::create(
     }
 
     try {
-        return Result<Ptr>::success(Ptr{new TcpConnection{
+        auto connection = Ptr{new TcpConnection{
             loop,
             logger,
             connection_id,
@@ -90,7 +111,10 @@ Result<TcpConnection::Ptr> TcpConnection::create(
             std::move(input_result).value(),
             std::move(output_result).value(),
             output_high_water_mark,
-            idle_timeout}});
+            idle_timeout,
+            metrics}};
+        connection->initialize_metrics();
+        return Result<Ptr>::success(std::move(connection));
     } catch (const std::bad_alloc&) {
         return Result<Ptr>::failure(make_error(
             ErrorCode::ResourceExhausted,
@@ -108,7 +132,8 @@ TcpConnection::TcpConnection(
     Buffer input_buffer,
     Buffer output_buffer,
     const std::size_t output_high_water_mark,
-    const std::optional<std::chrono::steady_clock::duration> idle_timeout)
+    const std::optional<std::chrono::steady_clock::duration> idle_timeout,
+    MetricsRegistry* const metrics)
     noexcept
     : loop_(loop),
       logger_(logger),
@@ -120,7 +145,23 @@ TcpConnection::TcpConnection(
       input_buffer_(std::move(input_buffer)),
       output_buffer_(std::move(output_buffer)),
       output_high_water_mark_(output_high_water_mark),
-      idle_timeout_(idle_timeout) {}
+      idle_timeout_(idle_timeout),
+      metrics_(metrics) {}
+
+void TcpConnection::initialize_metrics() noexcept {
+    if (metrics_ == nullptr) {
+        return;
+    }
+    closed_metric_ = metric_or_existing<Counter>(
+        [this] { return metrics_->create_counter("tcp_connections_closed_total"); },
+        [this] { return metrics_->get_counter("tcp_connections_closed_total"); });
+    idle_timeout_metric_ = metric_or_existing<Counter>(
+        [this] { return metrics_->create_counter("tcp_idle_timeout_total"); },
+        [this] { return metrics_->get_counter("tcp_idle_timeout_total"); });
+    active_metric_ = metric_or_existing<Gauge>(
+        [this] { return metrics_->create_gauge("tcp_connections_active"); },
+        [this] { return metrics_->get_gauge("tcp_connections_active"); });
+}
 
 TcpConnection::~TcpConnection() noexcept {
     if (channel_.is_registered()) {
@@ -263,6 +304,10 @@ Result<void> TcpConnection::connect_established() {
         return update_result;
     }
     state_ = State::Connected;
+    active_metric_counted_ = true;
+    if (active_metric_) {
+        active_metric_->increment();
+    }
 
     if (connection_callback_) {
         try {
@@ -300,6 +345,12 @@ Result<void> TcpConnection::connect_destroyed() {
 
     channel_.disable_all();
     state_ = State::Disconnected;
+    if (was_established && active_metric_counted_) {
+        active_metric_counted_ = false;
+        if (active_metric_) {
+            active_metric_->decrement();
+        }
+    }
     socket_.reset();
     const Ptr self = shared_from_this();
     if (was_established && connection_callback_) {
@@ -726,6 +777,9 @@ void TcpConnection::handle_idle_timeout(
     if (idle_generation_ != std::numeric_limits<std::uint64_t>::max()) {
         ++idle_generation_;
     }
+    if (idle_timeout_metric_) {
+        idle_timeout_metric_->increment();
+    }
     begin_close();
 }
 
@@ -747,8 +801,17 @@ void TcpConnection::begin_close() {
     cancel_idle_timeout();
     state_ = State::Disconnecting;
     close_notified_ = true;
+    if (closed_metric_) {
+        closed_metric_->increment();
+    }
     if (!close_callback_) {
         state_ = State::Disconnected;
+        if (active_metric_counted_) {
+            active_metric_counted_ = false;
+            if (active_metric_) {
+                active_metric_->decrement();
+            }
+        }
         socket_.reset();
         return;
     }

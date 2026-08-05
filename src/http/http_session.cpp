@@ -1,5 +1,7 @@
 #include "iaisf/http/http_session.hpp"
 
+#include "iaisf/metrics/metrics.hpp"
+
 #include <limits>
 #include <new>
 #include <string_view>
@@ -7,13 +9,37 @@
 
 namespace iaisf::http {
 
+namespace {
+
+template <typename Metric, typename Create, typename Get>
+std::shared_ptr<Metric> metric_or_existing(
+    Create&& create,
+    Get&& get) noexcept {
+    try {
+        auto created = create();
+        if (created) {
+            return created.value();
+        }
+        auto existing = get();
+        if (existing) {
+            return existing.value();
+        }
+    } catch (...) {
+        // Metrics are observational and never affect protocol behavior.
+    }
+    return {};
+}
+
+}  // namespace
+
 Result<HttpSession::Ptr> HttpSession::create(
     net::EventLoop& loop,
     const HttpRouter& router,
     HttpLimits limits,
     const ConnectionPtr& connection,
     std::optional<std::chrono::steady_clock::duration> header_timeout,
-    std::optional<std::chrono::steady_clock::duration> body_timeout) {
+    std::optional<std::chrono::steady_clock::duration> body_timeout,
+    MetricsRegistry* const metrics) {
     if (!loop.is_in_loop_thread()) {
         return Result<Ptr>::failure(make_error(
             ErrorCode::InvalidState,
@@ -37,14 +63,17 @@ Result<HttpSession::Ptr> HttpSession::create(
             "HTTP body timeout must be positive"));
     }
     try {
-        return Result<Ptr>::success(std::shared_ptr<HttpSession>{
+        auto session = std::shared_ptr<HttpSession>{
             new HttpSession{
                 loop,
                 router,
                 std::move(limits),
                 connection,
                 header_timeout,
-                body_timeout}});
+                body_timeout,
+                metrics}};
+        session->initialize_metrics();
+        return Result<Ptr>::success(std::move(session));
     } catch (const std::bad_alloc&) {
         return Result<Ptr>::failure(make_error(
             ErrorCode::ResourceExhausted,
@@ -58,14 +87,34 @@ HttpSession::HttpSession(
     HttpLimits limits,
     const ConnectionPtr& connection,
     std::optional<std::chrono::steady_clock::duration> header_timeout,
-    std::optional<std::chrono::steady_clock::duration> body_timeout)
+    std::optional<std::chrono::steady_clock::duration> body_timeout,
+    MetricsRegistry* const metrics)
     : loop_(loop),
       router_(router),
       limits_(std::move(limits)),
       parser_(limits_),
       connection_(connection),
       header_timeout_(header_timeout),
-      body_timeout_(body_timeout) {}
+      body_timeout_(body_timeout),
+      metrics_(metrics) {}
+
+void HttpSession::initialize_metrics() noexcept {
+    if (metrics_ == nullptr) {
+        return;
+    }
+    requests_metric_ = metric_or_existing<Counter>(
+        [this] { return metrics_->create_counter("http_requests_total"); },
+        [this] { return metrics_->get_counter("http_requests_total"); });
+    responses_metric_ = metric_or_existing<Counter>(
+        [this] { return metrics_->create_counter("http_responses_total"); },
+        [this] { return metrics_->get_counter("http_responses_total"); });
+    timeout_408_metric_ = metric_or_existing<Counter>(
+        [this] { return metrics_->create_counter("http_408_timeout_total"); },
+        [this] { return metrics_->get_counter("http_408_timeout_total"); });
+    parse_errors_metric_ = metric_or_existing<Counter>(
+        [this] { return metrics_->create_counter("http_parse_errors_total"); },
+        [this] { return metrics_->get_counter("http_parse_errors_total"); });
+}
 
 void HttpSession::on_message(
     const ConnectionPtr& connection,
@@ -165,6 +214,9 @@ void HttpSession::dispatch_available(
             return;
         }
         if (progress.disposition == ParseDisposition::Error) {
+            if (parse_errors_metric_) {
+                parse_errors_metric_->increment();
+            }
             input.retrieve_all();
             send_error(connection, progress.error_status);
             return;
@@ -177,6 +229,9 @@ void HttpSession::dispatch_available(
             return;
         }
         auto request = std::move(request_result).value();
+        if (requests_metric_) {
+            requests_metric_->increment();
+        }
         receive_state_ = ReceiveState::AwaitingRequest;
         auto response_result = router_.dispatch(request);
         if (!response_result) {
@@ -271,6 +326,9 @@ void HttpSession::send_response(
         close_without_response(connection);
         return;
     }
+    if (responses_metric_) {
+        responses_metric_->increment();
+    }
     if (close_after_response) {
         cancel_header_timeout();
         cancel_body_timeout();
@@ -298,6 +356,9 @@ void HttpSession::send_error(
     HttpResponse response;
     try {
         response = HttpResponse::error(status, true);
+        if (status == HttpStatus::RequestTimeout && timeout_408_metric_) {
+            timeout_408_metric_->increment();
+        }
     } catch (...) {
         close_without_response(connection);
         return;
@@ -313,6 +374,9 @@ void HttpSession::send_error(
     if (!send_result) {
         close_without_response(connection);
         return;
+    }
+    if (responses_metric_) {
+        responses_metric_->increment();
     }
     terminal_ = true;
     auto close_result = connection->close_after_write();

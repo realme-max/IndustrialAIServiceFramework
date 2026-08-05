@@ -839,6 +839,64 @@ Result<void> apply_logging_config(const Json &root, AppConfig &config) {
     return Result<void>::success();
 }
 
+Result<void> apply_metrics_config(const Json &root, AppConfig &config) {
+    if (!root.contains("metrics")) {
+        return Result<void>::success();
+    }
+    const Json& metrics = root.at("metrics");
+    auto object = require_object(metrics, "metrics");
+    if (!object) {
+        return object;
+    }
+    auto fields = reject_unknown_fields(
+        metrics, {"enabled", "endpoint"}, "metrics");
+    if (!fields) {
+        return fields;
+    }
+    if (metrics.contains("enabled")) {
+        if (!metrics.at("enabled").is_boolean()) {
+            return config_failure("metrics.enabled must be a boolean");
+        }
+        config.metrics.enabled = metrics.at("enabled").get<bool>();
+    }
+    if (metrics.contains("endpoint")) {
+        if (!metrics.at("endpoint").is_string()) {
+            return config_failure("metrics.endpoint must be a string");
+        }
+        config.metrics.endpoint = metrics.at("endpoint").get<std::string>();
+    }
+    return Result<void>::success();
+}
+
+Result<void> apply_diagnostics_config(const Json &root, AppConfig &config) {
+    if (!root.contains("diagnostics")) {
+        return Result<void>::success();
+    }
+    const Json& diagnostics = root.at("diagnostics");
+    auto object = require_object(diagnostics, "diagnostics");
+    if (!object) {
+        return object;
+    }
+    auto fields = reject_unknown_fields(
+        diagnostics, {"enabled", "endpoint"}, "diagnostics");
+    if (!fields) {
+        return fields;
+    }
+    if (diagnostics.contains("enabled")) {
+        if (!diagnostics.at("enabled").is_boolean()) {
+            return config_failure("diagnostics.enabled must be a boolean");
+        }
+        config.diagnostics.enabled = diagnostics.at("enabled").get<bool>();
+    }
+    if (diagnostics.contains("endpoint")) {
+        if (!diagnostics.at("endpoint").is_string()) {
+            return config_failure("diagnostics.endpoint must be a string");
+        }
+        config.diagnostics.endpoint = diagnostics.at("endpoint").get<std::string>();
+    }
+    return Result<void>::success();
+}
+
 Result<void> apply_legacy_flat_config(const Json &root, AppConfig &config) {
     if (root.contains("service_name")) {
         if (root.contains("service")) {
@@ -915,7 +973,7 @@ Result<AppConfig> parse_app_config(const std::string &contents) {
     auto top = reject_unknown_fields(root,
                                      {"schema_version", "service", "server",
                                       "http", "runtime", "tasks", "plugins",
-                                      "task_api", "logging", "service_name",
+                                      "task_api", "logging", "metrics", "diagnostics", "service_name",
                                       "worker_threads", "task_queue_capacity",
                                       "log_level"},
                                      "root");
@@ -934,7 +992,7 @@ Result<AppConfig> parse_app_config(const std::string &contents) {
         config.schema_version = static_cast<std::uint32_t>(version.value());
     }
 
-    const std::array<Result<void> (*)(const Json &, AppConfig &), 8U> appliers{{
+    const std::array<Result<void> (*)(const Json &, AppConfig &), 10U> appliers{{
         &apply_service_config,
         &apply_server_config,
         &apply_http_config,
@@ -943,6 +1001,8 @@ Result<AppConfig> parse_app_config(const std::string &contents) {
         &apply_plugin_config,
         &apply_task_api_config,
         &apply_logging_config,
+        &apply_metrics_config,
+        &apply_diagnostics_config,
     }};
     for (const auto apply : appliers) {
         auto result = apply(root, config);
@@ -990,6 +1050,8 @@ AppConfig default_app_config() {
         LoggingConfig{LogLevel::Info, 1024U, 32U, 64U, 1000U,
                       LoggingConsoleConfig{true},
                       LoggingFileConfig{false, {}, 10U * 1024U * 1024U, 3U}},
+        MetricsConfig{true, "/metrics"},
+        DiagnosticsConfig{false, "/debug/status"},
     };
 }
 
@@ -1060,6 +1122,37 @@ Result<void> validate_app_config(const AppConfig &config) {
             return config_failure(
                 "logging.file.path must be a non-empty path without control characters");
         }
+    }
+    if (config.metrics.endpoint.empty() ||
+        config.metrics.endpoint.size() > kMaxMetricsEndpointBytes ||
+        config.metrics.endpoint.front() != '/' ||
+        config.metrics.endpoint.find_first_of("?#\\") != std::string::npos ||
+        contains_control_character(config.metrics.endpoint)) {
+        return config_failure(
+            "metrics.endpoint must be a valid path of at most 128 bytes");
+    }
+    if (config.diagnostics.endpoint.empty() ||
+        config.diagnostics.endpoint.size() > kMaxDiagnosticsEndpointBytes ||
+        config.diagnostics.endpoint.front() != '/' ||
+        config.diagnostics.endpoint.find_first_of("?#\\") != std::string::npos ||
+        contains_control_character(config.diagnostics.endpoint)) {
+        return config_failure(
+            "diagnostics.endpoint must be a valid path of at most 128 bytes");
+    }
+    if (config.diagnostics.enabled &&
+        config.server.host.rfind("127.", 0U) != 0U) {
+        return config_failure(
+            "diagnostics must only be enabled on loopback server.host");
+    }
+    const auto reserved = [](const std::string& endpoint) {
+        return endpoint == "/health" || endpoint == "/ready" ||
+               endpoint == "/version" || endpoint == "/v1/tasks" ||
+               endpoint.rfind("/v1/tasks/", 0U) == 0U;
+    };
+    if (reserved(config.diagnostics.endpoint) ||
+        (config.metrics.enabled &&
+         config.diagnostics.endpoint == config.metrics.endpoint)) {
+        return config_failure("diagnostics endpoint conflicts with a service route");
     }
     return Result<void>::success();
 }

@@ -120,6 +120,25 @@ TEST(AppConfigTest, LoadsACompleteValidConfiguration) {
     EXPECT_EQ(result.value().logging.level, iaisf::LogLevel::Debug);
 }
 
+TEST(AppConfigTest, DiagnosticsAreDisabledByDefaultAndCanBeEnabledOnLoopback) {
+    const iaisf::AppConfig defaults = iaisf::default_app_config();
+    EXPECT_FALSE(defaults.diagnostics.enabled);
+    const ScopedConfigFile file{R"({
+        "server": {"host": "127.0.0.1"},
+        "diagnostics": {"enabled": true, "endpoint": "/debug/status"}
+    })"};
+    const auto result = iaisf::load_app_config(file.path());
+    ASSERT_TRUE(result) << result.error().message;
+    EXPECT_TRUE(result.value().diagnostics.enabled);
+}
+
+TEST(AppConfigTest, DiagnosticsRejectsUnknownFieldsAndNonLoopbackEnable) {
+    expect_config_error(R"({"diagnostics":{"unknown":true}})");
+    expect_config_error(R"({"diagnostics":{"enabled":true}})");
+    expect_config_error(R"({"server":{"host":"0.0.0.0"},"diagnostics":{"enabled":true}})");
+    expect_config_error(R"({"diagnostics":{"endpoint":"/bad?x"}})");
+}
+
 TEST(AppConfigTest, LoadsLegacyFlatConfiguration) {
     const ScopedConfigFile file{R"({
         "service_name": "legacy-service",

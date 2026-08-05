@@ -7,6 +7,7 @@
 
 #include "iaisf/core/result.hpp"
 #include "iaisf/logging/logger.hpp"
+#include "iaisf/metrics/metrics.hpp"
 #include "iaisf/task/task_executor.hpp"
 #include "iaisf/task/task_limits.hpp"
 #include "iaisf/task/task_repository.hpp"
@@ -67,13 +68,15 @@ public:
         ThreadPoolOptions pool_options,
         TaskLimits limits,
         ILogger& logger,
-        TaskHandler handler);
+        TaskHandler handler,
+        MetricsRegistry* metrics = nullptr);
     [[nodiscard]] static Result<std::unique_ptr<TaskManager>> create(
         ThreadPoolOptions pool_options,
         TaskLimits limits,
         ILogger& logger,
         TaskValidator validator,
-        TaskHandler handler);
+        TaskHandler handler,
+        MetricsRegistry* metrics = nullptr);
 
     TaskManager(
         ConstructionKey,
@@ -81,7 +84,8 @@ public:
         TaskLimits limits,
         ILogger& logger,
         TaskValidator validator,
-        TaskHandler handler);
+        TaskHandler handler,
+        MetricsRegistry* metrics = nullptr);
     ~TaskManager();
 
     TaskManager(const TaskManager&) = delete;
@@ -119,6 +123,7 @@ private:
     void finish_submission() noexcept;
     [[nodiscard]] TaskSubmitOutcome submit_admitted(
         const TaskRequest& request);
+    void initialize_metrics() noexcept;
 
     mutable std::mutex admission_mutex_;
     std::condition_variable submissions_finished_;
@@ -129,6 +134,8 @@ private:
     TaskRepository repository_;
     TaskExecutor executor_;
     std::unique_ptr<BoundedThreadPool> pool_;
+    MetricsRegistry* const metrics_{nullptr};
+    std::shared_ptr<Counter> submitted_metric_;
 };
 
 }  // namespace iaisf::task

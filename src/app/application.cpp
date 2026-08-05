@@ -35,7 +35,9 @@ void report_failure(std::ostream &output, const std::string_view category,
 }
 
 Result<std::unique_ptr<AsyncLogger>> create_runtime_logger(
-    const AppConfig &config, std::ostream &console_output) {
+    const AppConfig &config,
+    std::ostream &console_output,
+    MetricsRegistry* const metrics) {
     auto options = AsyncLoggerOptions::create(
         config.logging.queue_capacity,
         config.logging.reserved_critical_capacity,
@@ -85,7 +87,8 @@ Result<std::unique_ptr<AsyncLogger>> create_runtime_logger(
         return Result<std::unique_ptr<AsyncLogger>>::failure(
             make_error(ErrorCode::InternalError, "unable to initialize logging sinks"));
     }
-    return AsyncLogger::create(std::move(logger_options), std::move(sinks));
+    return AsyncLogger::create(
+        std::move(logger_options), std::move(sinks), metrics);
 }
 
 } // namespace
@@ -170,7 +173,8 @@ int Application::run_with_config(const std::string &path, const bool serve) {
                   << "serve mode requires the Linux service runtime\n";
     return kConfigurationExitCode;
 #else
-    auto logger_result = create_runtime_logger(config, output_);
+    auto logger_result = create_runtime_logger(
+        config, output_, &metrics_registry_);
     if (!logger_result) {
         report_failure(error_output_, "logging startup", logger_result.error());
         return kConfigurationExitCode;
@@ -181,7 +185,8 @@ int Application::run_with_config(const std::string &path, const bool serve) {
     service::RuntimeOptions runtime = std::move(runtime_result).value();
     auto loop_result = net::EventLoop::create(
         runtime_logger, runtime.reactor_max_events(),
-        runtime.pending_callback_capacity(), runtime.timer_options());
+        runtime.pending_callback_capacity(), runtime.timer_options(),
+        &metrics_registry_);
     if (!loop_result) {
         const auto shutdown = runtime_logger_->shutdown();
         runtime_logger_.reset();
@@ -193,7 +198,8 @@ int Application::run_with_config(const std::string &path, const bool serve) {
     }
     auto loop = std::move(loop_result).value();
     auto service_result = service::IndustrialAiService::create(
-        *loop, runtime_logger, runtime.bind_endpoint(), runtime.service_options());
+        *loop, runtime_logger, runtime.bind_endpoint(), runtime.service_options(),
+        runtime_logger_.get());
     if (!service_result) {
         loop.reset();
         const auto shutdown = runtime_logger_->shutdown();

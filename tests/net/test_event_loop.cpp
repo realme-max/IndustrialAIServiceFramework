@@ -22,6 +22,7 @@
 #include "iaisf/core/error.hpp"
 #include "iaisf/core/result.hpp"
 #include "iaisf/logging/logger.hpp"
+#include "iaisf/metrics/metrics.hpp"
 #include "iaisf/net/channel.hpp"
 #include "iaisf/net/epoll_poller.hpp"
 #include "iaisf/net/event_loop.hpp"
@@ -940,6 +941,47 @@ TEST(EventLoopTest, SaturatedEventfdCountsAsAnExistingWakeup) {
             sizeof(value)),
         -1);
     EXPECT_TRUE(errno == EAGAIN || errno == EWOULDBLOCK);
+}
+
+TEST(EventLoopTest, UpdatesRuntimeMetricsWithoutChangingShutdown) {
+    RecordingLogger logger;
+    iaisf::MetricsRegistry metrics;
+    auto create_result = iaisf::net::EventLoop::create(
+        logger, 16U, 8U, {}, &metrics);
+    ASSERT_TRUE(create_result);
+    auto loop = std::move(create_result).value();
+
+    auto iterations = metrics.get_counter("event_loop_iterations_total");
+    auto callbacks = metrics.get_counter(
+        "event_loop_callbacks_executed_total");
+    auto pending = metrics.get_gauge("event_loop_pending_callbacks");
+    auto channels = metrics.get_gauge("event_loop_channels_active");
+    ASSERT_TRUE(iterations);
+    ASSERT_TRUE(callbacks);
+    ASSERT_TRUE(pending);
+    ASSERT_TRUE(channels);
+    EXPECT_EQ(iterations.value()->snapshot(), 0U);
+    EXPECT_EQ(callbacks.value()->snapshot(), 0U);
+    EXPECT_EQ(pending.value()->snapshot(), 0);
+    EXPECT_EQ(channels.value()->snapshot(), 2);
+
+    bool callback_ran = false;
+    ASSERT_TRUE(loop->queue_in_loop([&callback_ran, &loop] {
+        callback_ran = true;
+        loop->stop();
+    }));
+    EXPECT_EQ(pending.value()->snapshot(), 1);
+
+    auto run_result = loop->run();
+    ASSERT_TRUE(run_result);
+    EXPECT_TRUE(callback_ran);
+    EXPECT_EQ(iterations.value()->snapshot(), 1U);
+    EXPECT_EQ(callbacks.value()->snapshot(), 1U);
+    EXPECT_EQ(pending.value()->snapshot(), 0);
+    EXPECT_EQ(loop->state(), iaisf::net::EventLoop::State::Stopped);
+
+    loop.reset();
+    EXPECT_EQ(channels.value()->snapshot(), 0);
 }
 
 }  // namespace

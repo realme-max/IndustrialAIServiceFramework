@@ -5,6 +5,7 @@
 #include <thread>
 #include <utility>
 
+#include "iaisf/config/app_config.hpp"
 #include "iaisf/core/error.hpp"
 
 namespace iaisf::service {
@@ -20,12 +21,16 @@ Result<void> validate_cross_limits(
     const task::ThreadPoolOptions pool,
     const task::TaskLimits& task,
     const plugin::PluginLimits& plugin,
-    const api::TaskApiLimits& api_options) {
+    const api::TaskApiLimits& api_options,
+    const bool metrics_enabled,
+    const bool diagnostics_enabled) {
     auto pool_valid = task::BoundedThreadPool::validate_options(pool);
     if (!pool_valid) {
         return pool_valid;
     }
-    if (http.max_routes() < 4U) {
+    const std::size_t required_routes = 5U +
+        (metrics_enabled ? 1U : 0U) + (diagnostics_enabled ? 1U : 0U);
+    if (http.max_routes() < required_routes) {
         return Result<void>::failure(make_error(
             ErrorCode::InvalidArgument,
             "HTTP route capacity cannot represent the required service routes"));
@@ -70,14 +75,19 @@ Result<ServiceOptions> ServiceOptions::create(
     const bool enable_echo,
     const bool enable_mock_vision,
     const std::optional<std::chrono::milliseconds> http_header_timeout,
-    const std::optional<std::chrono::milliseconds> http_body_timeout) {
+    const std::optional<std::chrono::milliseconds> http_body_timeout,
+    const bool metrics_enabled,
+    std::string metrics_endpoint,
+    const bool diagnostics_enabled,
+    std::string diagnostics_endpoint) {
     auto valid = validate_cross_limits(
         tcp_options,
         http_limits,
         pool_options,
         task_limits,
         plugin_limits,
-        api_limits);
+        api_limits,
+        metrics_enabled, diagnostics_enabled);
     if (!valid) {
         return Result<ServiceOptions>::failure(std::move(valid).error());
     }
@@ -89,6 +99,33 @@ Result<ServiceOptions> ServiceOptions::create(
             ErrorCode::InvalidArgument,
             "HTTP timeout values must be positive when enabled"));
     }
+    if (metrics_endpoint.empty() ||
+        metrics_endpoint.size() > kMaxMetricsEndpointBytes ||
+        metrics_endpoint.front() != '/' ||
+        metrics_endpoint.find_first_of("?#\\") != std::string::npos) {
+        return Result<ServiceOptions>::failure(make_error(
+            ErrorCode::InvalidArgument,
+            "metrics endpoint must be a valid path of at most 128 bytes"));
+    }
+    if (diagnostics_endpoint.empty() ||
+        diagnostics_endpoint.size() > kMaxDiagnosticsEndpointBytes ||
+        diagnostics_endpoint.front() != '/' ||
+        diagnostics_endpoint.find_first_of("?#\\") != std::string::npos) {
+        return Result<ServiceOptions>::failure(make_error(
+            ErrorCode::InvalidArgument,
+            "diagnostics endpoint must be a valid path of at most 128 bytes"));
+    }
+    const auto reserved = [](const std::string& endpoint) {
+        return endpoint == "/health" || endpoint == "/ready" ||
+               endpoint == "/version" || endpoint == "/v1/tasks" ||
+               endpoint.rfind("/v1/tasks/", 0U) == 0U;
+    };
+    if (reserved(diagnostics_endpoint) ||
+        (metrics_enabled && diagnostics_endpoint == metrics_endpoint)) {
+        return Result<ServiceOptions>::failure(make_error(
+            ErrorCode::InvalidArgument,
+            "diagnostics endpoint conflicts with a service route"));
+    }
     return Result<ServiceOptions>::success(ServiceOptions{
         std::move(tcp_options),
         std::move(http_limits),
@@ -99,7 +136,11 @@ Result<ServiceOptions> ServiceOptions::create(
         enable_echo,
         enable_mock_vision,
         http_header_timeout,
-        http_body_timeout});
+        http_body_timeout,
+        metrics_enabled,
+        std::move(metrics_endpoint),
+        diagnostics_enabled,
+        std::move(diagnostics_endpoint)});
 }
 
 Result<ServiceOptions> ServiceOptions::defaults() {
@@ -163,7 +204,11 @@ ServiceOptions::ServiceOptions(
     const bool enable_echo,
     const bool enable_mock_vision,
     const std::optional<std::chrono::milliseconds> http_header_timeout,
-    const std::optional<std::chrono::milliseconds> http_body_timeout) noexcept
+    const std::optional<std::chrono::milliseconds> http_body_timeout,
+    const bool metrics_enabled,
+    std::string metrics_endpoint,
+    const bool diagnostics_enabled,
+    std::string diagnostics_endpoint) noexcept
     : tcp_options_(std::move(tcp_options)),
       http_limits_(std::move(http_limits)),
       pool_options_(pool_options),
@@ -173,7 +218,11 @@ ServiceOptions::ServiceOptions(
       enable_echo_(enable_echo),
       enable_mock_vision_(enable_mock_vision),
       http_header_timeout_(http_header_timeout),
-      http_body_timeout_(http_body_timeout) {}
+      http_body_timeout_(http_body_timeout),
+      metrics_enabled_(metrics_enabled),
+      metrics_endpoint_(std::move(metrics_endpoint)),
+      diagnostics_enabled_(diagnostics_enabled),
+      diagnostics_endpoint_(std::move(diagnostics_endpoint)) {}
 
 const net::tcp::TcpServerOptions& ServiceOptions::tcp_options() const noexcept {
     return tcp_options_;
@@ -208,6 +257,22 @@ ServiceOptions::http_header_timeout() const noexcept {
 std::optional<std::chrono::milliseconds>
 ServiceOptions::http_body_timeout() const noexcept {
     return http_body_timeout_;
+}
+
+bool ServiceOptions::metrics_enabled() const noexcept {
+    return metrics_enabled_;
+}
+
+const std::string& ServiceOptions::metrics_endpoint() const noexcept {
+    return metrics_endpoint_;
+}
+
+bool ServiceOptions::diagnostics_enabled() const noexcept {
+    return diagnostics_enabled_;
+}
+
+const std::string& ServiceOptions::diagnostics_endpoint() const noexcept {
+    return diagnostics_endpoint_;
 }
 
 }  // namespace iaisf::service
