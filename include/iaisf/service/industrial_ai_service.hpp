@@ -12,7 +12,7 @@
 #include "iaisf/logging/log_diagnostics.hpp"
 #include "iaisf/net/event_loop.hpp"
 #include "iaisf/net/tcp/ipv4_endpoint.hpp"
-#include "iaisf/plugin/plugin_manager.hpp"
+#include "iaisf/plugin/plugin_runtime.hpp"
 #include "iaisf/plugin/plugin_task_adapter.hpp"
 #include "iaisf/service/service_options.hpp"
 #include "iaisf/task/task_manager.hpp"
@@ -20,13 +20,15 @@
 namespace iaisf::service {
 
 /**
- * Linux owner-thread composition root for HTTP, tasks, and static plugins.
+ * Linux owner-thread composition root for HTTP, tasks, and the in-process
+ * PluginRuntime.
  *
  * EventLoop and ILogger are borrowed. start()/stop() are owner-thread-only;
  * creation installs the process-wide SIGINT/SIGTERM shutdown callback on the
  * EventLoop. stop first closes HTTP admission, then drains and joins
  * TaskManager. It does not stop the externally owned EventLoop; the signal
- * callback invokes this stop flow before EventLoop::stop().
+ * callback invokes this stop flow before EventLoop::stop(). PluginRuntime is
+ * kept Frozen while TaskManager drains and is shut down afterwards.
  */
 class IndustrialAiService final {
     struct ConstructionKey {
@@ -70,7 +72,7 @@ public:
         ConstructionKey,
         net::EventLoop& loop,
         ILogger& logger,
-        std::shared_ptr<plugin::PluginManager> plugin_manager,
+        std::shared_ptr<plugin::PluginRuntime> plugin_runtime,
         std::shared_ptr<plugin::PluginTaskAdapter> plugin_adapter,
         std::unique_ptr<task::TaskManager> task_manager,
         api::TaskHttpApi::Ptr task_api,
@@ -101,7 +103,7 @@ private:
     ILogger& logger_;
 
     // Reverse destruction order is part of the lifetime contract.
-    std::shared_ptr<plugin::PluginManager> plugin_manager_;
+    std::shared_ptr<plugin::PluginRuntime> plugin_runtime_;
     std::shared_ptr<plugin::PluginTaskAdapter> plugin_adapter_;
     std::unique_ptr<task::TaskManager> task_manager_;
     api::TaskHttpApi::Ptr task_api_;

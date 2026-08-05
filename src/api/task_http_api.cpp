@@ -118,6 +118,41 @@ Result<HttpResponse> api_error(
 
 Result<TaskHttpApi::Ptr> TaskHttpApi::create(
     task::TaskManager& task_manager,
+    const plugin::PluginRuntime& plugin_runtime,
+    task::TaskLimits task_limits,
+    http::HttpLimits http_limits,
+    TaskApiLimits api_limits) {
+    if (!plugin_runtime.frozen()) {
+        return Result<Ptr>::failure(make_error(
+            ErrorCode::InvalidArgument,
+            "task API requires a frozen plugin runtime"));
+    }
+    auto capacity = validate_task_api_capacity(
+        task_limits,
+        plugin_runtime.limits(),
+        http_limits,
+        api_limits);
+    if (!capacity) {
+        return Result<Ptr>::failure(std::move(capacity).error());
+    }
+    try {
+        return Result<Ptr>::success(std::shared_ptr<TaskHttpApi>{
+            new TaskHttpApi{
+                ConstructionKey{},
+                task_manager,
+                plugin_runtime,
+                std::move(task_limits),
+                std::move(http_limits),
+                std::move(api_limits)}});
+    } catch (const std::bad_alloc&) {
+        return Result<Ptr>::failure(make_error(
+            ErrorCode::ResourceExhausted,
+            "unable to allocate task HTTP API"));
+    }
+}
+
+Result<TaskHttpApi::Ptr> TaskHttpApi::create(
+    task::TaskManager& task_manager,
     const plugin::PluginManager& plugin_manager,
     task::TaskLimits task_limits,
     http::HttpLimits http_limits,
@@ -154,12 +189,25 @@ Result<TaskHttpApi::Ptr> TaskHttpApi::create(
 TaskHttpApi::TaskHttpApi(
     ConstructionKey,
     task::TaskManager& task_manager,
+    const plugin::PluginRuntime& plugin_runtime,
+    task::TaskLimits task_limits,
+    http::HttpLimits http_limits,
+    TaskApiLimits api_limits) noexcept
+    : task_manager_(task_manager),
+      plugin_runtime_(&plugin_runtime),
+      task_limits_(std::move(task_limits)),
+      http_limits_(std::move(http_limits)),
+      api_limits_(std::move(api_limits)) {}
+
+TaskHttpApi::TaskHttpApi(
+    ConstructionKey,
+    task::TaskManager& task_manager,
     const plugin::PluginManager& plugin_manager,
     task::TaskLimits task_limits,
     http::HttpLimits http_limits,
     TaskApiLimits api_limits) noexcept
     : task_manager_(task_manager),
-      plugin_manager_(plugin_manager),
+      plugin_manager_(&plugin_manager),
       task_limits_(std::move(task_limits)),
       http_limits_(std::move(http_limits)),
       api_limits_(std::move(api_limits)) {}
@@ -283,9 +331,13 @@ Result<HttpResponse> TaskHttpApi::submit_task(
             http_limits_);
     }
 
-    auto plugin_validation = plugin_manager_.validate(
-        task_request.operation,
-        task_request.input);
+    auto plugin_validation = plugin_runtime_ != nullptr
+                                 ? plugin_runtime_->validate(
+                                       task_request.operation,
+                                       task_request.input)
+                                 : plugin_manager_->validate(
+                                       task_request.operation,
+                                       task_request.input);
     if (!plugin_validation) {
         if (plugin_validation.error().code == ErrorCode::NotFound) {
             return api_error(

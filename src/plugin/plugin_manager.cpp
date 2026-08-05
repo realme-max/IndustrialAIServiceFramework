@@ -79,6 +79,18 @@ Result<void> PluginManager::register_plugin(
             fixed_internal_error("plugin metadata validation failed"));
     }
 
+    return register_plugin_with_validated_metadata(
+        std::move(plugin), std::move(metadata));
+}
+
+Result<void> PluginManager::register_plugin_with_validated_metadata(
+    std::shared_ptr<const IAlgorithmPlugin> plugin,
+    PluginMetadata metadata) {
+    if (!plugin) {
+        return Result<void>::failure(bounded_error(
+            ErrorCode::InvalidArgument,
+            "plugin must not be null"));
+    }
     try {
         std::lock_guard<std::mutex> lock(mutex_);
         if (frozen_) {
@@ -121,6 +133,39 @@ Result<void> PluginManager::register_plugin(
     } catch (...) {
         return Result<void>::failure(
             fixed_internal_error("plugin registration failed"));
+    }
+}
+
+Result<void> PluginManager::validate_registration_slot(
+    const std::string_view operation) const {
+    try {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (frozen_) {
+            return Result<void>::failure(bounded_error(
+                ErrorCode::InvalidState,
+                "plugin registry is frozen"));
+        }
+        if (registry_.find(std::string(operation)) != registry_.end()) {
+            return Result<void>::failure(bounded_error(
+                ErrorCode::InvalidState,
+                "plugin operation is already registered"));
+        }
+        if (registry_.size() >= limits_.max_plugins()) {
+            return Result<void>::failure(bounded_error(
+                ErrorCode::ResourceExhausted,
+                "plugin registry capacity is exhausted"));
+        }
+        return Result<void>::success();
+    } catch (const std::bad_alloc&) {
+        return Result<void>::failure(bounded_error(
+            ErrorCode::ResourceExhausted,
+            "unable to inspect plugin registry"));
+    } catch (const std::exception&) {
+        return Result<void>::failure(
+            fixed_internal_error("unable to inspect plugin registry"));
+    } catch (...) {
+        return Result<void>::failure(
+            fixed_internal_error("unable to inspect plugin registry"));
     }
 }
 

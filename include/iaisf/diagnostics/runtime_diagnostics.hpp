@@ -4,11 +4,13 @@
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <vector>
 
 #include "iaisf/core/result.hpp"
 #include "iaisf/health/health_checker.hpp"
 #include "iaisf/logging/log_diagnostics.hpp"
 #include "iaisf/metrics/metrics.hpp"
+#include "iaisf/plugin/plugin_runtime.hpp"
 #include "iaisf/task/task_manager.hpp"
 
 namespace iaisf::diagnostics {
@@ -34,10 +36,21 @@ struct LoggerDiagnostics {
     std::uint64_t sink_failures{0U};
 };
 
+struct PluginRuntimeDiagnosticsSnapshot {
+    bool available{false};
+    plugin::PluginRuntimeState state{plugin::PluginRuntimeState::Stopped};
+    std::size_t registered_count{0U};
+    std::size_t active_executions{0U};
+    std::size_t managed_plugins{0U};
+    bool shutdown_failed{false};
+    std::vector<plugin::PluginEntrySnapshot> entries;
+};
+
 struct RuntimeDiagnosticsSnapshot {
     health::HealthStatus health;
     TaskDiagnostics tasks;
     LoggerDiagnostics logger;
+    PluginRuntimeDiagnosticsSnapshot plugins;
     MetricsSnapshot metrics;
 };
 
@@ -48,13 +61,15 @@ public:
         std::shared_ptr<const health::HealthChecker> health_checker,
         const task::TaskManager& task_manager,
         const MetricsRegistry& metrics,
-        const ILogDiagnostics* logger = nullptr);
+        const ILogDiagnostics* logger = nullptr,
+        std::weak_ptr<const plugin::PluginRuntime> plugin_runtime = {});
 
     RuntimeDiagnostics(
         std::shared_ptr<const health::HealthChecker> health_checker,
         const task::TaskManager& task_manager,
         const MetricsRegistry& metrics,
-        const ILogDiagnostics* logger) noexcept;
+        const ILogDiagnostics* logger,
+        std::weak_ptr<const plugin::PluginRuntime> plugin_runtime) noexcept;
 
     [[nodiscard]] Result<RuntimeDiagnosticsSnapshot> snapshot() const;
 
@@ -63,6 +78,7 @@ private:
     const task::TaskManager& task_manager_;
     const MetricsRegistry& metrics_;
     const ILogDiagnostics* const logger_{nullptr};
+    std::weak_ptr<const plugin::PluginRuntime> plugin_runtime_;
 };
 
 /** Produces bounded JSON without exposing task payloads or log text. */

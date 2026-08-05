@@ -4,6 +4,7 @@
 
 #include "iaisf/core/result.hpp"
 #include "iaisf/plugin/plugin_manager.hpp"
+#include "iaisf/plugin/plugin_runtime.hpp"
 #include "iaisf/task/task_types.hpp"
 
 namespace iaisf::plugin {
@@ -26,6 +27,8 @@ class PluginTaskAdapter {
 public:
     [[nodiscard]] static Result<std::shared_ptr<PluginTaskAdapter>> create(
         std::shared_ptr<PluginManager> manager);
+    [[nodiscard]] static Result<std::shared_ptr<PluginTaskAdapter>> create(
+        std::shared_ptr<PluginRuntime> runtime);
 
     PluginTaskAdapter(const PluginTaskAdapter&) = delete;
     PluginTaskAdapter& operator=(const PluginTaskAdapter&) = delete;
@@ -35,6 +38,9 @@ public:
     PluginTaskAdapter(
         ConstructionKey,
         std::shared_ptr<PluginManager> manager);
+    PluginTaskAdapter(
+        ConstructionKey,
+        std::shared_ptr<PluginRuntime> runtime);
 
     [[nodiscard]] Result<void> validate_task(
         const task::TaskRequest& request) const;
@@ -46,6 +52,7 @@ public:
 
 private:
     std::shared_ptr<const PluginManager> manager_;
+    std::shared_ptr<const PluginRuntime> runtime_;
 };
 
 }  // namespace iaisf::plugin

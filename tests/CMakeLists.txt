@@ -1,3 +1,5 @@
+enable_language(C)
+
 add_executable(
   iaisf_tests
   test_app_config.cpp
@@ -215,7 +217,9 @@ add_executable(
   plugin/test_plugin_limits.cpp
   plugin/test_plugin_manager.cpp
   plugin/test_plugin_metadata.cpp
+  plugin/test_plugin_abi.cpp
   plugin/test_plugin_task_adapter.cpp
+  plugin/test_plugin_runtime.cpp
 )
 target_compile_features(iaisf_plugin_tests PRIVATE cxx_std_17)
 target_link_libraries(
@@ -233,7 +237,29 @@ set_tests_properties(
   ${IAISF_PLUGIN_TESTS}
   PROPERTIES
     LABELS "unit;plugin"
-    TIMEOUT 10
+  TIMEOUT 10
+)
+
+add_executable(iaisf_plugin_abi_c_include plugin/test_plugin_abi_c.c)
+set_target_properties(
+  iaisf_plugin_abi_c_include
+  PROPERTIES
+    C_STANDARD 11
+    C_STANDARD_REQUIRED YES
+    C_EXTENSIONS OFF
+)
+target_include_directories(
+  iaisf_plugin_abi_c_include
+  PRIVATE
+    "${PROJECT_SOURCE_DIR}/include"
+)
+add_test(
+  NAME iaisf_plugin_abi_c_include
+  COMMAND iaisf_plugin_abi_c_include
+)
+set_tests_properties(
+  iaisf_plugin_abi_c_include
+  PROPERTIES LABELS "unit;plugin" TIMEOUT 10
 )
 
 add_executable(

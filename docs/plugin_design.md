@@ -420,3 +420,139 @@ Service 只借用静态 PluginManager/TaskManager，不改变 Phase 6 插件契�
 ## Phase 7G 封板同步
 
 最终 push run 30781932731 对应 `a44b1272bf603a17724fa17c66d60ee0e18bb918`，Debug/Release 均 `497/497`，Plugin 92、Task 99 实际执行，项目源码与测试 warning 均为 0。静态注册、并发插件调用、输入快照、双重校验和错误安全规范化契约保持不变；动态 `.so`、真实模型/GPU 和常驻 CLI 仍未实现。Phase 7 状态为 `PHASE_7_SERVICE_INTEGRATION_COMPLETED`，尚未执行 50 次重复稳定性测试。
+## Phase 8G-1 PluginRuntime lifecycle
+
+Phase 8G-1 adds an in-process `PluginRuntime` around the existing static
+registry. Dynamic `.so`/DLL loading, C ABI, hot reload and process isolation
+remain outside this phase.
+
+The runtime state machine is `Configuring -> Frozen -> Draining -> Stopped`;
+`Failed` is fail-closed. Registration validates metadata and reserves a
+duplicate/capacity-free slot before initializing an optional
+`IManagedAlgorithmPlugin`; the registry entry is published only after the
+transaction succeeds. A failed initialization or publish rolls back the
+current lifecycle object without changing earlier registrations. Managed
+plugins shut down in reverse initialization order, and all lifecycle errors
+are normalized.
+
+`PluginExecutionLease` keeps the plugin handle alive and increments an active
+invocation count. Draining rejects new validation/execution calls and waits
+for all leases before invoking plugin shutdown. `IndustrialAiService` closes
+HTTP admission and joins `TaskManager` before shutting down `PluginRuntime`;
+the runtime does not own or reference TaskManager, HTTP, EventLoop or TCP.
+
+`PluginManager` remains the registry implementation owned by the runtime, and
+the old `PluginTaskAdapter`/`TaskHttpApi` overloads remain compatibility entry
+points for existing callers. Service composition uses the runtime overloads;
+there is no second registry. Dynamic loading and plugin diagnostics export
+remain outside this phase.
+
+Implementation status: `PHASE_8G_1_PLUGIN_RUNTIME_LIFECYCLE_IMPLEMENTED`.
+
+## Phase 8G-2A PluginRuntime metrics
+
+`PluginRuntime::create` accepts an optional borrowed `MetricsRegistry*`.
+Application owns the registry; the runtime stores no ownership and remains
+usable without metrics. Service composition passes the Application-owned
+registry through `EventLoop::metrics_registry()`.
+
+The runtime registers a fixed, label-free metric set: registration,
+initialization, validation, execution and shutdown counters; registered,
+active-execution and numeric-state gauges; and validation/execution duration
+histograms. Metric creation is best effort and type/name conflicts disable only
+the affected metric handle. Every update is observational and cannot change
+plugin registration, validation, execution or shutdown outcomes. No operation
+labels or dynamic metric names are created.
+
+`plugin_runtime_active_executions` follows execution lease ownership and
+returns to zero when the final lease is released. `plugin_runtime_state` maps
+Configuring/Frozen/Draining/Stopped/Failed to stable numeric values. The
+registered gauge counts successfully published entries; it is not decremented
+by shutdown because registry publication is still the runtime's durable
+registration fact. Histogram samples record elapsed seconds for every call,
+including failed calls.
+
+The metrics tests use promises/condition variables and verify lifecycle counts,
+active-lease transitions, and that registry failures never alter plugin
+execution. No HTTP/TCP/Task execution semantics or dynamic loader behavior is
+changed.
+
+Implementation status:
+`PHASE_8G_2A_PLUGIN_RUNTIME_METRICS_IMPLEMENTED`.
+
+## Phase 8G-2B per-entry lifecycle observation
+
+Each accepted operation has a runtime-owned observation entry with its
+operation, metadata copy, managed-lifecycle flag, lifecycle state, active
+execution count, and shutdown-failure bit. Entry states are
+`Registered -> Initializing -> Ready -> Draining -> Stopped`; initialization
+or registration rollback failures become `Failed`. Failed entries remain
+observable until a subsequent registration replaces that failed observation,
+or until the runtime is destroyed.
+
+`PluginExecutionLease` holds both the copied plugin handle and a shared entry
+observation. While the lease is alive, the runtime-wide and entry-local active
+counts are incremented; release decrements both under the runtime lifecycle
+lock. Plugin code never runs while the registry lock is held. Entry snapshots
+are independent copies and can be read concurrently with execution.
+
+Shutdown first marks ready entries `Draining`, rejects new leases, waits for
+all runtime leases (including their entry leases), invokes managed shutdown
+hooks in reverse initialization order, clears lifecycle ownership, and marks
+entries `Stopped`. A returned shutdown error sets that entry's
+`shutdown_failed` bit while keeping the runtime terminal and exception text
+sanitized. Repeated shutdown remains idempotent.
+
+The public observation API is `entry_snapshot(operation)` and
+`entry_snapshots()`. It exposes no plugin object or mutable registry state.
+Dynamic loading, C ABI boundaries, and HTTP plugin APIs remain out of scope.
+
+Implementation status:
+`PHASE_8G_2B_PLUGIN_ENTRY_LIFECYCLE_IMPLEMENTED`.
+
+## Phase 8G-2C PluginRuntime diagnostics integration
+
+`RuntimeDiagnostics` observes the service-owned `PluginRuntime` through a
+`std::weak_ptr<const PluginRuntime>`. A snapshot therefore never extends the
+runtime lifetime and contains only copied metadata: runtime state, registration
+and active-lease counts, managed-plugin count, shutdown-failure status, and
+per-entry operation/version/state/managed/active-execution fields. Plugin
+handles, paths, configuration, exception text, and request or result payloads
+are intentionally absent.
+
+The diagnostics JSON keeps entries in deterministic operation order. An expired
+runtime is represented by `plugins.available=false` with an empty entry list;
+the existing `GET /debug/status` route and response-size fail-closed behavior
+are unchanged. `POST /debug/status` remains a method mismatch (405), and no
+new route or metric is introduced.
+
+Implementation status:
+`PHASE_8G_2C_PLUGIN_RUNTIME_DIAGNOSTICS_IMPLEMENTED`.
+
+## Phase 8G-3 stable C ABI contract
+
+The C ABI is an independent compatibility boundary in
+`include/iaisf/plugin/abi/plugin_abi.h`. It is pure C11-compatible and uses
+only fixed-width integers, `size_t`, pointer/length views, opaque instance
+handles, and function pointers. Every public table carries an ABI version and
+`struct_size`; older hosts can therefore validate a minimum prefix while
+future fields are appended.
+
+Version 1 defines metadata, host services (logging and allocation), and the
+plugin callbacks `get_metadata`, `create`, `validate`, `execute`, `shutdown`,
+and `destroy`. Execution returns bytes through a host-owned output callback,
+so no allocator or C runtime ownership crosses the boundary. Callback status
+codes are explicit and no exception or RTTI contract exists at the C edge.
+
+`AbiPluginAdapter` is the host-side bridge to the existing
+`IAlgorithmPlugin`/`IManagedAlgorithmPlugin` interfaces. It validates ABI
+headers, required callbacks, metadata and configured byte limits, snapshots
+metadata, serializes JSON input, collects bounded JSON output, and keeps
+execution concurrent while shutdown takes an exclusive lifecycle lock. The
+adapter owns the opaque instance only after a successful `create`, invokes
+`shutdown` once, and invokes `destroy` during final destruction. It does not
+load shared libraries; `dlopen`, `LoadLibrary`, search paths, hot reload and
+HTTP plugin APIs remain unimplemented.
+
+Implementation status:
+`PHASE_8G_3_STABLE_C_ABI_CONTRACT_IMPLEMENTED`.

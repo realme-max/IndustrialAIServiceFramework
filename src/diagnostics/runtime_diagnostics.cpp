@@ -1,5 +1,6 @@
 #include "iaisf/diagnostics/runtime_diagnostics.hpp"
 
+#include <algorithm>
 #include <new>
 #include <utility>
 
@@ -26,13 +27,50 @@ const char* logger_state_name(const LogDiagnosticsState state) noexcept {
     return "stopped";
 }
 
+const char* plugin_runtime_state_name(
+    const plugin::PluginRuntimeState state) noexcept {
+    switch (state) {
+    case plugin::PluginRuntimeState::Configuring:
+        return "configuring";
+    case plugin::PluginRuntimeState::Frozen:
+        return "frozen";
+    case plugin::PluginRuntimeState::Draining:
+        return "draining";
+    case plugin::PluginRuntimeState::Stopped:
+        return "stopped";
+    case plugin::PluginRuntimeState::Failed:
+        return "failed";
+    }
+    return "failed";
+}
+
+const char* plugin_entry_state_name(
+    const plugin::PluginEntryState state) noexcept {
+    switch (state) {
+    case plugin::PluginEntryState::Registered:
+        return "registered";
+    case plugin::PluginEntryState::Initializing:
+        return "initializing";
+    case plugin::PluginEntryState::Ready:
+        return "ready";
+    case plugin::PluginEntryState::Draining:
+        return "draining";
+    case plugin::PluginEntryState::Stopped:
+        return "stopped";
+    case plugin::PluginEntryState::Failed:
+        return "failed";
+    }
+    return "failed";
+}
+
 } // namespace
 
 Result<std::shared_ptr<RuntimeDiagnostics>> RuntimeDiagnostics::create(
     std::shared_ptr<const health::HealthChecker> health_checker,
     const task::TaskManager& task_manager,
     const MetricsRegistry& metrics,
-    const ILogDiagnostics* const logger) {
+    const ILogDiagnostics* const logger,
+    std::weak_ptr<const plugin::PluginRuntime> plugin_runtime) {
     if (!health_checker) {
         return Result<std::shared_ptr<RuntimeDiagnostics>>::failure(
             make_error(ErrorCode::InvalidArgument,
@@ -42,7 +80,8 @@ Result<std::shared_ptr<RuntimeDiagnostics>> RuntimeDiagnostics::create(
         return Result<std::shared_ptr<RuntimeDiagnostics>>::success(
             std::make_shared<RuntimeDiagnostics>(std::move(health_checker),
                                                   task_manager, metrics,
-                                                  logger));
+                                                  logger,
+                                                  std::move(plugin_runtime)));
     } catch (const std::bad_alloc&) {
         return Result<std::shared_ptr<RuntimeDiagnostics>>::failure(
             make_error(ErrorCode::ResourceExhausted,
@@ -58,11 +97,13 @@ RuntimeDiagnostics::RuntimeDiagnostics(
     std::shared_ptr<const health::HealthChecker> health_checker,
     const task::TaskManager& task_manager,
     const MetricsRegistry& metrics,
-    const ILogDiagnostics* const logger) noexcept
+    const ILogDiagnostics* const logger,
+    std::weak_ptr<const plugin::PluginRuntime> plugin_runtime) noexcept
     : health_checker_(std::move(health_checker)),
       task_manager_(task_manager),
       metrics_(metrics),
-      logger_(logger) {}
+      logger_(logger),
+      plugin_runtime_(std::move(plugin_runtime)) {}
 
 Result<RuntimeDiagnosticsSnapshot> RuntimeDiagnostics::snapshot() const {
     try {
@@ -85,6 +126,25 @@ Result<RuntimeDiagnosticsSnapshot> RuntimeDiagnostics::snapshot() const {
             result.logger.dropped = log.dropped;
             result.logger.rejected_after_shutdown = log.rejected_after_shutdown;
             result.logger.sink_failures = log.sink_failures;
+        }
+        if (const auto runtime = plugin_runtime_.lock()) {
+            result.plugins.available = true;
+            result.plugins.state = runtime->state();
+            result.plugins.registered_count = runtime->size();
+            result.plugins.active_executions =
+                runtime->active_execution_count();
+            auto entries = runtime->entry_snapshots();
+            if (entries) {
+                result.plugins.entries = std::move(entries).value();
+                for (const auto& entry : result.plugins.entries) {
+                    result.plugins.managed_plugins +=
+                        entry.managed_lifecycle ? 1U : 0U;
+                    result.plugins.shutdown_failed =
+                        result.plugins.shutdown_failed || entry.shutdown_failed;
+                }
+            } else {
+                result.plugins.available = false;
+            }
         }
         auto metrics = metrics_.snapshot();
         if (!metrics) {
@@ -133,6 +193,28 @@ Result<std::string> to_json(const RuntimeDiagnosticsSnapshot& snapshot,
                             {"rejected_after_shutdown",
                              snapshot.logger.rejected_after_shutdown},
                             {"sink_failures", snapshot.logger.sink_failures}};
+        Json plugin_entries = Json::array();
+        auto entries = snapshot.plugins.entries;
+        std::sort(entries.begin(), entries.end(),
+                  [](const auto& left, const auto& right) {
+                      return left.operation < right.operation;
+                  });
+        for (const auto& entry : entries) {
+            plugin_entries.push_back({
+                {"operation", entry.operation},
+                {"version", entry.metadata.version},
+                {"state", plugin_entry_state_name(entry.state)},
+                {"managed", entry.managed_lifecycle},
+                {"active_executions", entry.active_execution_count}});
+        }
+        root["plugins"] = {
+            {"available", snapshot.plugins.available},
+            {"state", plugin_runtime_state_name(snapshot.plugins.state)},
+            {"registered_count", snapshot.plugins.registered_count},
+            {"active_executions", snapshot.plugins.active_executions},
+            {"managed_plugins", snapshot.plugins.managed_plugins},
+            {"shutdown_failed", snapshot.plugins.shutdown_failed},
+            {"entries", std::move(plugin_entries)}};
         Json counters = Json::array();
         for (const auto& value : snapshot.metrics.counters) {
             counters.push_back({{"name", value.name}, {"value", value.value}});

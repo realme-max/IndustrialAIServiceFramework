@@ -10,13 +10,16 @@ namespace iaisf::plugin {
  * It does not read images or point clouds and does not run a model, GPU,
  * OpenCV, PCL, or TensorRT.
  */
-class MockVisionPlugin final : public IAlgorithmPlugin {
+class MockVisionPlugin final : public IAlgorithmPlugin,
+                               public IManagedAlgorithmPlugin {
 public:
     [[nodiscard]] PluginMetadata metadata() const override;
     [[nodiscard]] Result<void> validate_input(
         const nlohmann::json& input) const override;
     [[nodiscard]] Result<nlohmann::json> execute(
         const nlohmann::json& input) const override;
+    [[nodiscard]] Result<void> initialize() override;
+    [[nodiscard]] Result<void> shutdown() override;
 };
 
 }  // namespace iaisf::plugin

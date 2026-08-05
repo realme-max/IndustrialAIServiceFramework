@@ -221,4 +221,12 @@ Result<nlohmann::json> MockVisionPlugin::execute(
     }
 }
 
+Result<void> MockVisionPlugin::initialize() {
+    return Result<void>::success();
+}
+
+Result<void> MockVisionPlugin::shutdown() {
+    return Result<void>::success();
+}
+
 }  // namespace iaisf::plugin
