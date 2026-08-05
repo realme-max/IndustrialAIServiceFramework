@@ -1,8 +1,11 @@
 #pragma once
 
 #include <ostream>
+#include <memory>
 #include <string>
 #include <vector>
+
+#include "iaisf/logging/async_logger.hpp"
 
 namespace iaisf {
 
@@ -10,11 +13,7 @@ class Application {
 public:
     Application(std::ostream& output, std::ostream& error_output);
 
-    /**
-     * Runs the Phase 1 command-line application.
-     *
-     * args contains command-line arguments excluding the executable name.
-     */
+    /** Runs the command-line application; args excludes executable name. */
     int run(const std::vector<std::string>& args);
 
     [[nodiscard]] static std::string version_text();
@@ -26,7 +25,8 @@ private:
 
     std::ostream& output_;
     std::ostream& error_output_;
+    // Runtime logging is owned by the application and outlives the service.
+    std::unique_ptr<AsyncLogger> runtime_logger_;
 };
 
 }  // namespace iaisf
-

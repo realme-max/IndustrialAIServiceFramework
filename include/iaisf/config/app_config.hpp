@@ -15,6 +15,11 @@ inline constexpr std::size_t kMaxConfigurationFileBytes = 1024U * 1024U;
 inline constexpr std::size_t kMaxServiceNameLength = 128U;
 inline constexpr std::size_t kMaxWorkerThreads = 256U;
 inline constexpr std::size_t kMaxTaskQueueCapacity = 1'000'000U;
+inline constexpr std::size_t kMaxLogQueueCapacity = 1'000'000U;
+inline constexpr std::size_t kMaxLogBatchSize = 1'000'000U;
+inline constexpr std::uint64_t kMaxLogFlushIntervalMs = 60ULL * 60ULL * 1000ULL;
+inline constexpr std::uintmax_t kMaxLogFileBytes = 1ULL * 1024ULL * 1024ULL * 1024ULL;
+inline constexpr std::size_t kMaxLogArchives = 1000U;
 
 struct ServiceConfig {
     std::string name;
@@ -107,8 +112,25 @@ struct TaskApiConfig {
     std::int64_t max_status_url_bytes{};
 };
 
+struct LoggingConsoleConfig {
+    bool enabled{true};
+};
+
+struct LoggingFileConfig {
+    bool enabled{false};
+    std::string path;
+    std::uintmax_t max_file_bytes{10U * 1024U * 1024U};
+    std::size_t max_archives{3U};
+};
+
 struct LoggingConfig {
     LogLevel level{LogLevel::Info};
+    std::size_t queue_capacity{1024U};
+    std::size_t reserved_critical_capacity{32U};
+    std::size_t batch_size{64U};
+    std::uint64_t flush_interval_ms{1000U};
+    LoggingConsoleConfig console;
+    LoggingFileConfig file;
 };
 
 /** Portable, resource-free application configuration value. */
