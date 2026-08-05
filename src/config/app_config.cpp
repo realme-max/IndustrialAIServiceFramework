@@ -707,7 +707,11 @@ Result<void> apply_logging_config(const Json &root, AppConfig &config) {
     if (!object) {
         return object;
     }
-    auto fields = reject_unknown_fields(logging, {"level"}, "logging");
+    auto fields = reject_unknown_fields(
+        logging,
+        {"level", "queue_capacity", "reserved_critical_capacity", "batch_size",
+         "flush_interval_ms", "console", "file"},
+        "logging");
     if (!fields) {
         return fields;
     }
@@ -721,6 +725,116 @@ Result<void> apply_logging_config(const Json &root, AppConfig &config) {
                 "logging.level must be one of trace, debug, info, warn, error");
         }
         config.logging.level = level.value();
+    }
+
+    if (logging.contains("queue_capacity")) {
+        auto value = read_size(logging.at("queue_capacity"),
+                               "logging.queue_capacity", kMaxLogQueueCapacity);
+        if (!value) {
+            return Result<void>::failure(std::move(value).error());
+        }
+        config.logging.queue_capacity = value.value();
+    }
+    if (logging.contains("reserved_critical_capacity")) {
+        auto value = read_integer(logging.at("reserved_critical_capacity"),
+                                  "logging.reserved_critical_capacity", true);
+        if (!value) {
+            return Result<void>::failure(std::move(value).error());
+        }
+        if (static_cast<std::uint64_t>(value.value()) > kMaxLogQueueCapacity) {
+            return config_failure(
+                "logging.reserved_critical_capacity exceeds the allowed maximum");
+        }
+        config.logging.reserved_critical_capacity =
+            static_cast<std::size_t>(value.value());
+    }
+    if (logging.contains("batch_size")) {
+        auto value = read_size(logging.at("batch_size"), "logging.batch_size",
+                               kMaxLogBatchSize);
+        if (!value) {
+            return Result<void>::failure(std::move(value).error());
+        }
+        config.logging.batch_size = value.value();
+    }
+    if (logging.contains("flush_interval_ms")) {
+        auto value = read_integer(logging.at("flush_interval_ms"),
+                                  "logging.flush_interval_ms", true);
+        if (!value) {
+            return Result<void>::failure(std::move(value).error());
+        }
+        if (static_cast<std::uint64_t>(value.value()) > kMaxLogFlushIntervalMs) {
+            return config_failure("logging.flush_interval_ms exceeds the allowed maximum");
+        }
+        config.logging.flush_interval_ms =
+            static_cast<std::uint64_t>(value.value());
+    }
+
+    if (logging.contains("console")) {
+        const Json &console = logging.at("console");
+        auto console_object = require_object(console, "logging.console");
+        if (!console_object) {
+            return console_object;
+        }
+        auto console_fields =
+            reject_unknown_fields(console, {"enabled"}, "logging.console");
+        if (!console_fields) {
+            return console_fields;
+        }
+        if (console.contains("enabled")) {
+            if (!console.at("enabled").is_boolean()) {
+                return config_failure("logging.console.enabled must be a boolean");
+            }
+            config.logging.console.enabled = console.at("enabled").get<bool>();
+        }
+    }
+
+    if (logging.contains("file")) {
+        const Json &file = logging.at("file");
+        auto file_object = require_object(file, "logging.file");
+        if (!file_object) {
+            return file_object;
+        }
+        auto file_fields = reject_unknown_fields(
+            file, {"enabled", "path", "max_file_bytes", "max_archives"},
+            "logging.file");
+        if (!file_fields) {
+            return file_fields;
+        }
+        if (file.contains("enabled")) {
+            if (!file.at("enabled").is_boolean()) {
+                return config_failure("logging.file.enabled must be a boolean");
+            }
+            config.logging.file.enabled = file.at("enabled").get<bool>();
+        }
+        if (file.contains("path")) {
+            if (!file.at("path").is_string()) {
+                return config_failure("logging.file.path must be a string");
+            }
+            config.logging.file.path = file.at("path").get<std::string>();
+        }
+        if (file.contains("max_file_bytes")) {
+            auto value = read_size(file.at("max_file_bytes"),
+                                   "logging.file.max_file_bytes",
+                                   static_cast<std::size_t>(kMaxLogFileBytes));
+            if (!value) {
+                return Result<void>::failure(std::move(value).error());
+            }
+            config.logging.file.max_file_bytes =
+                static_cast<std::uintmax_t>(value.value());
+        }
+        if (file.contains("max_archives")) {
+            auto value = read_integer(file.at("max_archives"),
+                                      "logging.file.max_archives", true);
+            if (!value) {
+                return Result<void>::failure(std::move(value).error());
+            }
+            if (static_cast<std::uint64_t>(value.value()) > kMaxLogArchives) {
+                return config_failure(
+                    "logging.file.max_archives exceeds the allowed maximum");
+            }
+            config.logging.file.max_archives =
+                static_cast<std::size_t>(value.value());
+        }
     }
     return Result<void>::success();
 }
@@ -873,7 +987,9 @@ AppConfig default_app_config() {
                                        512 * 1024, 512 * 1024, 64, 100000,
                                        512 * 1024, 64, 128}},
         TaskApiConfig{256, 128},
-        LoggingConfig{LogLevel::Info},
+        LoggingConfig{LogLevel::Info, 1024U, 32U, 64U, 1000U,
+                      LoggingConsoleConfig{true},
+                      LoggingFileConfig{false, {}, 10U * 1024U * 1024U, 3U}},
     };
 }
 
@@ -919,6 +1035,31 @@ Result<void> validate_app_config(const AppConfig &config) {
     }
     if (!is_known_log_level(config.logging.level)) {
         return config_failure("logging.level is invalid");
+    }
+    if (config.logging.queue_capacity == 0U ||
+        config.logging.queue_capacity > kMaxLogQueueCapacity ||
+        config.logging.reserved_critical_capacity >
+            config.logging.queue_capacity ||
+        config.logging.batch_size == 0U ||
+        config.logging.batch_size > config.logging.queue_capacity ||
+        config.logging.flush_interval_ms > kMaxLogFlushIntervalMs) {
+        return config_failure("logging queue options are outside supported ranges");
+    }
+    if (!config.logging.console.enabled && !config.logging.file.enabled) {
+        return config_failure("at least one logging sink must be enabled");
+    }
+    if (config.logging.file.max_file_bytes == 0U ||
+        config.logging.file.max_file_bytes > kMaxLogFileBytes ||
+        config.logging.file.max_archives > kMaxLogArchives) {
+        return config_failure("logging file limits are outside supported ranges");
+    }
+    if (config.logging.file.enabled) {
+        if (config.logging.file.path.empty() ||
+            contains_only_whitespace(config.logging.file.path) ||
+            contains_control_character(config.logging.file.path)) {
+            return config_failure(
+                "logging.file.path must be a non-empty path without control characters");
+        }
     }
     return Result<void>::success();
 }

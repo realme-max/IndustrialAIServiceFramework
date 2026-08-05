@@ -21,9 +21,38 @@ target_compile_definitions(
 )
 iaisf_enable_project_warnings(iaisf_tests)
 
+if(WIN32)
+  target_sources(iaisf_tests PRIVATE app/test_application_logging.cpp)
+endif()
+
 include(GoogleTest)
 gtest_add_tests(TARGET iaisf_tests TEST_LIST IAISF_UNIT_TESTS)
 set_tests_properties(${IAISF_UNIT_TESTS} PROPERTIES LABELS unit)
+
+add_executable(
+  iaisf_logging_tests
+  log/test_async_logger.cpp
+  log/test_rolling_file_sink.cpp
+  log/test_logging_config.cpp
+)
+target_compile_features(iaisf_logging_tests PRIVATE cxx_std_17)
+target_link_libraries(
+  iaisf_logging_tests
+  PRIVATE
+    iaisf::logging
+    GTest::gtest
+    GTest::gtest_main
+    Threads::Threads
+)
+iaisf_enable_project_warnings(iaisf_logging_tests)
+
+gtest_add_tests(TARGET iaisf_logging_tests TEST_LIST IAISF_LOGGING_TESTS)
+set_tests_properties(
+  ${IAISF_LOGGING_TESTS}
+  PROPERTIES
+    LABELS "unit;logging"
+    TIMEOUT 20
+)
 
 add_executable(
   iaisf_http_core_tests
@@ -256,6 +285,7 @@ if(TARGET iaisf_service)
   add_executable(
     iaisf_app_service_tests
     app/test_application_service.cpp
+    app/test_application_logging.cpp
   )
   target_compile_features(iaisf_app_service_tests PRIVATE cxx_std_17)
   target_link_libraries(
