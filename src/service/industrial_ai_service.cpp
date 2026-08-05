@@ -92,36 +92,42 @@ Result<IndustrialAiService::Ptr> IndustrialAiService::create(
 
         auto health_checker = std::make_shared<health::HealthChecker>();
 
-        auto plugin_manager =
-            std::make_shared<plugin::PluginManager>(options.plugin_limits());
+        auto plugin_runtime_result =
+            plugin::PluginRuntime::create(
+                options.plugin_limits(), loop.metrics_registry());
+        if (!plugin_runtime_result) {
+            return Result<Ptr>::failure(
+                std::move(plugin_runtime_result).error());
+        }
+        auto plugin_runtime = std::move(plugin_runtime_result).value();
         if (options.enable_echo()) {
-            auto registered = plugin_manager->register_plugin(
+            auto registered = plugin_runtime->register_plugin(
                 std::make_shared<plugin::EchoPlugin>());
             if (!registered) {
                 return Result<Ptr>::failure(std::move(registered).error());
             }
         }
         if (options.enable_mock_vision()) {
-            auto registered = plugin_manager->register_plugin(
+            auto registered = plugin_runtime->register_plugin(
                 std::make_shared<plugin::MockVisionPlugin>());
             if (!registered) {
                 return Result<Ptr>::failure(std::move(registered).error());
             }
         }
         for (auto& static_plugin : static_plugins) {
-            auto registered = plugin_manager->register_plugin(
+            auto registered = plugin_runtime->register_plugin(
                 std::move(static_plugin));
             if (!registered) {
                 return Result<Ptr>::failure(std::move(registered).error());
             }
         }
-        auto frozen = plugin_manager->freeze();
+        auto frozen = plugin_runtime->freeze();
         if (!frozen) {
             return Result<Ptr>::failure(std::move(frozen).error());
         }
 
         auto adapter_result =
-            plugin::PluginTaskAdapter::create(plugin_manager);
+            plugin::PluginTaskAdapter::create(plugin_runtime);
         if (!adapter_result) {
             return Result<Ptr>::failure(std::move(adapter_result).error());
         }
@@ -148,7 +154,8 @@ Result<IndustrialAiService::Ptr> IndustrialAiService::create(
                     "diagnostics endpoint requires an application metrics registry"));
             }
             auto diagnostics_result = diagnostics::RuntimeDiagnostics::create(
-                health_checker, *task_manager, *metrics, logger_diagnostics);
+                health_checker, *task_manager, *metrics, logger_diagnostics,
+                std::weak_ptr<const plugin::PluginRuntime>{plugin_runtime});
             if (!diagnostics_result) {
                 return Result<Ptr>::failure(std::move(diagnostics_result).error());
             }
@@ -157,7 +164,7 @@ Result<IndustrialAiService::Ptr> IndustrialAiService::create(
 
         auto api_result = api::TaskHttpApi::create(
             *task_manager,
-            *plugin_manager,
+            *plugin_runtime,
             options.task_limits(),
             options.http_limits(),
             options.api_limits());
@@ -221,7 +228,7 @@ Result<IndustrialAiService::Ptr> IndustrialAiService::create(
             ConstructionKey{},
             loop,
             logger,
-            std::move(plugin_manager),
+            std::move(plugin_runtime),
             std::move(adapter),
             std::move(task_manager),
             std::move(task_api),
@@ -247,7 +254,7 @@ IndustrialAiService::IndustrialAiService(
     ConstructionKey,
     net::EventLoop& loop,
     ILogger& logger,
-    std::shared_ptr<plugin::PluginManager> plugin_manager,
+    std::shared_ptr<plugin::PluginRuntime> plugin_runtime,
     std::shared_ptr<plugin::PluginTaskAdapter> plugin_adapter,
     std::unique_ptr<task::TaskManager> task_manager,
     api::TaskHttpApi::Ptr task_api,
@@ -257,7 +264,7 @@ IndustrialAiService::IndustrialAiService(
     std::shared_ptr<SignalShutdownState> signal_shutdown_state) noexcept
     : loop_(loop),
       logger_(logger),
-      plugin_manager_(std::move(plugin_manager)),
+      plugin_runtime_(std::move(plugin_runtime)),
       plugin_adapter_(std::move(plugin_adapter)),
       task_manager_(std::move(task_manager)),
       task_api_(std::move(task_api)),
@@ -371,8 +378,12 @@ Result<void> IndustrialAiService::advance_stop() {
                 ErrorCode::InternalError,
                 "task manager shutdown returned before workers stopped"));
         }
+        auto plugin_stop = plugin_runtime_->shutdown();
         (void)health_checker_->transition_to(health::HealthPhase::Stopped);
         state_ = State::Stopped;
+        if (!plugin_stop) {
+            return plugin_stop;
+        }
     }
     return Result<void>::success();
 }
@@ -424,7 +435,8 @@ bool IndustrialAiService::stopped() const noexcept {
            http_server_->stopped() &&
            http_server_->session_count() == 0U &&
            http_server_->connection_count() == 0U &&
-           task_manager_->stopped();
+           task_manager_->stopped() &&
+           plugin_runtime_->state() == plugin::PluginRuntimeState::Stopped;
 }
 
 const net::tcp::Ipv4Endpoint&

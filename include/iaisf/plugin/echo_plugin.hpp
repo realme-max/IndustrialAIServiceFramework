@@ -10,13 +10,16 @@ namespace iaisf::plugin {
  * Input must contain exactly one "payload" member. Successful execution
  * returns an independent copy of that member without an envelope.
  */
-class EchoPlugin final : public IAlgorithmPlugin {
+class EchoPlugin final : public IAlgorithmPlugin,
+                         public IManagedAlgorithmPlugin {
 public:
     [[nodiscard]] PluginMetadata metadata() const override;
     [[nodiscard]] Result<void> validate_input(
         const nlohmann::json& input) const override;
     [[nodiscard]] Result<nlohmann::json> execute(
         const nlohmann::json& input) const override;
+    [[nodiscard]] Result<void> initialize() override;
+    [[nodiscard]] Result<void> shutdown() override;
 };
 
 }  // namespace iaisf::plugin

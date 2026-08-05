@@ -18,6 +18,7 @@
 namespace iaisf::plugin {
 
 class PluginTaskAdapter;
+class PluginRuntime;
 
 /**
  * Explicit in-process plugin registry.
@@ -59,11 +60,18 @@ public:
 
 private:
     friend class PluginTaskAdapter;
+    friend class PluginRuntime;
 
     struct Entry {
         PluginMetadata metadata;
         std::shared_ptr<const IAlgorithmPlugin> plugin;
     };
+
+    [[nodiscard]] Result<void> register_plugin_with_validated_metadata(
+        std::shared_ptr<const IAlgorithmPlugin> plugin,
+        PluginMetadata metadata);
+    [[nodiscard]] Result<void> validate_registration_slot(
+        std::string_view operation) const;
 
     [[nodiscard]] Result<std::shared_ptr<const IAlgorithmPlugin>> find_plugin(
         std::string_view operation) const;

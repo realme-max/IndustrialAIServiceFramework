@@ -157,6 +157,7 @@ target_include_directories(
 target_link_libraries(
   iaisf_diagnostics
   PUBLIC iaisf::core iaisf::health iaisf::task iaisf::logging iaisf::metrics
+         iaisf::plugin
 )
 iaisf_enable_project_warnings(iaisf_diagnostics)
 
@@ -168,7 +169,10 @@ add_library(
   src/plugin/plugin_limits.cpp
   src/plugin/plugin_manager.cpp
   src/plugin/plugin_metadata.cpp
+  src/plugin/plugin_abi_adapter.cpp
+  src/plugin/plugin_abi_validation.cpp
   src/plugin/plugin_task_adapter.cpp
+  src/plugin/plugin_runtime.cpp
 )
 add_library(iaisf::plugin ALIAS iaisf_plugin)
 target_compile_features(iaisf_plugin PUBLIC cxx_std_17)

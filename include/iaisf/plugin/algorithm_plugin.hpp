@@ -28,4 +28,20 @@ public:
         const nlohmann::json& input) const = 0;
 };
 
+/**
+ * Optional lifecycle capability for in-process plugins.
+ *
+ * The existing algorithm contract remains valid for stateless plugins.  A
+ * managed plugin may opt in to composition-root initialization and shutdown.  A
+ * lifecycle implementation must not throw across the runtime boundary; the
+ * runtime converts any violation into a stable Error.
+ */
+class IManagedAlgorithmPlugin {
+public:
+    virtual ~IManagedAlgorithmPlugin() = default;
+
+    [[nodiscard]] virtual Result<void> initialize() = 0;
+    [[nodiscard]] virtual Result<void> shutdown() = 0;
+};
+
 }  // namespace iaisf::plugin

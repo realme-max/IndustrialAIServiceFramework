@@ -52,4 +52,12 @@ Result<nlohmann::json> EchoPlugin::execute(
     }
 }
 
+Result<void> EchoPlugin::initialize() {
+    return Result<void>::success();
+}
+
+Result<void> EchoPlugin::shutdown() {
+    return Result<void>::success();
+}
+
 }  // namespace iaisf::plugin

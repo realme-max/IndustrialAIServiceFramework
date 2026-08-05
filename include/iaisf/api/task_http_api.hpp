@@ -7,6 +7,7 @@
 #include "iaisf/http/http_limits.hpp"
 #include "iaisf/http/http_router.hpp"
 #include "iaisf/plugin/plugin_manager.hpp"
+#include "iaisf/plugin/plugin_runtime.hpp"
 #include "iaisf/task/task_limits.hpp"
 #include "iaisf/task/task_manager.hpp"
 
@@ -29,6 +30,12 @@ public:
 
     [[nodiscard]] static Result<Ptr> create(
         task::TaskManager& task_manager,
+        const plugin::PluginRuntime& plugin_runtime,
+        task::TaskLimits task_limits,
+        http::HttpLimits http_limits,
+        TaskApiLimits api_limits = TaskApiLimits::defaults());
+    [[nodiscard]] static Result<Ptr> create(
+        task::TaskManager& task_manager,
         const plugin::PluginManager& plugin_manager,
         task::TaskLimits task_limits,
         http::HttpLimits http_limits,
@@ -38,6 +45,14 @@ public:
     TaskHttpApi& operator=(const TaskHttpApi&) = delete;
     TaskHttpApi(TaskHttpApi&&) = delete;
     TaskHttpApi& operator=(TaskHttpApi&&) = delete;
+
+    TaskHttpApi(
+        ConstructionKey,
+        task::TaskManager& task_manager,
+        const plugin::PluginRuntime& plugin_runtime,
+        task::TaskLimits task_limits,
+        http::HttpLimits http_limits,
+        TaskApiLimits api_limits) noexcept;
 
     TaskHttpApi(
         ConstructionKey,
@@ -62,7 +77,8 @@ private:
         const http::HttpRequest& request);
 
     task::TaskManager& task_manager_;
-    const plugin::PluginManager& plugin_manager_;
+    const plugin::PluginRuntime* const plugin_runtime_{nullptr};
+    const plugin::PluginManager* const plugin_manager_{nullptr};
     task::TaskLimits task_limits_;
     http::HttpLimits http_limits_;
     TaskApiLimits api_limits_;
