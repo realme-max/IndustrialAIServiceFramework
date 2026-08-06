@@ -1,7 +1,10 @@
 #pragma once
 
 #include <chrono>
+#include <filesystem>
 #include <optional>
+#include <string>
+#include <vector>
 
 #include "iaisf/api/task_api_limits.hpp"
 #include "iaisf/core/result.hpp"
@@ -12,6 +15,19 @@
 #include "iaisf/task/thread_pool.hpp"
 
 namespace iaisf::service {
+
+struct DynamicPluginModuleOptions {
+    std::string id;
+    std::filesystem::path library;
+    std::string config_json{"{}"};
+};
+
+struct DynamicPluginOptions {
+    bool enabled{false};
+    std::filesystem::path root{"plugins"};
+    std::size_t max_modules{16U};
+    std::vector<DynamicPluginModuleOptions> modules;
+};
 
 /** Validated aggregate configuration for the Phase 7 composition root. */
 class ServiceOptions final {
@@ -32,7 +48,8 @@ public:
         bool metrics_enabled = false,
         std::string metrics_endpoint = "/metrics",
         bool diagnostics_enabled = false,
-        std::string diagnostics_endpoint = "/debug/status");
+        std::string diagnostics_endpoint = "/debug/status",
+        DynamicPluginOptions dynamic_plugins = {});
     [[nodiscard]] static Result<ServiceOptions> defaults();
 
     [[nodiscard]] const net::tcp::TcpServerOptions& tcp_options() const noexcept;
@@ -51,6 +68,7 @@ public:
     [[nodiscard]] const std::string& metrics_endpoint() const noexcept;
     [[nodiscard]] bool diagnostics_enabled() const noexcept;
     [[nodiscard]] const std::string& diagnostics_endpoint() const noexcept;
+    [[nodiscard]] const DynamicPluginOptions& dynamic_plugins() const noexcept;
 
 private:
     ServiceOptions(
@@ -67,7 +85,8 @@ private:
         bool metrics_enabled,
         std::string metrics_endpoint,
         bool diagnostics_enabled,
-        std::string diagnostics_endpoint) noexcept;
+        std::string diagnostics_endpoint,
+        DynamicPluginOptions dynamic_plugins) noexcept;
 
     net::tcp::TcpServerOptions tcp_options_;
     http::HttpLimits http_limits_;
@@ -83,6 +102,7 @@ private:
     std::string metrics_endpoint_;
     bool diagnostics_enabled_{false};
     std::string diagnostics_endpoint_;
+    DynamicPluginOptions dynamic_plugins_;
 };
 
 }  // namespace iaisf::service

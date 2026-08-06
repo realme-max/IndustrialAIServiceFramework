@@ -21,7 +21,8 @@ class AbiPluginAdapter final : public IAlgorithmPlugin,
 public:
     [[nodiscard]] static Result<std::shared_ptr<AbiPluginAdapter>> create(
         iaisf_plugin_api api,
-        PluginLimits limits);
+        PluginLimits limits,
+        nlohmann::json config = nlohmann::json::object());
 
     ~AbiPluginAdapter() noexcept override;
 
@@ -44,7 +45,8 @@ private:
         iaisf_plugin_api api,
         PluginLimits limits,
         PluginMetadata metadata,
-        iaisf_plugin_handle* instance) noexcept;
+        iaisf_plugin_handle* instance,
+        std::string config_storage) noexcept;
 
     static void default_log(
         void* context,
@@ -63,14 +65,19 @@ private:
         iaisf_plugin_status_t status,
         ErrorCode fallback,
         const char* operation) const;
+    bool destroy_instance_locked() noexcept;
 
     iaisf_plugin_api api_{};
     PluginLimits limits_;
     PluginMetadata metadata_;
     iaisf_plugin_handle* instance_{nullptr};
     iaisf_plugin_host_api host_{};
+    std::string config_storage_;
     mutable std::shared_mutex lifecycle_mutex_;
     bool shutdown_called_{false};
+    bool destroy_called_{false};
+    bool initialize_supported_{false};
+    bool initialized_{false};
 };
 
 }  // namespace iaisf::plugin::abi

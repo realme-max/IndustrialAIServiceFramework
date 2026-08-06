@@ -43,6 +43,36 @@ TEST(RuntimeDiagnosticsTest, JsonContainsOnlyBoundedObservations) {
     EXPECT_NE(encoded.value().find("\"available\":false"), std::string::npos);
 }
 
+TEST(RuntimeDiagnosticsTest, DynamicPluginSectionHasNoSensitiveFields) {
+    RuntimeDiagnosticsSnapshot snapshot;
+    snapshot.plugins.available = true;
+    snapshot.plugins.dynamic_loading_enabled = true;
+    snapshot.plugins.dynamic_module_count = 2U;
+    snapshot.plugins.registered_count = 1U;
+    snapshot.plugins.managed_plugins = 1U;
+    snapshot.plugins.entries.push_back(plugin::PluginEntrySnapshot{
+        "dynamic_fixture",
+        plugin::PluginMetadata{
+            "dynamic_fixture", "fixture", "1.0", "secret description", false, {}},
+        "dynamic", "fixture-id", true,
+        plugin::PluginEntryState::Ready, 0U, false});
+
+    auto encoded = to_json(snapshot, 4096U);
+    ASSERT_TRUE(encoded);
+    EXPECT_NE(encoded.value().find("\"dynamic_loading_enabled\":true"),
+              std::string::npos);
+    EXPECT_NE(encoded.value().find("\"dynamic_module_count\":2"),
+              std::string::npos);
+    EXPECT_NE(encoded.value().find("\"origin\":\"dynamic\""),
+              std::string::npos);
+    EXPECT_NE(encoded.value().find("\"module_id\":\"fixture-id\""),
+              std::string::npos);
+    EXPECT_EQ(encoded.value().find("secret description"), std::string::npos);
+    EXPECT_EQ(encoded.value().find("library"), std::string::npos);
+    EXPECT_EQ(encoded.value().find("/plugins"), std::string::npos);
+    EXPECT_EQ(encoded.value().find("config"), std::string::npos);
+}
+
 TEST(RuntimeDiagnosticsTest, ResponseLimitFailsClosed) {
     RuntimeDiagnosticsSnapshot snapshot;
     auto encoded = to_json(snapshot, 1U);

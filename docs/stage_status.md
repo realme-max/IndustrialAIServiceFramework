@@ -3,15 +3,15 @@
 ## 当前结论
 
 ```text
-PHASE_8C_2_CONFIGURATION_SYSTEM_IMPLEMENTED
+PHASE_8G_FINAL_DYNAMIC_PLUGIN_HARDENED
 ```
 
-- 当前阶段：Phase 8C-2 Configuration System
-- 实现状态：portable AppConfig、RuntimeOptions 映射、Service 配置注入和 Linux `--serve` 已实现
-- Windows 验证：Visual Studio 2022 x64 Debug/Release 均为 380/380
-- WSL 验证：Ubuntu 24.04 GCC Debug/Release 均为 596/596；当前实现尚无 GitHub Actions CI
+- 当前阶段：Phase 8G-4E Dynamic Plugin Final Hardening（本地未提交审计）
+- 实现状态：动态插件配置、C ABI、Loader、Adapter、PluginRuntime、Metrics、Diagnostics 和回滚链路已审计
+- Windows 验证：Visual Studio 2022 x64 Debug/Release 各 533 注册，528 passed、5 个显式环境 skip、0 failures
+- WSL 验证：Ubuntu 24.04 Debug/Release 各 761/761，分别 1 个权限能力显式 skip、0 failures
 - 日期：2026-08-04（Asia/Shanghai）
-- 下一步：审核并提交 Phase 8C-2，再取得 exact commit 的远端 Linux CI
+- 下一步：提交当前改动后，以 exact commit 取得 GitHub Actions Linux Debug/Release 证据
 
 Phase 8A/8B/8C-1 已提供 timerfd、TCP/HTTP timeout 和 signalfd；Phase 8C-2 在不改变
 这些生命周期语义的前提下增加一次性本地 JSON 配置和应用组合。Linux
@@ -893,3 +893,51 @@ Active stop 语义：触发 stop 的当前请求不保证 503，连接可能在�
 - 配置专项实际包括 AppConfig 22 项、RuntimeOptions 5 项和 Linux `--serve`/SIGTERM 进程集成 1 项；需求列出的 16 类场景均有覆盖。
 - 项目源码 warning 0、项目测试 warning 0；当前未提交实现尚无 GitHub Actions CI 证据。
 - 未实现：热更新、YAML、环境变量覆盖、动态插件、异步文件日志、数据库、真实 AI/GPU 和 benchmark。
+## Phase 8G-4D Dynamic Plugin Configuration and Service Integration
+
+状态：`PHASE_8G_4D_DYNAMIC_PLUGIN_CONFIGURATION_IMPLEMENTED`
+
+- `plugins.runtime` schema 支持 startup-only dynamic loading、相对安全路径、平台库选择、模块上限和受限 JSON config。
+- `RuntimeOptions` 将 portable `AppConfig` 转换为已选平台库的 `DynamicPluginOptions`；旧静态插件配置保持兼容。
+- Service 创建事务执行静态注册、动态加载、`register_dynamic`、freeze 和 HTTP 启动；任意失败均返回错误并通过 RAII 回滚。
+- 新增 `plugin_dynamic_modules_loaded` gauge 与 `plugin_dynamic_load_failures_total` counter，均为无 label、best effort。
+- Plugin diagnostics 增加动态加载开关和已加载模块数量，不暴露 root、library 或 config。
+- 测试 fixture 构建为平台原生 MODULE（Windows DLL / Linux SO），由 CTest 自动构建依赖。
+
+本地验证：WSL Ubuntu Debug/Release `752/752`；Windows VS2022 Debug/Release 各 524 个测试（520 passed、4 个既有环境相关 skipped）。项目源码与测试 warning 为 0，`git diff --check` 通过。本轮尚未取得新的 GitHub Actions run，不将本地结果描述为远程 CI 证据。
+
+当前未实现：热加载/卸载、运行期插件管理、远程下载、进程隔离、真实 AI/GPU。下一步需先提交并在 Linux CI 验证本阶段提交。
+
+## Phase 8G-4E: final dynamic-plugin hardening audit
+
+Status: `PHASE_8G_FINAL_DYNAMIC_PLUGIN_HARDENED` (local, uncommitted).
+
+The audit verified Config → RuntimeOptions → Loader → DynamicModule → C ABI →
+Adapter → PluginRuntime → TaskManager/HTTP ownership, lease-protected module
+lifetime, startup transaction rollback, and shutdown ordering. Create,
+initialize, execute, shutdown, destroy and native-unload failures are bounded
+and isolated; unload failures increment `plugin_dynamic_unload_failures_total`
+and still clear the native handle.
+
+Fixed dynamic metrics are `plugin_dynamic_modules_loaded`,
+`plugin_dynamic_load_failures_total` and
+`plugin_dynamic_unload_failures_total`. Diagnostics exposes only bounded state,
+counts, origin and module-id; paths, root, config, handles, payloads and
+exception text are excluded.
+
+Validation performed on the final source:
+
+| Environment | Result | Notes |
+|---|---:|---|
+| WSL Ubuntu 24.04 Debug | 761/761 | one explicit permission-capability skip, zero failures |
+| WSL Ubuntu 24.04 Release | 761/761 | one explicit permission-capability skip, zero failures |
+| Windows VS2022 Debug | 528 passed / 533 registered | five explicit environment skips, zero failures |
+| Windows VS2022 Release | 528 passed / 533 registered | five explicit environment skips, zero failures |
+
+Project C/C++ source and test warnings were zero. The Windows build's
+non-fatal `pwsh.exe` lookup messages come from the local Visual Studio
+applocal helper, not the project compiler. The existing Linux workflow already
+builds plugin, fixture, loader/adapter tests and Service targets; no new remote
+run was created for this uncommitted worktree. ASan/UBSan were not run because
+no sanitizer configuration is enabled locally. No hot reload, remote plugin,
+process isolation or sandbox is included.

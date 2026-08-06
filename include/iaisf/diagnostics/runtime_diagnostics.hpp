@@ -38,6 +38,8 @@ struct LoggerDiagnostics {
 
 struct PluginRuntimeDiagnosticsSnapshot {
     bool available{false};
+    bool dynamic_loading_enabled{false};
+    std::size_t dynamic_module_count{0U};
     plugin::PluginRuntimeState state{plugin::PluginRuntimeState::Stopped};
     std::size_t registered_count{0U};
     std::size_t active_executions{0U};

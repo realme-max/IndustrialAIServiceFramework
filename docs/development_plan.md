@@ -539,3 +539,16 @@ warning 修复提交 `a44b1272bf603a17724fa17c66d60ee0e18bb918` 仅修改测试�
 
 本阶段不包含热更新、YAML、环境变量覆盖、动态插件、异步日志或生产部署。下一步必须先
 审核并提交当前实现，再以 exact commit 取得 Linux CI；不得把本地 WSL 结果写成远端 CI。
+## Phase 8G-4D：动态插件配置与 Service 启动集成
+
+状态：**implemented locally; Linux CI pending**
+
+已完成：
+
+- 严格解析 `plugins.runtime`，兼容旧静态插件配置；
+- RuntimeOptions 平台库选择和安全路径校验；
+- IndustrialAiService 启动事务中的动态加载、注册、freeze 和失败回滚；
+- 动态模块 metrics、diagnostics 字段及真实 fixture 集成测试；
+- Windows 和 WSL Debug/Release 本地回归，项目 warning 为 0。
+
+未包含：热加载、运行期加载、动态插件 HTTP 管理、远程下载、进程隔离和真实模型推理。下一步是提交后使用同一提交运行 Linux CI，再进行阶段封板记录。

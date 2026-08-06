@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <csignal>
 #include <future>
+#include <filesystem>
 #include <functional>
 #include <memory>
 #include <mutex>
@@ -372,18 +373,18 @@ struct ExchangeResult {
     WireResponse response;
 };
 
-ExchangeResult exchange_once(const std::string& wire_request) {
+ExchangeResult exchange_once_with_options(
+    const std::string& wire_request,
+    ServiceOptions options) {
     RecordingLogger logger;
     auto loop_result = net::EventLoop::create(logger, 128U, 256U);
     EXPECT_TRUE(loop_result);
     auto loop = std::move(loop_result).value();
-    auto options = ServiceOptions::defaults();
-    EXPECT_TRUE(options);
     auto service_result = IndustrialAiService::create(
         *loop,
         logger,
         net::tcp::Ipv4Endpoint::loopback(0U),
-        std::move(options).value());
+        std::move(options));
     EXPECT_TRUE(service_result);
     auto service = std::move(service_result).value();
     EXPECT_TRUE(service->start());
@@ -488,6 +489,13 @@ TEST(IndustrialAiServiceTest, StartAndStopAreSingleUseAndIdempotent) {
     EXPECT_TRUE(service->stop());
     EXPECT_TRUE(service->stop());
     EXPECT_FALSE(service->start());
+}
+
+ExchangeResult exchange_once(const std::string& wire_request) {
+    auto options = ServiceOptions::defaults();
+    EXPECT_TRUE(options);
+    return exchange_once_with_options(
+        wire_request, std::move(options).value());
 }
 
 TEST(IndustrialAiServiceTest, SigtermTriggersFullServiceShutdown) {
@@ -773,6 +781,90 @@ TEST(IndustrialAiServiceTest, ServesHealthOverLoopback) {
         result.response.body,
         "{\"status\":\"ok\",\"live\":true,\"ready\":true,"
         "\"phase\":\"running\"}");
+}
+
+TEST(IndustrialAiServiceTest, StartsConfiguredDynamicPluginAndExecutesTask) {
+    auto defaults = ServiceOptions::defaults();
+    ASSERT_TRUE(defaults) << defaults.error().message;
+    auto dynamic = defaults.value().dynamic_plugins();
+    dynamic.enabled = true;
+    const std::filesystem::path fixture{IAISF_DYNAMIC_FIXTURE_PATH};
+    dynamic.root = fixture.parent_path();
+    dynamic.modules.push_back({
+        "dynamic_fixture", fixture.filename(), "{}"});
+    auto options = ServiceOptions::create(
+        defaults.value().tcp_options(), defaults.value().http_limits(),
+        defaults.value().pool_options(), defaults.value().task_limits(),
+        defaults.value().plugin_limits(), defaults.value().api_limits(),
+        defaults.value().enable_echo(), defaults.value().enable_mock_vision(),
+        defaults.value().http_header_timeout(),
+        defaults.value().http_body_timeout(), defaults.value().metrics_enabled(),
+        defaults.value().metrics_endpoint(), defaults.value().diagnostics_enabled(),
+        defaults.value().diagnostics_endpoint(), std::move(dynamic));
+    ASSERT_TRUE(options) << options.error().message;
+
+    const auto result = exchange_once_with_options(
+        post_request(R"({"operation":"dynamic_fixture","input":{}})"),
+        std::move(options).value());
+    EXPECT_TRUE(result.loop_result) << result.loop_result.error().message;
+    EXPECT_TRUE(result.client_error.empty()) << result.client_error;
+    EXPECT_EQ(result.response.status, 202);
+    const auto body = nlohmann::json::parse(result.response.body);
+    EXPECT_TRUE(body["task_id"].is_string());
+}
+
+TEST(IndustrialAiServiceTest, DynamicPluginStartupFailureRollsBackRuntime) {
+    RecordingLogger logger;
+    auto loop = net::EventLoop::create(logger, 128U, 256U).value();
+    auto defaults = ServiceOptions::defaults();
+    ASSERT_TRUE(defaults);
+    auto dynamic = defaults.value().dynamic_plugins();
+    dynamic.enabled = true;
+    dynamic.root = std::filesystem::path{IAISF_DYNAMIC_FIXTURE_PATH}.parent_path();
+    dynamic.modules.push_back({"missing", "does-not-exist.so", "{}"});
+    auto options = ServiceOptions::create(
+        defaults.value().tcp_options(), defaults.value().http_limits(),
+        defaults.value().pool_options(), defaults.value().task_limits(),
+        defaults.value().plugin_limits(), defaults.value().api_limits(),
+        defaults.value().enable_echo(), defaults.value().enable_mock_vision(),
+        defaults.value().http_header_timeout(),
+        defaults.value().http_body_timeout(), defaults.value().metrics_enabled(),
+        defaults.value().metrics_endpoint(), defaults.value().diagnostics_enabled(),
+        defaults.value().diagnostics_endpoint(), std::move(dynamic));
+    ASSERT_TRUE(options);
+    const auto result = IndustrialAiService::create(
+        *loop, logger, net::tcp::Ipv4Endpoint::loopback(0U),
+        std::move(options).value());
+    EXPECT_FALSE(result);
+    EXPECT_EQ(loop->state(), net::EventLoop::State::Created);
+}
+
+TEST(IndustrialAiServiceTest, DuplicateDynamicModuleFailsBeforeServicePublication) {
+    RecordingLogger logger;
+    auto loop = net::EventLoop::create(logger, 128U, 256U).value();
+    auto defaults = ServiceOptions::defaults();
+    ASSERT_TRUE(defaults);
+    auto dynamic = defaults.value().dynamic_plugins();
+    dynamic.enabled = true;
+    const std::filesystem::path fixture{IAISF_DYNAMIC_FIXTURE_PATH};
+    dynamic.root = fixture.parent_path();
+    dynamic.modules.push_back({"first", fixture.filename(), "{}"});
+    dynamic.modules.push_back({"second", fixture.filename(), "{}"});
+    auto options = ServiceOptions::create(
+        defaults.value().tcp_options(), defaults.value().http_limits(),
+        defaults.value().pool_options(), defaults.value().task_limits(),
+        defaults.value().plugin_limits(), defaults.value().api_limits(),
+        defaults.value().enable_echo(), defaults.value().enable_mock_vision(),
+        defaults.value().http_header_timeout(),
+        defaults.value().http_body_timeout(), defaults.value().metrics_enabled(),
+        defaults.value().metrics_endpoint(), defaults.value().diagnostics_enabled(),
+        defaults.value().diagnostics_endpoint(), std::move(dynamic));
+    ASSERT_TRUE(options);
+    const auto result = IndustrialAiService::create(
+        *loop, logger, net::tcp::Ipv4Endpoint::loopback(0U),
+        std::move(options).value());
+    EXPECT_FALSE(result);
+    EXPECT_EQ(loop->state(), net::EventLoop::State::Created);
 }
 
 TEST(IndustrialAiServiceTest, ServesVersionOverLoopback) {

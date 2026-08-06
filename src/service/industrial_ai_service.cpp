@@ -1,6 +1,7 @@
 #include "iaisf/service/industrial_ai_service.hpp"
 
 #include <exception>
+#include <cstdint>
 #include <new>
 #include <utility>
 
@@ -8,6 +9,7 @@
 #include "iaisf/http/builtin_routes.hpp"
 #include "iaisf/http/diagnostics_routes.hpp"
 #include "iaisf/plugin/echo_plugin.hpp"
+#include "iaisf/plugin/detail/dynamic_plugin_loader.hpp"
 #include "iaisf/plugin/mock_vision_plugin.hpp"
 
 namespace iaisf::service {
@@ -121,6 +123,65 @@ Result<IndustrialAiService::Ptr> IndustrialAiService::create(
                 return Result<Ptr>::failure(std::move(registered).error());
             }
         }
+        std::shared_ptr<Gauge> dynamic_modules_loaded_metric;
+        std::shared_ptr<Counter> dynamic_load_failures_metric;
+        if (auto* const metrics = loop.metrics_registry(); metrics != nullptr) {
+            auto loaded_metric =
+                metrics->create_gauge("plugin_dynamic_modules_loaded");
+            if (loaded_metric) {
+                dynamic_modules_loaded_metric =
+                    std::move(loaded_metric).value();
+            }
+            auto failure_metric =
+                metrics->create_counter("plugin_dynamic_load_failures_total");
+            if (failure_metric) {
+                dynamic_load_failures_metric =
+                    std::move(failure_metric).value();
+            }
+        }
+        std::size_t loaded_dynamic_modules = 0U;
+        if (options.dynamic_plugins().enabled) {
+            auto loader_result = plugin::detail::DynamicPluginLoader::create(
+                plugin::detail::DynamicPluginLoaderOptions{
+                    options.dynamic_plugins().root});
+            if (!loader_result) {
+                if (dynamic_load_failures_metric) {
+                    dynamic_load_failures_metric->increment();
+                }
+                return Result<Ptr>::failure(std::move(loader_result).error());
+            }
+            auto loader = std::move(loader_result).value();
+            for (const auto& configured : options.dynamic_plugins().modules) {
+                auto adapter_result = loader->load_plugin(
+                    plugin::detail::DynamicPluginModuleSpec{
+                        configured.id, configured.library,
+                        configured.config_json},
+                    options.plugin_limits());
+                if (!adapter_result) {
+                    if (dynamic_load_failures_metric) {
+                        dynamic_load_failures_metric->increment();
+                    }
+                    return Result<Ptr>::failure(
+                        std::move(adapter_result).error());
+                }
+                auto registered = plugin_runtime->register_dynamic(
+                    std::move(adapter_result).value(),
+                    plugin::DynamicPluginRegistrationOptions{configured.id});
+                if (!registered) {
+                    if (dynamic_load_failures_metric) {
+                        dynamic_load_failures_metric->increment();
+                    }
+                    return Result<Ptr>::failure(std::move(registered).error());
+                }
+                ++loaded_dynamic_modules;
+                if (dynamic_modules_loaded_metric) {
+                    dynamic_modules_loaded_metric->set(
+                        static_cast<std::int64_t>(loaded_dynamic_modules));
+                }
+            }
+        }
+        plugin_runtime->set_dynamic_loading_observation(
+            options.dynamic_plugins().enabled, loaded_dynamic_modules);
         auto frozen = plugin_runtime->freeze();
         if (!frozen) {
             return Result<Ptr>::failure(std::move(frozen).error());

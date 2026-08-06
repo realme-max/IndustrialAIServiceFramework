@@ -24,6 +24,7 @@ class RuntimeOptions final {
     [[nodiscard]] net::TimerQueueOptions timer_options() const noexcept;
     [[nodiscard]] const net::tcp::Ipv4Endpoint &bind_endpoint() const noexcept;
     [[nodiscard]] const ServiceOptions &service_options() const noexcept;
+    [[nodiscard]] const DynamicPluginOptions& dynamic_plugin_options() const noexcept;
 
   private:
     std::size_t reactor_max_events_;
