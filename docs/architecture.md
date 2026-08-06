@@ -3,12 +3,22 @@
 ## 1. 文档状态
 
 - 项目：IndustrialAIServiceFramework
-- 阶段：Phase 7 Service Integration and Task HTTP API
-- 日期：2026-07-31
-- 状态：`PHASE_7_SERVICE_INTEGRATION_COMPLETED`；最终 Linux CI Debug/Release 全部通过，项目源码与测试 warning 均为 0
-- 目标平台：Linux x86_64，C++17
+- 阶段：Phase 9B-1A Application Domain Final Hardening
+- 日期：2026-08-06
+- 状态：`PHASE_9B_1_APPLICATION_DOMAIN_FOUNDATION_HARDENED`（本地双平台验证，未提交）
+- 目标平台：portable C++17 application core；既有服务运行目标仍为 Linux x86_64
 
-本文同时记录已实现的 Phase 1 基础设施、Phase 2 Reactor、Phase 3 TCP、Phase 4 HTTP、Phase 5 Task Runtime 与 Phase 6 静态插件系统，以及后续目标边界。只有明确列入已实现边界的类才是当前能力。
+本文同时记录已实现的既有服务栈和 Phase 9B-1 应用领域基础。只有明确列入已实现边界的类才是当前能力；历史阶段验证记录保留，不代表 Phase 9 外部 worker 已实现。
+
+### Phase 9B-1 应用层边界
+
+`iaisf_application_core` 仅依赖 `iaisf::core`，不依赖网络、线程、Task 或 Plugin。
+它定义唯一身份映射 `weld_inspection/post_weld` 与 `welding_guidance/pre_weld`、集中式
+Application Job 状态转换和无路径的 `ArtifactRef`。两个应用互相独立，不自动串联。
+
+PTV2/WeldAgent adapter、HTTP Application API、Repository、Artifact I/O 和 Worker Protocol
+均未实现。PTV2 的质量评价必须写为 `quality_assessment=not_implemented`；WeldAgent
+边界禁止真实 joint values、机器人控制和 URL 发送。详细契约见 `docs/application_layer.md`。
 
 ### 1.1 Phase 1 已实现边界
 

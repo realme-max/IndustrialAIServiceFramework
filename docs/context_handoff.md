@@ -3,8 +3,16 @@
 ## 1. 当前状态
 
 - 项目：IndustrialAIServiceFramework
-- 当前分支：`phase/8-timer-infrastructure`
-- 当前状态：`PHASE_8G_FINAL_DYNAMIC_PLUGIN_HARDENED`（本地未提交审计；无新的远端 CI run）
+- 当前分支：`phase/9-industrial-ai-application-layer`
+- 当前状态：`PHASE_9B_1_APPLICATION_DOMAIN_FOUNDATION_HARDENED`（Phase 9B-1A，本地双平台验证；未提交）
+- 当前基线 HEAD：`14b10905d593f73117d25d936e7a7a47e588adaa`
+- Phase 9A：只读 Application Integration Design Audit 已完成
+- Phase 9B-1：新增 `iaisf_application_core` / `iaisf::application_core`，仅依赖 `iaisf::core`
+- Phase 9B-1A：返回分配型 `Result` 的解析/验证 API 不声明 `noexcept`；纯查询和 bool 检查保留 `noexcept`
+- 验证：Windows Debug/Release 各注册 558 项（553 passed、5 explicitly skipped、0 failed）；WSL Ubuntu 24.04 GCC 13.3.0 Debug/Release 各注册 786 项（785 passed、1 explicitly skipped、0 failed）；Application Domain 四配置均 25/25 passed；warning 0
+- 应用边界：`weld_inspection/post_weld` 与 `welding_guidance/pre_weld` 完全独立，不自动串联
+- 真实性边界：PTV2 质量评价为 `quality_assessment=not_implemented`；WeldAgent 不得生成真实 joint values、控制机器人或发送 URL
+- 未实现：HTTP Application API、ApplicationJob Repository、Artifact I/O、Worker Protocol、PTV2/WeldAgent adapter、cancel/kill
 - Phase 0 提交：`5fbcec0 docs: complete phase 0 architecture design`
 - Phase 1 最终实现提交：`63b30cffcbe3e621af33664721b3675a647bd1a1`
 - Phase 2 起始 HEAD / main / origin/main：`6065d91b277c07ed04e64b3f08034788965e6ac1`

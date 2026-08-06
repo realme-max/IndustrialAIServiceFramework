@@ -67,6 +67,24 @@ target_link_libraries(iaisf_core PUBLIC nlohmann_json::nlohmann_json)
 iaisf_enable_project_warnings(iaisf_core)
 
 add_library(
+  iaisf_application_core
+  STATIC
+  src/application/application_identity.cpp
+  src/application/application_job_state.cpp
+  src/application/artifact_ref.cpp
+)
+add_library(iaisf::application_core ALIAS iaisf_application_core)
+target_compile_features(iaisf_application_core PUBLIC cxx_std_17)
+target_include_directories(
+  iaisf_application_core
+  PUBLIC
+    "$<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>"
+    "$<BUILD_INTERFACE:${IAISF_GENERATED_INCLUDE_DIR}>"
+)
+target_link_libraries(iaisf_application_core PUBLIC iaisf::core)
+iaisf_enable_project_warnings(iaisf_application_core)
+
+add_library(
   iaisf_logging
   STATIC
   src/logging/async_logger.cpp

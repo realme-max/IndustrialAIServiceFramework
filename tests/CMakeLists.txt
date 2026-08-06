@@ -32,6 +32,30 @@ gtest_add_tests(TARGET iaisf_tests TEST_LIST IAISF_UNIT_TESTS)
 set_tests_properties(${IAISF_UNIT_TESTS} PROPERTIES LABELS unit)
 
 add_executable(
+  iaisf_application_core_tests
+  application/test_application_identity.cpp
+  application/test_application_job_state.cpp
+  application/test_artifact_ref.cpp
+)
+target_compile_features(iaisf_application_core_tests PRIVATE cxx_std_17)
+target_link_libraries(
+  iaisf_application_core_tests
+  PRIVATE
+    iaisf::application_core
+    GTest::gtest
+    GTest::gtest_main
+)
+iaisf_enable_project_warnings(iaisf_application_core_tests)
+gtest_add_tests(
+  TARGET iaisf_application_core_tests
+  TEST_LIST IAISF_APPLICATION_CORE_TESTS
+)
+set_tests_properties(
+  ${IAISF_APPLICATION_CORE_TESTS}
+  PROPERTIES LABELS "unit;application" TIMEOUT 10
+)
+
+add_executable(
   iaisf_logging_tests
   log/test_async_logger.cpp
   log/test_logger_metrics.cpp

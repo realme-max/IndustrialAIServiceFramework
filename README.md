@@ -2,7 +2,7 @@
 
 面向工业 AI 应用的 C++ 高性能任务服务框架。
 
-> 当前结论：`PHASE_8G_FINAL_DYNAMIC_PLUGIN_HARDENED`（本地未提交审计）。Phase 8G 动态插件链路已完成最终本地质量审计；新的远端 Linux CI 仍需在提交后绑定，不把本地结果冒充远端证据。
+> 当前结论：`PHASE_9B_1_APPLICATION_DOMAIN_FOUNDATION_HARDENED`（本地验证，未提交）。Phase 9A 只读设计审计已完成；Phase 9B-1/1A 新增并加固跨平台 `iaisf_application_core`。本地 WSL 结果不是 GitHub Actions 证据。
 
 ## 项目定位
 
@@ -14,6 +14,15 @@
 `iaisf_server --serve --config <path>` 会由 `iaisf_app` 组合 EventLoop、静态插件、
 HTTP/TCP Service 和 signalfd 停止链路并进入事件循环。Windows 保留配置校验，但
 对 `--serve` 返回明确的不支持错误。
+
+## Phase 9 Application Domain Foundation
+
+- `weld_inspection/post_weld` 与 `welding_guidance/pre_weld` 是两个完全独立的应用，不自动串联。
+- 新增 `ApplicationIdentity`、集中式 `ApplicationJobState` 转换矩阵和公共 `ArtifactRef` 值类型。
+- PTV2 当前定位仅为分割与几何输入；独立质量能力尚未实现，必须标记 `quality_assessment=not_implemented`。
+- WeldAgent 当前边界禁止真实 joint values、机器人控制及 controller URL 发送。
+- HTTP Application API、ApplicationJob Repository、Artifact 存储、Worker Protocol 和两个外部项目 adapter 均未实现。
+- 设计与边界详见 [Application Layer](docs/application_layer.md)。
 
 ## Phase 8C-2 配置系统
 

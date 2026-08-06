@@ -3,15 +3,18 @@
 ## 当前结论
 
 ```text
-PHASE_8G_FINAL_DYNAMIC_PLUGIN_HARDENED
+PHASE_9B_1_APPLICATION_DOMAIN_FOUNDATION_HARDENED
 ```
 
-- 当前阶段：Phase 8G-4E Dynamic Plugin Final Hardening（本地未提交审计）
-- 实现状态：动态插件配置、C ABI、Loader、Adapter、PluginRuntime、Metrics、Diagnostics 和回滚链路已审计
-- Windows 验证：Visual Studio 2022 x64 Debug/Release 各 533 注册，528 passed、5 个显式环境 skip、0 failures
-- WSL 验证：Ubuntu 24.04 Debug/Release 各 761/761，分别 1 个权限能力显式 skip、0 failures
-- 日期：2026-08-04（Asia/Shanghai）
-- 下一步：提交当前改动后，以 exact commit 取得 GitHub Actions Linux Debug/Release 证据
+- 当前阶段：Phase 9B-1A Application Domain Final Hardening（本地未提交）
+- 基线：`14b10905d593f73117d25d936e7a7a47e588adaa`（Phase 8G 已提交，不再描述为本地未提交）
+- 实现状态：portable ApplicationIdentity、ApplicationJobState 和 ArtifactRef 已实现并完成 `Result` exception-specification 加固；Phase 9A 只读设计审计已完成
+- Windows 验证：Visual Studio 2022 x64 Debug/Release 各注册 558 项，553 passed、5 explicitly skipped、0 failed；Application Domain 25/25 passed
+- WSL 验证：Ubuntu 24.04 / GCC 13.3.0 Debug/Release 各注册 786 项，785 passed、1 explicitly skipped、0 failed；Application Domain 25/25 passed
+- warning：项目源码与测试为 0；WSL 本地结果不冒充 GitHub Actions
+- 日期：2026-08-06（Asia/Shanghai）
+- 未实现：HTTP Application API、Job Repository、Artifact 存储、Worker Protocol、PTV2/WeldAgent adapter
+- 下一步：先稳定 versioned Application API 与 Repository contract，不接入真实 worker
 
 Phase 8A/8B/8C-1 已提供 timerfd、TCP/HTTP timeout 和 signalfd；Phase 8C-2 在不改变
 这些生命周期语义的前提下增加一次性本地 JSON 配置和应用组合。Linux
