@@ -44,6 +44,7 @@ namespace {
     const ApplicationJobId& job_id,
     const IndustrialApplication application,
     const ScenePhase scene_phase,
+    const ApplicationSubmissionSpec& submission,
     const ApplicationJobState state,
     const std::uint64_t version,
     const ApplicationJobTimePoint created_at,
@@ -64,6 +65,11 @@ namespace {
             ErrorCode::InvalidArgument,
             "application job snapshot invariant is invalid"));
     }
+    const auto valid_submission = submission.validate_for(
+        application, scene_phase);
+    if (!valid_submission) {
+        return valid_submission;
+    }
     return validate_inputs(input_artifacts);
 }
 
@@ -73,6 +79,7 @@ ApplicationJobSnapshot::ApplicationJobSnapshot(
     ApplicationJobId job_id,
     const IndustrialApplication application,
     const ScenePhase scene_phase,
+    ApplicationSubmissionSpec submission,
     const ApplicationJobState state,
     const std::uint64_t version,
     const ApplicationJobTimePoint created_at,
@@ -81,6 +88,7 @@ ApplicationJobSnapshot::ApplicationJobSnapshot(
     : job_id_(std::move(job_id)),
       application_(application),
       scene_phase_(scene_phase),
+      submission_(std::move(submission)),
       state_(state),
       version_(version),
       created_at_(created_at),
@@ -113,6 +121,7 @@ void ApplicationJobSnapshot::swap(ApplicationJobSnapshot& other) noexcept {
     using std::swap;
     swap(application_, other.application_);
     swap(scene_phase_, other.scene_phase_);
+    swap(submission_, other.submission_);
     swap(state_, other.state_);
     swap(version_, other.version_);
     swap(created_at_, other.created_at_);
@@ -126,6 +135,7 @@ Result<ApplicationJobSnapshot> ApplicationJobSnapshot::create(
         request.job_id,
         request.application,
         request.scene_phase,
+        request.submission,
         ApplicationJobState::Accepted,
         1U,
         request.created_at,
@@ -139,6 +149,7 @@ Result<ApplicationJobSnapshot> ApplicationJobSnapshot::create(
             request.job_id,
             request.application,
             request.scene_phase,
+            request.submission,
             ApplicationJobState::Accepted,
             1U,
             request.created_at,
@@ -162,6 +173,7 @@ Result<ApplicationJobSnapshot> ApplicationJobSnapshot::transitioned(
         job_id_,
         application_,
         scene_phase_,
+        submission_,
         state_,
         version_,
         created_at_,
@@ -227,6 +239,11 @@ ApplicationJobTimePoint ApplicationJobSnapshot::created_at() const noexcept {
 
 ApplicationJobTimePoint ApplicationJobSnapshot::updated_at() const noexcept {
     return updated_at_;
+}
+
+const ApplicationSubmissionSpec&
+ApplicationJobSnapshot::submission() const noexcept {
+    return submission_;
 }
 
 const std::vector<ArtifactRef>& ApplicationJobSnapshot::input_artifacts() const noexcept {

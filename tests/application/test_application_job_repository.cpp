@@ -62,6 +62,31 @@ namespace {
     };
 }
 
+[[nodiscard]] ApplicationSubmissionSpec inspection_spec() {
+    auto outputs = InspectionRequestedOutputs::create(true, true);
+    EXPECT_TRUE(outputs);
+    auto submission = WeldInspectionSubmission::create(
+        std::move(outputs).value());
+    EXPECT_TRUE(submission);
+    auto spec = ApplicationSubmissionSpec::create(
+        std::move(submission).value());
+    EXPECT_TRUE(spec);
+    return std::move(spec).value();
+}
+
+[[nodiscard]] ApplicationSubmissionSpec guidance_spec() {
+    auto weld_type = WeldTypeRequest::create(
+        WeldTypeMode::Requested, RequestedWeldType::Corner);
+    EXPECT_TRUE(weld_type);
+    auto submission = WeldingGuidanceSubmission::create(
+        std::move(weld_type).value(), HumanCheckpointPolicy::Required);
+    EXPECT_TRUE(submission);
+    auto spec = ApplicationSubmissionSpec::create(
+        std::move(submission).value());
+    EXPECT_TRUE(spec);
+    return std::move(spec).value();
+}
+
 [[nodiscard]] ApplicationJobCreateRequest request(
     const std::string& id,
     const IndustrialApplication application =
@@ -71,6 +96,19 @@ namespace {
         job_id(id),
         application,
         phase,
+        inspection_spec(),
+        ApplicationJobTimePoint{std::chrono::seconds{100}},
+        {artifact()},
+    };
+}
+
+[[nodiscard]] ApplicationJobCreateRequest guidance_request(
+    const std::string& id) {
+    return ApplicationJobCreateRequest{
+        job_id(id),
+        IndustrialApplication::WeldingGuidance,
+        ScenePhase::PreWeld,
+        guidance_spec(),
         ApplicationJobTimePoint{std::chrono::seconds{100}},
         {artifact()},
     };
@@ -136,8 +174,38 @@ TEST(InMemoryApplicationJobRepositoryTest, CreatesAcceptedVersionOneSnapshot) {
     EXPECT_EQ(created.value().state(), ApplicationJobState::Accepted);
     EXPECT_EQ(created.value().version(), 1U);
     EXPECT_EQ(created.value().created_at(), created.value().updated_at());
+    ASSERT_NE(created.value().submission().inspection(), nullptr);
+    EXPECT_EQ(created.value().submission(), request("job-create").submission);
     EXPECT_EQ(repo->size(), 1U);
     EXPECT_EQ(repo->capacity(), 8U);
+}
+
+TEST(InMemoryApplicationJobRepositoryTest, PersistsGuidanceSubmissionSpec) {
+    auto repo = repository();
+    const auto created = repo->create(guidance_request("guidance-job"));
+    ASSERT_TRUE(created);
+    ASSERT_NE(created.value().submission().guidance(), nullptr);
+    EXPECT_EQ(
+        created.value().submission().guidance()->weld_type().mode(),
+        WeldTypeMode::Requested);
+    ASSERT_TRUE(created.value().submission().guidance()
+                    ->weld_type()
+                    .requested_type()
+                    .has_value());
+    EXPECT_EQ(
+        *created.value().submission().guidance()->weld_type().requested_type(),
+        RequestedWeldType::Corner);
+
+    const auto fetched = repo->get(
+        job_id("guidance-job"), IndustrialApplication::WeldingGuidance);
+    ASSERT_TRUE(fetched);
+    EXPECT_EQ(fetched.value().submission(), created.value().submission());
+    const auto transitioned = repo->transition(
+        job_id("guidance-job"), IndustrialApplication::WeldingGuidance,
+        1U, ApplicationJobState::Queued,
+        ApplicationJobTimePoint{std::chrono::seconds{101}});
+    ASSERT_TRUE(transitioned);
+    EXPECT_EQ(transitioned.value().submission(), created.value().submission());
 }
 
 TEST(InMemoryApplicationJobRepositoryTest, InvalidCreateIsTransactional) {

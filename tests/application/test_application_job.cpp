@@ -29,6 +29,18 @@ namespace {
     };
 }
 
+[[nodiscard]] ApplicationSubmissionSpec inspection_spec() {
+    auto outputs = InspectionRequestedOutputs::create(true, true);
+    EXPECT_TRUE(outputs);
+    auto submission = WeldInspectionSubmission::create(
+        std::move(outputs).value());
+    EXPECT_TRUE(submission);
+    auto spec = ApplicationSubmissionSpec::create(
+        std::move(submission).value());
+    EXPECT_TRUE(spec);
+    return std::move(spec).value();
+}
+
 [[nodiscard]] ApplicationJobCreateRequest request(
     const std::string& id,
     const IndustrialApplication application =
@@ -38,6 +50,7 @@ namespace {
         job_id(id),
         application,
         phase,
+        inspection_spec(),
         ApplicationJobTimePoint{std::chrono::seconds{100}},
         {artifact("input-1")},
     };
@@ -54,6 +67,11 @@ TEST(ApplicationJobSnapshotTest, CreationProducesAcceptedVersionOneSnapshot) {
     EXPECT_EQ(created.value().state(), ApplicationJobState::Accepted);
     EXPECT_EQ(created.value().version(), 1U);
     EXPECT_EQ(created.value().created_at(), created.value().updated_at());
+    ASSERT_NE(created.value().submission().inspection(), nullptr);
+    EXPECT_TRUE(created.value().submission().inspection()->outputs()
+                    .requests_segmentation());
+    EXPECT_TRUE(created.value().submission().inspection()->outputs()
+                    .requests_geometry());
     ASSERT_EQ(created.value().input_artifacts().size(), 1U);
 }
 
@@ -104,12 +122,14 @@ TEST(ApplicationJobSnapshotTest, MoveConstructionPreservesSourceInvariants) {
     EXPECT_EQ(source.input_artifacts().size(), 1U);
     EXPECT_EQ(destination.job_id(), source.job_id());
     EXPECT_EQ(destination.input_artifacts().size(), 1U);
+    EXPECT_EQ(destination.submission(), source.submission());
 
     const auto transitioned = source.transitioned(
         ApplicationJobState::Queued,
         ApplicationJobTimePoint{std::chrono::seconds{101}});
     ASSERT_TRUE(transitioned);
     EXPECT_EQ(transitioned.value().version(), 2U);
+    EXPECT_EQ(transitioned.value().submission(), source.submission());
 }
 
 TEST(ApplicationJobSnapshotTest, MoveAssignmentPreservesSourceInvariants) {
@@ -128,6 +148,7 @@ TEST(ApplicationJobSnapshotTest, MoveAssignmentPreservesSourceInvariants) {
     EXPECT_EQ(source.input_artifacts().size(), 1U);
     EXPECT_EQ(destination.job_id(), source.job_id());
     EXPECT_EQ(destination.input_artifacts().size(), 1U);
+    EXPECT_EQ(destination.submission(), source.submission());
 }
 
 TEST(ApplicationJobSnapshotTest, AllocatingMoveOperationsAreNotNoexcept) {
@@ -187,6 +208,7 @@ TEST(ApplicationJobSnapshotTest, TransitionPreservesIdentityAndIncrementsOnce) {
     EXPECT_EQ(transitioned.value().job_id(), created.value().job_id());
     EXPECT_EQ(transitioned.value().state(), ApplicationJobState::Queued);
     EXPECT_EQ(transitioned.value().version(), 2U);
+    EXPECT_EQ(transitioned.value().submission(), created.value().submission());
     EXPECT_EQ(transitioned.value().created_at(), created.value().created_at());
     EXPECT_EQ(transitioned.value().updated_at(), update_time);
 }

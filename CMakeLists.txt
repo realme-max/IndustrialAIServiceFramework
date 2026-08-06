@@ -73,6 +73,7 @@ add_library(
   src/application/application_job.cpp
   src/application/application_job_id.cpp
   src/application/application_job_state.cpp
+  src/application/application_submission.cpp
   src/application/artifact_ref.cpp
 )
 add_library(iaisf::application_core ALIAS iaisf_application_core)
