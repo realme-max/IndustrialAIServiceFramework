@@ -3,23 +3,24 @@
 ## 当前结论
 
 ```text
-PHASE_9B_1_APPLICATION_DOMAIN_FOUNDATION_HARDENED
+PHASE_9B_2_APPLICATION_JOB_VALUE_INVARIANT_HARDENED
 ```
 
-- 当前阶段：Phase 9B-1A Application Domain Final Hardening（本地未提交）
-- 基线：`14b10905d593f73117d25d936e7a7a47e588adaa`（Phase 8G 已提交，不再描述为本地未提交）
-- 实现状态：portable ApplicationIdentity、ApplicationJobState 和 ArtifactRef 已实现并完成 `Result` exception-specification 加固；Phase 9A 只读设计审计已完成
-- Windows 验证：Visual Studio 2022 x64 Debug/Release 各注册 558 项，553 passed、5 explicitly skipped、0 failed；Application Domain 25/25 passed
-- WSL 验证：Ubuntu 24.04 / GCC 13.3.0 Debug/Release 各注册 786 项，785 passed、1 explicitly skipped、0 failed；Application Domain 25/25 passed
+- 当前阶段：Phase 9B-2 Application Job Value Invariant Hardening（本地未提交）
+- 基线：`d84557413fad50f26478698d8157bfb691d709ce`（Phase 9B-1 已提交并通过远程 CI）
+- 实现状态：portable Job ID/snapshot、结构化 Repository contract 和线程安全有界内存 Repository 已实现；ID/Snapshot move 改为 copy-preserving 并在所有接受边界重验不变量；未改变 Phase 9B-1 状态矩阵
+- Windows 验证：Visual Studio 2022 x64 Debug/Release 各注册 598 项，593 passed、5 explicitly skipped、0 failed；Application 65/65、Repository 40/40 passed
+- WSL 验证：Ubuntu 24.04 / GCC 13.3.0 Debug/Release 各注册 826 项，825 passed、1 explicitly skipped、0 failed；Application 65/65、Repository 40/40 passed
 - warning：项目源码与测试为 0；WSL 本地结果不冒充 GitHub Actions
 - 日期：2026-08-06（Asia/Shanghai）
-- 未实现：HTTP Application API、Job Repository、Artifact 存储、Worker Protocol、PTV2/WeldAgent adapter
-- 下一步：先稳定 versioned Application API 与 Repository contract，不接入真实 worker
+- 未实现：versioned HTTP Application API、持久化 Repository、Artifact I/O/Store、Worker Protocol、PTV2/WeldAgent adapter
+- 下一步：Phase 9B-3 只实现 versioned HTTP/JSON Application API，不接入真实 worker
 
 Phase 8A/8B/8C-1 已提供 timerfd、TCP/HTTP timeout 和 signalfd；Phase 8C-2 在不改变
 这些生命周期语义的前提下增加一次性本地 JSON 配置和应用组合。Linux
 `iaisf_server --serve --config` 会启动静态 Echo/MockVision、Task HTTP API 与监听；
-动态插件、任务自动 timeout、热更新和异步文件日志仍未实现。
+既有动态插件和异步文件日志能力保持不变；Application Job Repository 尚未接入 Service，
+任务自动 timeout 与热更新仍未实现。
 
 Phase 7 新增 `iaisf_task_api`（跨平台）和 `iaisf_service`（Linux-only）。
 Windows Debug/Release 均为 370/370，Task API 46/46；Linux Service 15 个 CTest

@@ -2,7 +2,7 @@
 
 面向工业 AI 应用的 C++ 高性能任务服务框架。
 
-> 当前结论：`PHASE_9B_1_APPLICATION_DOMAIN_FOUNDATION_HARDENED`（本地验证，未提交）。Phase 9A 只读设计审计已完成；Phase 9B-1/1A 新增并加固跨平台 `iaisf_application_core`。本地 WSL 结果不是 GitHub Actions 证据。
+> 当前结论：`PHASE_9B_2_APPLICATION_JOB_VALUE_INVARIANT_HARDENED`（本地验证，未提交）。Phase 9B-2 在已提交的 Phase 9B-1 基线 `d84557413fad50f26478698d8157bfb691d709ce` 上新增跨平台 Application Job 值模型和有界内存 Repository，并完成移动后值不变量加固；本地 WSL 结果不是 GitHub Actions 证据。
 
 ## 项目定位
 
@@ -15,13 +15,19 @@
 HTTP/TCP Service 和 signalfd 停止链路并进入事件循环。Windows 保留配置校验，但
 对 `--serve` 返回明确的不支持错误。
 
-## Phase 9 Application Domain Foundation
+## Phase 9 Application Domain 与 Repository Core
 
 - `weld_inspection/post_weld` 与 `welding_guidance/pre_weld` 是两个完全独立的应用，不自动串联。
-- 新增 `ApplicationIdentity`、集中式 `ApplicationJobState` 转换矩阵和公共 `ArtifactRef` 值类型。
+- `iaisf_application_core` 提供 `ApplicationIdentity`、集中式 `ApplicationJobState` 转换矩阵、公共 `ArtifactRef`、强类型 `ApplicationJobId` 和不可产生非法公开状态的 `ApplicationJobSnapshot`。
+- `iaisf_application_repository` 提供结构化失败、乐观版本控制和线程安全的 `InMemoryApplicationJobRepository`。成功转换在单一临界区内校验并提交，version 精确增加 1；相同 `expected_version` 的并发转换只有一次成功。
+- `ApplicationJobId` 与 `ApplicationJobSnapshot` 使用 copy-preserving move；move construction/assignment 后源对象与目标对象都保持完整合法。分配型 copy/move assignment 先复制再无分配 swap，失败不改变目标对象。
+- Snapshot create/transition 与 Repository create/get/transition/erase 都执行最终 ID/值不变量检查；语法无效 ID 返回 `InvalidArgument`，合法 ID 的跨 application 访问仍返回 `NotFound`。
+- Repository 容量固定且非零，不自动驱逐、不做 TTL/持久化；只允许按精确版本显式删除终态元数据。`ArtifactRef` 仍只是已验证的值引用，Repository 不读取、拥有或删除 artifact 内容。
+- 跨 application 查询或更新统一返回 `NotFound`，不泄露另一应用的 Job 是否存在；`weld_inspection/post_weld` 与 `welding_guidance/pre_weld` 继续完全独立。
 - PTV2 当前定位仅为分割与几何输入；独立质量能力尚未实现，必须标记 `quality_assessment=not_implemented`。
 - WeldAgent 当前边界禁止真实 joint values、机器人控制及 controller URL 发送。
-- HTTP Application API、ApplicationJob Repository、Artifact 存储、Worker Protocol 和两个外部项目 adapter 均未实现。
+- Windows VS2022 Debug/Release 本地各注册 598 项：593 passed、5 explicitly skipped、0 failed；WSL Ubuntu Debug/Release 本地各注册 826 项：825 passed、1 explicitly skipped、0 failed。本阶段 Repository 40/40 在四套配置均通过，项目源码与测试编译 warning 为 0。
+- versioned HTTP Application API、持久化 Repository、Artifact I/O/Store、Worker Protocol 和两个外部项目 adapter 均未实现。
 - 设计与边界详见 [Application Layer](docs/application_layer.md)。
 
 ## Phase 8C-2 配置系统

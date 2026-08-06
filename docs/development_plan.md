@@ -2,9 +2,10 @@
 
 ## 1. 执行原则
 
-当前实施点为 **Phase 9B-1（completed locally, uncommitted）**。Phase 9A 只读设计审计
-已经完成；Phase 9B-1 只增加 portable Application Domain Foundation，未开始 HTTP
-Application API、Repository、Artifact 存储或 Worker Protocol。
+当前实施点为 **Phase 9B-2（completed locally, uncommitted）**。Phase 9A 只读设计审计
+和 Phase 9B-1 portable Application Domain Foundation 已完成；Phase 9B-2 新增强类型 Job ID、
+不可变 snapshot、Repository contract 与有界内存实现，未开始 HTTP Application API、持久化、
+Artifact I/O 或 Worker Protocol。Phase 9B-3 建议只实现 versioned HTTP/JSON Application API。
 
 项目当前按 Phase 0—10 推进。Phase 2 后将 Reactor Core 与 TCP Transport 分开验收，
 因此后续原计划顺延一阶段。每个阶段只在其验收门槛通过后进入下一阶段，并同步更新：
