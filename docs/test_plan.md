@@ -2,6 +2,23 @@
 
 ## 1. 状态与原则
 
+> Phase 9B-1 本地最终矩阵：Windows VS2022 Debug 和 Release 各注册 558 项，其中
+> 553 passed、5 explicitly skipped、0 failed；WSL Ubuntu 24.04 GCC 13.3.0 Debug 和
+> Release 各注册 786 项，其中 785 passed、1 explicitly skipped、0 failed。
+> Application Domain 分组在四个配置中均为 25/25 passed。项目源码与测试编译 warning
+> 为 0。WSL 结果不是 GitHub Actions 证据。
+
+Phase 9B-1A 移除了分配型 `Result` API 上不成立的 `noexcept` 声明及对应静态测试；
+测试只验证正常和普通非法输入通过结构化 `Result` 返回，不声称能够验证 OOM 行为。
+
+### Phase 9B-1 Application Domain 测试
+
+- 稳定 enum 字符串、严格解析、两组唯一 application/scene 映射和非法枚举 fail-closed；
+- 两个应用的完整 11-state 转换矩阵、终态不可恢复、自转换拒绝及 guidance-only `waiting_human`；
+- ArtifactRef 的空值、精确上限、上限 +1、控制字符、NUL、SHA 大小写/非 hex、size/count 边界；
+- Windows path、UNC、`../` 与 URL 无法作为 artifact ID；错误有界且不回显输入；
+- 测试不使用 sleep、网络、临时文件、环境变量或外部项目。
+
 > Phase 7G 最新结论覆盖下文历史性描述：Linux push CI run 30781932731 已实际执行完整测试并通过 497/497，warning 修复后项目源码与测试 warning 均为 0，当前状态为 `PHASE_7_SERVICE_INTEGRATION_COMPLETED`。
 
 下方长段落保留的是 Phase 7B 的历史快照，不是当前 Linux 结果；当前矩阵和 Phase 7E 审计记录优先。
