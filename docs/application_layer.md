@@ -118,3 +118,30 @@ Phase 9B-3 建议只定义 versioned HTTP/JSON Application API，将稳定 Domai
 Worker Protocol 仍应留在后续阶段。不得为了复用现有
 `/v1/tasks` 将多阶段 WeldAgent 强行包装成 `IAlgorithmPlugin`，也不得在协议稳定前接入
 真实 PTV2、WeldAgent、GPU 或机器人。
+
+## Phase 9B-3A-1：Submission Specification
+
+本阶段仅补齐 Domain submission specification。`ApplicationSubmissionSpec` 使用受控 factory
+创建，内部保存 inspection 或 guidance 的已验证值；不保存原始 JSON、不执行 I/O，也不依赖
+HTTP、线程或平台 API。
+
+`InspectionRequestedOutputs` 使用 bitmask 表示输出集合，因此 segmentation/geometry 的输入
+顺序不会形成两个不同的 Domain 值。至少一个输出必选，重复和非法枚举无法进入类型。
+
+`WeldTypeRequest` 强制 `auto` 不带 requested type，`requested` 必须携带 `straight`、
+`corner` 或 `l`。`HumanCheckpointPolicy` 当前只有 `required`。这些字段只是业务请求，
+不代表质量评价、算法分派、IK、轨迹、碰撞检查或机器人执行。
+
+Submission specification 已加入 Job request 和 immutable snapshot。Snapshot create、
+transition 和 Repository create 均验证 application/scene/spec 三方匹配；copy/move、get、
+transition 和终态删除不会丢失 specification。当前 Domain 仍允许 1–16 个 ArtifactRef；
+后续 HTTP v1 会暂时限制为恰好一个点云输入，直到 artifact role 被正式定义。
+
+本阶段没有 JSON/HTTP API、Task API/route、ID generator、clock、幂等、dispatcher、worker、
+Artifact I/O/Store、AppConfig、RuntimeOptions 或 Service 组合。
+
+本阶段本地验证：Application label 在 Windows VS2022 Debug/Release 与 WSL Ubuntu 24.04
+GCC Debug/Release 均为 74 registered、74 passed、0 explicitly skipped、0 failed；完整
+CTest 分别为 Windows `607/602/5/0`（registered/passed/skipped/failed）和 WSL
+`835/834/1/0`。四套配置均重新生成并编译，项目源码/测试 warning 为 0；WSL 结果不代表
+GitHub Actions。

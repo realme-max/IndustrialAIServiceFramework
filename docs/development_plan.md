@@ -557,3 +557,20 @@ warning 修复提交 `a44b1272bf603a17724fa17c66d60ee0e18bb918` 仅修改测试�
 - Windows 和 WSL Debug/Release 本地回归，项目 warning 为 0。
 
 未包含：热加载、运行期加载、动态插件 HTTP 管理、远程下载、进程隔离和真实模型推理。下一步是提交后使用同一提交运行 Linux CI，再进行阶段封板记录。
+
+## Phase 9B-3A-1：Application Submission Domain Foundation（完成）
+
+- [x] Inspection 输出集合的规范化、非空和非法枚举拒绝
+- [x] Guidance weld type 与 human checkpoint 不变量
+- [x] Application/scene/spec 交叉匹配校验
+- [x] Job request、immutable snapshot、Repository 的完整保存和独立复制
+- [x] Domain/Application/Repository 测试及 CTest 注册
+
+本阶段不包含 JSON、HTTP、Job ID generator、clock、幂等、dispatcher、worker、Artifact
+Store 或 Service 组合。下一阶段 9B-3A-2 只应处理 Domain contract 的进一步测试/边界审计，
+不得提前注册 Application HTTP route。
+
+本地封板验证：Windows VS2022 Debug/Release 各 `607 registered / 602 passed / 5 explicitly
+skipped / 0 failed`；WSL Ubuntu 24.04 GCC Debug/Release 各 `835 / 834 / 1 / 0`。
+Application label 四套均 `74/74`，项目源码和测试 warning 均为 0；WSL 结果不是 GitHub
+Actions 证据。本阶段未 commit/push，未开始 9B-3A-2。

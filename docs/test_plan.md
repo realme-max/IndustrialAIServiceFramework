@@ -2,12 +2,12 @@
 
 ## 1. 状态与原则
 
-> Phase 9B-2 值不变量加固后的本地最终矩阵：Windows VS2022 Debug 和 Release 各注册
-> 598 项，其中 593 passed、5 explicitly skipped、0 failed；WSL Ubuntu 24.04 GCC 13.3.0
-> Debug 和 Release 各注册 826 项，其中 825 passed、1 explicitly skipped、0 failed。
-> Application 分组在四个配置中均为 65 项，其中 Phase 9B-1 Domain 25 项、Phase 9B-2
-> Repository 40 项，全部 passed。项目源码与测试编译 warning
-> 为 0。WSL 结果不是 GitHub Actions 证据。
+> Phase 9B-3A-1 本地最终矩阵：Windows VS2022 Debug 和 Release 各注册 607 项，其中
+> 602 passed、5 explicitly skipped、0 failed；WSL Ubuntu 24.04 GCC 13.3.0 Debug 和
+> Release 各注册 835 项，其中 834 passed、1 explicitly skipped、0 failed。Application
+> 分组在四个配置中均为 74 项（Application Submission 8、Application Domain 33、
+> Repository 41），全部 passed。项目源码与测试编译 warning 为 0。WSL 结果不是 GitHub
+> Actions 证据。Phase 9B-2 的 598/826 历史矩阵保留在下方阶段记录中。
 
 Phase 9B-1A 移除了分配型 `Result` API 上不成立的 `noexcept` 声明及对应静态测试；
 测试只验证正常和普通非法输入通过结构化 `Result` 返回，不声称能够验证 OOM 行为。
@@ -913,3 +913,18 @@ Phase 0 的非运行验证项：
 Debug/Release `596/596`；两平台 version/config smoke 成功，项目源码与测试编译
 warning 为 0。WSL 直接构建当前 Windows 挂载工作区，未使用另一份 Linux clone，也不
 冒充 GitHub Actions。当前实现尚未获得 exact commit 的远端 Linux CI。
+
+## Phase 9B-3A-1 Application Submission Domain Foundation 本地验证
+
+本阶段四套本地配置均重新生成并编译了 application core、repository 和新增测试，未使用旧二进制冒充结果。Application label 定向 CTest 在 Windows VS2022 Debug/Release 与 WSL Ubuntu 24.04 GCC Debug/Release 均为 `74 registered / 74 passed / 0 explicitly skipped / 0 failed`；其中 Application Submission 为 8 项，Application Domain（含 identity、state、submission、job、artifact）为 33 项，Repository 为 41 项。
+
+完整 CTest 矩阵如下；WSL 结果是本地验证，不是 GitHub Actions 证据：
+
+| 配置 | registered | passed | explicitly skipped | failed |
+|---|---:|---:|---:|---:|
+| Windows VS2022 Debug | 607 | 602 | 5 | 0 |
+| Windows VS2022 Release | 607 | 602 | 5 | 0 |
+| WSL Ubuntu 24.04 GCC Debug | 835 | 834 | 1 | 0 |
+| WSL Ubuntu 24.04 GCC Release | 835 | 834 | 1 | 0 |
+
+Windows 的 5 个 skip 是既有 RollingFileSink/SafePath capability 环境项；WSL 的 1 个 skip 是既有 SafePath permission capability 项。四套配置的项目源码和测试编译 warning 均为 0，`git diff --check` 通过。新增覆盖包括：inspection 输出 bitmask 规范化、guidance auto/requested 组合、非法 enum 和 policy、copy/move 源目标不变量、application/scene/spec 匹配、Snapshot transition 保持 spec、Repository 保存 guidance spec 以及跨 application 隔离回归。

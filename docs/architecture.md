@@ -1050,3 +1050,28 @@ JSON file -> AppConfig (portable)
 EventLoop 只增加构造期 TimerQueueOptions 注入，TimerQueue、stop 和 active-batch 生命周期
 语义未改变。ServiceOptions 只携带已验证的 HTTP timeout 值；HttpSession 与 TcpConnection
 原有 timeout 所有权、generation 和 weak_ptr 规则未改变。
+
+## Phase 9B-3A-1 Domain boundary
+
+`iaisf_application_core` 新增 `ApplicationSubmissionSpec`，仍只依赖 `iaisf::core`。其
+validated value 进入 `ApplicationJobCreateRequest → ApplicationJobSnapshot →
+InMemoryApplicationJobRepository`，Repository 不理解 JSON、HTTP、worker 或具体工业算法。
+
+```text
+validated inspection/guidance spec
+                 ↓
+ApplicationJobCreateRequest
+                 ↓
+ApplicationJobSnapshot (immutable)
+                 ↓
+Repository value copy
+```
+
+Inspection 与 guidance 只能携带各自 spec；交叉 application/scene/spec 组合 fail-closed。
+Snapshot transition 只改变 state/version/time，spec 保持逐字值相等。Domain 尚未创建 HTTP
+route、ID generator、clock、dispatcher 或 Service 入口。
+
+本地验证已重新生成四套构建树：Windows VS2022 Debug/Release 全量各 `607 registered /
+602 passed / 5 explicitly skipped / 0 failed`，WSL Ubuntu 24.04 GCC Debug/Release 各
+`835 / 834 / 1 / 0`；Application label 四套均 `74/74`，warning 为 0。WSL 结果不作为
+GitHub Actions 证据。

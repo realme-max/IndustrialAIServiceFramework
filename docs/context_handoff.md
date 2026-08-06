@@ -4,8 +4,8 @@
 
 - 项目：IndustrialAIServiceFramework
 - 当前分支：`phase/9-industrial-ai-application-layer`
-- 当前状态：`PHASE_9B_2_APPLICATION_JOB_VALUE_INVARIANT_HARDENED`（本地双平台验证；未提交）
-- 当前基线 HEAD：`d84557413fad50f26478698d8157bfb691d709ce`
+- 当前状态：`PHASE_9B_3A_1_APPLICATION_SUBMISSION_DOMAIN_FOUNDATION_COMPLETED`（本地四配置验证；未提交）
+- 当前基线 HEAD：`6271ba1909ae27994b427233f365b567222104dd`
 - Phase 9A：只读 Application Integration Design Audit 已完成
 - Phase 9B-1：新增 `iaisf_application_core` / `iaisf::application_core`，仅依赖 `iaisf::core`
 - Phase 9B-1A：返回分配型 `Result` 的解析/验证 API 不声明 `noexcept`；纯查询和 bool 检查保留 `noexcept`
@@ -14,7 +14,7 @@
 - Repository：固定非零容量、无自动驱逐/TTL/持久化；相同 expected version 只有一个 writer 成功；版本不回绕；只显式删除精确版本的终态元数据
 - 隔离：application/scene 继续唯一配对；跨 application 的 Job 访问按 `NotFound` 处理；两个业务不串联
 - Artifact：Job 持有 1–16 个已验证 metadata 副本；Repository 不读取、拥有或删除 artifact 内容
-- 验证：Windows Debug/Release 各注册 598 项（593 passed、5 explicitly skipped、0 failed）；WSL Ubuntu 24.04 GCC 13.3.0 Debug/Release 各注册 826 项（825 passed、1 explicitly skipped、0 failed）；Application 65/65、Repository 40/40 四配置均 passed；warning 0
+- 验证：Windows Debug/Release 各注册 607 项（602 passed、5 explicitly skipped、0 failed）；WSL Ubuntu 24.04 GCC 13.3.0 Debug/Release 各注册 835 项（834 passed、1 explicitly skipped、0 failed）；Application 74/74 四配置均 passed；warning 0。WSL 结果不是 GitHub Actions 证据
 - 应用边界：`weld_inspection/post_weld` 与 `welding_guidance/pre_weld` 完全独立，不自动串联
 - 真实性边界：PTV2 质量评价为 `quality_assessment=not_implemented`；WeldAgent 不得生成真实 joint values、控制机器人或发送 URL
 - 未实现：versioned HTTP Application API、持久化 Repository、Artifact I/O/Store、Worker Protocol、PTV2/WeldAgent adapter、worker cancel/kill
@@ -1514,3 +1514,22 @@ Active stop 不保证触发请求返回 503；连接可能在响应生成前关�
 - ASan/UBSan were not executed because no sanitizer build configuration is
   enabled; no workflow was changed. Hot reload, remote loading, plugin
   marketplace, process isolation and sandboxing remain forbidden.
+
+## Phase 9B-3A-1 handoff
+
+- 当前分支：`phase/9-industrial-ai-application-layer`；工作区保持未提交。
+- 新增 `ApplicationSubmissionSpec`，内部 variant 不直接暴露；通过受控 factory 创建。
+- Inspection 使用 bitmask 输出集合，至少一个输出；Guidance 使用 validated weld type 和
+  `HumanCheckpointPolicy::Required`。
+- `ApplicationJobCreateRequest`、`ApplicationJobSnapshot` 和 InMemory Repository 均完整保存
+  spec；Snapshot transition 只改变状态、版本和时间；get 返回独立副本。
+- application/scene/spec 交叉组合失败，不改变 Phase 9B-1 状态矩阵或 ArtifactRef 1–16 上限。
+- 本阶段没有 JSON/HTTP、ID generator、clock、幂等、dispatcher、worker、Artifact Store、
+  Service、PTV2 或 WeldAgent 接入。
+- Application label 定向测试四套配置均为 74 registered、74 passed、0 explicitly skipped、
+  0 failed；其中 Application Submission 8 项、Application Domain 33 项、Repository 41 项。
+- 全量本地矩阵：Windows VS2022 Debug/Release 各 607 registered、602 passed、5 explicitly
+  skipped、0 failed；WSL Ubuntu 24.04 GCC Debug/Release 各 835 registered、834 passed、1
+  explicitly skipped、0 failed。四套配置均重新生成并编译，项目源码/测试 warning 为 0，WSL
+  结果不代表 GitHub Actions。
+- 下一阶段不得直接注册 HTTP route；先完成 Domain contract 的边界测试与审计。

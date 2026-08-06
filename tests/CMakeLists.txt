@@ -35,6 +35,7 @@ add_executable(
   iaisf_application_core_tests
   application/test_application_identity.cpp
   application/test_application_job_state.cpp
+  application/test_application_submission.cpp
   application/test_artifact_ref.cpp
 )
 target_compile_features(iaisf_application_core_tests PRIVATE cxx_std_17)

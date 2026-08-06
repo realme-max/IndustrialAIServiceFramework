@@ -2,7 +2,7 @@
 
 面向工业 AI 应用的 C++ 高性能任务服务框架。
 
-> 当前结论：`PHASE_9B_2_APPLICATION_JOB_VALUE_INVARIANT_HARDENED`（本地验证，未提交）。Phase 9B-2 在已提交的 Phase 9B-1 基线 `d84557413fad50f26478698d8157bfb691d709ce` 上新增跨平台 Application Job 值模型和有界内存 Repository，并完成移动后值不变量加固；本地 WSL 结果不是 GitHub Actions 证据。
+> 当前结论：`PHASE_9B_3A_1_APPLICATION_SUBMISSION_DOMAIN_FOUNDATION_COMPLETED`（本地验证，未提交）。Phase 9B-3A-1 在 Phase 9B-2 基础上增加不可变 application-specific submission specification，并完整保存在 Job/Snapshot/Repository；本地 WSL 结果不是 GitHub Actions 证据。
 
 ## 项目定位
 
@@ -26,7 +26,7 @@ HTTP/TCP Service 和 signalfd 停止链路并进入事件循环。Windows 保留
 - 跨 application 查询或更新统一返回 `NotFound`，不泄露另一应用的 Job 是否存在；`weld_inspection/post_weld` 与 `welding_guidance/pre_weld` 继续完全独立。
 - PTV2 当前定位仅为分割与几何输入；独立质量能力尚未实现，必须标记 `quality_assessment=not_implemented`。
 - WeldAgent 当前边界禁止真实 joint values、机器人控制及 controller URL 发送。
-- Windows VS2022 Debug/Release 本地各注册 598 项：593 passed、5 explicitly skipped、0 failed；WSL Ubuntu Debug/Release 本地各注册 826 项：825 passed、1 explicitly skipped、0 failed。本阶段 Repository 40/40 在四套配置均通过，项目源码与测试编译 warning 为 0。
+- Windows VS2022 Debug/Release 本地各注册 607 项：602 passed、5 explicitly skipped、0 failed；WSL Ubuntu Debug/Release 本地各注册 835 项：834 passed、1 explicitly skipped、0 failed。Application 74/74（其中 Application Submission 8 项），Repository 41/41 在四套配置均通过，项目源码与测试编译 warning 为 0。上一阶段的 598/826 矩阵保留在历史记录中。
 - versioned HTTP Application API、持久化 Repository、Artifact I/O/Store、Worker Protocol 和两个外部项目 adapter 均未实现。
 - 设计与边界详见 [Application Layer](docs/application_layer.md)。
 
@@ -535,3 +535,27 @@ workflow 已构建插件、fixture、loader/adapter tests 和 Service targets。
 本轮新增真实 fixture 动态插件、配置校验和 Service 集成测试。WSL Ubuntu Debug/Release 均为 752/752，
 Windows VS2022 Debug/Release 均为 524 个测试、520 passed、4 skipped（既有环境相关），项目源码和测试 warning 均为 0。
 这些是本地回归结果，当前没有为本轮提交绑定 GitHub Actions run。
+
+## Phase 9B-3A-1：Application Submission Domain Foundation
+
+状态：`PHASE_9B_3A_1_APPLICATION_SUBMISSION_DOMAIN_FOUNDATION_COMPLETED`（本地未提交）。
+本阶段只增加不可变的 application-specific submission specification，并将其完整保存到
+`ApplicationJobCreateRequest`、`ApplicationJobSnapshot` 和 Repository；没有 JSON、HTTP、
+Task API/route、Job ID generator、clock、dispatcher、worker、Artifact I/O、AppConfig、
+RuntimeOptions 或 Service 组合。
+
+Inspection 只表达 `segmentation`/`geometry` 输出请求；没有质量评分、pass/fail 或插件选择。
+Guidance 只保存 `auto`/`requested` weld type、`straight`/`corner`/`l` 请求和必需的人审
+checkpoint；不授权机器人，也不表示算法已正确分派。后续 HTTP v1 才会将输入收窄为恰好一个
+点云 Artifact。
+
+本地验证矩阵（四套配置均重新生成并编译）：
+
+| 配置 | registered | passed | explicitly skipped | failed | Application label |
+|---|---:|---:|---:|---:|---:|
+| Windows VS2022 Debug | 607 | 602 | 5 | 0 | 74/74 |
+| Windows VS2022 Release | 607 | 602 | 5 | 0 | 74/74 |
+| WSL Ubuntu 24.04 GCC Debug | 835 | 834 | 1 | 0 | 74/74 |
+| WSL Ubuntu 24.04 GCC Release | 835 | 834 | 1 | 0 | 74/74 |
+
+项目源码和测试编译 warning 均为 0，`git diff --check` 通过。WSL 结果是本地验证，不是 GitHub Actions；本阶段没有 commit、push 或进入 9B-3A-2。

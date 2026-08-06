@@ -8,6 +8,7 @@
 #include "iaisf/application/application_identity.hpp"
 #include "iaisf/application/application_job_id.hpp"
 #include "iaisf/application/application_job_state.hpp"
+#include "iaisf/application/application_submission.hpp"
 #include "iaisf/application/artifact_ref.hpp"
 #include "iaisf/core/result.hpp"
 
@@ -22,6 +23,7 @@ struct ApplicationJobCreateRequest {
     ApplicationJobId job_id;
     IndustrialApplication application;
     ScenePhase scene_phase;
+    ApplicationSubmissionSpec submission;
     ApplicationJobTimePoint created_at;
     std::vector<ArtifactRef> input_artifacts;
 };
@@ -57,6 +59,7 @@ public:
     [[nodiscard]] std::uint64_t version() const noexcept;
     [[nodiscard]] ApplicationJobTimePoint created_at() const noexcept;
     [[nodiscard]] ApplicationJobTimePoint updated_at() const noexcept;
+    [[nodiscard]] const ApplicationSubmissionSpec& submission() const noexcept;
     [[nodiscard]] const std::vector<ArtifactRef>& input_artifacts() const noexcept;
 
 private:
@@ -67,6 +70,7 @@ private:
         ApplicationJobId job_id,
         IndustrialApplication application,
         ScenePhase scene_phase,
+        ApplicationSubmissionSpec submission,
         ApplicationJobState state,
         std::uint64_t version,
         ApplicationJobTimePoint created_at,
@@ -78,6 +82,7 @@ private:
     ApplicationJobId job_id_;
     IndustrialApplication application_;
     ScenePhase scene_phase_;
+    ApplicationSubmissionSpec submission_;
     ApplicationJobState state_;
     std::uint64_t version_;
     ApplicationJobTimePoint created_at_;

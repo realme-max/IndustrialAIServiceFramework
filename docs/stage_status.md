@@ -3,18 +3,18 @@
 ## 当前结论
 
 ```text
-PHASE_9B_2_APPLICATION_JOB_VALUE_INVARIANT_HARDENED
+PHASE_9B_3A_1_APPLICATION_SUBMISSION_DOMAIN_FOUNDATION_COMPLETED
 ```
 
-- 当前阶段：Phase 9B-2 Application Job Value Invariant Hardening（本地未提交）
-- 基线：`d84557413fad50f26478698d8157bfb691d709ce`（Phase 9B-1 已提交并通过远程 CI）
-- 实现状态：portable Job ID/snapshot、结构化 Repository contract 和线程安全有界内存 Repository 已实现；ID/Snapshot move 改为 copy-preserving 并在所有接受边界重验不变量；未改变 Phase 9B-1 状态矩阵
-- Windows 验证：Visual Studio 2022 x64 Debug/Release 各注册 598 项，593 passed、5 explicitly skipped、0 failed；Application 65/65、Repository 40/40 passed
-- WSL 验证：Ubuntu 24.04 / GCC 13.3.0 Debug/Release 各注册 826 项，825 passed、1 explicitly skipped、0 failed；Application 65/65、Repository 40/40 passed
+- 当前阶段：Phase 9B-3A-1 Application Submission Domain Foundation（本地未提交）
+- 基线：`6271ba1909ae27994b427233f365b567222104dd`（Phase 9B-2 已验收）
+- 实现状态：新增不可变 submission specification，并在 Job request、Snapshot 和 Repository 中完整保存；不改变既有 Job 状态矩阵、ArtifactRef 1–16 上限或 application 隔离
+- Windows 验证：Visual Studio 2022 x64 Debug/Release 各注册 607 项，602 passed、5 explicitly skipped、0 failed；Application 74/74
+- WSL 验证：Ubuntu 24.04 / GCC 13.3.0 Debug/Release 各注册 835 项，834 passed、1 explicitly skipped、0 failed；Application 74/74
 - warning：项目源码与测试为 0；WSL 本地结果不冒充 GitHub Actions
 - 日期：2026-08-06（Asia/Shanghai）
 - 未实现：versioned HTTP Application API、持久化 Repository、Artifact I/O/Store、Worker Protocol、PTV2/WeldAgent adapter
-- 下一步：Phase 9B-3 只实现 versioned HTTP/JSON Application API，不接入真实 worker
+- 下一步：Phase 9B-3A-2 Domain contract 进一步审计（尚未开始）；versioned HTTP/JSON API 仍属后续范围
 
 Phase 8A/8B/8C-1 已提供 timerfd、TCP/HTTP timeout 和 signalfd；Phase 8C-2 在不改变
 这些生命周期语义的前提下增加一次性本地 JSON 配置和应用组合。Linux
@@ -945,3 +945,32 @@ builds plugin, fixture, loader/adapter tests and Service targets; no new remote
 run was created for this uncommitted worktree. ASan/UBSan were not run because
 no sanitizer configuration is enabled locally. No hot reload, remote plugin,
 process isolation or sandbox is included.
+
+## Phase 9B-3A-1 Application Submission Domain Foundation
+
+状态：`PHASE_9B_3A_1_APPLICATION_SUBMISSION_DOMAIN_FOUNDATION_COMPLETED`（本地未提交）。
+
+已完成：
+
+- `InspectionRequestedOutputs` 以 bitmask 规范化 segmentation/geometry；
+- `WeldTypeRequest` 的 auto/requested 规则及 guidance human checkpoint；
+- application/scene/spec 三方 fail-closed 校验；
+- Job request、immutable snapshot、Repository 的 specification 保存与独立复制；
+- Application/Repository CTest 覆盖：Application label 74/74，Application submission 8 项，
+  Application Domain 33 项，Repository 41 项。
+
+本地全量验证（四套配置均重新生成并编译）：
+
+| 配置 | registered | passed | explicitly skipped | failed |
+|---|---:|---:|---:|---:|
+| Windows VS2022 Debug | 607 | 602 | 5 | 0 |
+| Windows VS2022 Release | 607 | 602 | 5 | 0 |
+| WSL Ubuntu 24.04 GCC Debug | 835 | 834 | 1 | 0 |
+| WSL Ubuntu 24.04 GCC Release | 835 | 834 | 1 | 0 |
+
+项目源码和测试 warning 均为 0，`git diff --check` 通过；WSL 结果是本地验证，不是 GitHub
+Actions 证据。
+
+未实现：JSON、HTTP、Task API/route、ID generator、clock、幂等、dispatcher、worker、Artifact
+I/O/Store、AppConfig、RuntimeOptions、Service 组合，以及 PTV2/WeldAgent adapter。后续 HTTP
+v1 才暂时限制为恰好一个点云 Artifact。
