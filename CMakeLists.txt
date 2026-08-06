@@ -70,6 +70,8 @@ add_library(
   iaisf_application_core
   STATIC
   src/application/application_identity.cpp
+  src/application/application_job.cpp
+  src/application/application_job_id.cpp
   src/application/application_job_state.cpp
   src/application/artifact_ref.cpp
 )
@@ -83,6 +85,29 @@ target_include_directories(
 )
 target_link_libraries(iaisf_application_core PUBLIC iaisf::core)
 iaisf_enable_project_warnings(iaisf_application_core)
+
+add_library(
+  iaisf_application_repository
+  STATIC
+  src/application/application_job_repository.cpp
+  src/application/in_memory_application_job_repository.cpp
+)
+add_library(iaisf::application_repository ALIAS iaisf_application_repository)
+target_compile_features(iaisf_application_repository PUBLIC cxx_std_17)
+target_include_directories(
+  iaisf_application_repository
+  PUBLIC
+    "$<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>"
+    "$<BUILD_INTERFACE:${IAISF_GENERATED_INCLUDE_DIR}>"
+)
+target_link_libraries(
+  iaisf_application_repository
+  PUBLIC
+    iaisf::application_core
+  PRIVATE
+    Threads::Threads
+)
+iaisf_enable_project_warnings(iaisf_application_repository)
 
 add_library(
   iaisf_logging

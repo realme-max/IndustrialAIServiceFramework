@@ -2,10 +2,11 @@
 
 ## 1. 状态与原则
 
-> Phase 9B-1 本地最终矩阵：Windows VS2022 Debug 和 Release 各注册 558 项，其中
-> 553 passed、5 explicitly skipped、0 failed；WSL Ubuntu 24.04 GCC 13.3.0 Debug 和
-> Release 各注册 786 项，其中 785 passed、1 explicitly skipped、0 failed。
-> Application Domain 分组在四个配置中均为 25/25 passed。项目源码与测试编译 warning
+> Phase 9B-2 值不变量加固后的本地最终矩阵：Windows VS2022 Debug 和 Release 各注册
+> 598 项，其中 593 passed、5 explicitly skipped、0 failed；WSL Ubuntu 24.04 GCC 13.3.0
+> Debug 和 Release 各注册 826 项，其中 825 passed、1 explicitly skipped、0 failed。
+> Application 分组在四个配置中均为 65 项，其中 Phase 9B-1 Domain 25 项、Phase 9B-2
+> Repository 40 项，全部 passed。项目源码与测试编译 warning
 > 为 0。WSL 结果不是 GitHub Actions 证据。
 
 Phase 9B-1A 移除了分配型 `Result` API 上不成立的 `noexcept` 声明及对应静态测试；
@@ -18,6 +19,19 @@ Phase 9B-1A 移除了分配型 `Result` API 上不成立的 `noexcept` 声明及
 - ArtifactRef 的空值、精确上限、上限 +1、控制字符、NUL、SHA 大小写/非 hex、size/count 边界；
 - Windows path、UNC、`../` 与 URL 无法作为 artifact ID；错误有界且不回显输入；
 - 测试不使用 sleep、网络、临时文件、环境变量或外部项目。
+
+### Phase 9B-2 Application Job Repository 测试
+
+- `ApplicationJobId`：精确长度/字符边界、大小写、hash、路径/URL/UNC/NUL/控制字符和非 ASCII fail-closed；
+- snapshot：Accepted/version 1、不别名输入 vector、application/scene 隔离、1–16 artifacts、逐项验证和重复 ID；
+- Repository：结构化 failure、非零容量、事务性 create、独立返回副本、跨 application 的 NotFound 策略；
+- transition：集中状态矩阵、精确 version +1、stale version、时间倒退、终态和 version 溢出 fail-closed；
+- erase：仅终态、精确版本、显式释放元数据容量，不执行 Artifact I/O；
+- 并发：多 reader、不同 ID create、相同 ID create 和相同 expected_version transition；使用 promise/shared future 起跑门，不使用 sleep。
+- 值不变量：ID/Snapshot move construction 与 assignment 均保留源值；移动后源 ID 可重新创建合法 snapshot，移动后源 snapshot 可继续转换；分配型 move 不声明 `noexcept`。
+- Repository 防御边界：create/get/transition/erase 对语法无效 ID 均返回 `InvalidArgument`，且 size、state、version、created/updated timestamp 完全不变；跨 application `NotFound` 回归保持。
+
+四套配置的 `repository` CTest label 均为 40 registered / 40 passed / 0 skipped / 0 failed。
 
 > Phase 7G 最新结论覆盖下文历史性描述：Linux push CI run 30781932731 已实际执行完整测试并通过 497/497，warning 修复后项目源码与测试 warning 均为 0，当前状态为 `PHASE_7_SERVICE_INTEGRATION_COMPLETED`。
 

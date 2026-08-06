@@ -4,15 +4,20 @@
 
 - 项目：IndustrialAIServiceFramework
 - 当前分支：`phase/9-industrial-ai-application-layer`
-- 当前状态：`PHASE_9B_1_APPLICATION_DOMAIN_FOUNDATION_HARDENED`（Phase 9B-1A，本地双平台验证；未提交）
-- 当前基线 HEAD：`14b10905d593f73117d25d936e7a7a47e588adaa`
+- 当前状态：`PHASE_9B_2_APPLICATION_JOB_VALUE_INVARIANT_HARDENED`（本地双平台验证；未提交）
+- 当前基线 HEAD：`d84557413fad50f26478698d8157bfb691d709ce`
 - Phase 9A：只读 Application Integration Design Audit 已完成
 - Phase 9B-1：新增 `iaisf_application_core` / `iaisf::application_core`，仅依赖 `iaisf::core`
 - Phase 9B-1A：返回分配型 `Result` 的解析/验证 API 不声明 `noexcept`；纯查询和 bool 检查保留 `noexcept`
-- 验证：Windows Debug/Release 各注册 558 项（553 passed、5 explicitly skipped、0 failed）；WSL Ubuntu 24.04 GCC 13.3.0 Debug/Release 各注册 786 项（785 passed、1 explicitly skipped、0 failed）；Application Domain 四配置均 25/25 passed；warning 0
+- Phase 9B-2：新增 `iaisf_application_repository` / `iaisf::application_repository`、强类型 `ApplicationJobId`、不可变公开 snapshot、结构化失败与乐观版本控制
+- 值不变量：ID/Snapshot 显式 copy-preserving move，源/目标都保持合法；copy/move assignment 先复制再 swap；Snapshot 和 Repository 接受边界重验 ID 与完整值不变量
+- Repository：固定非零容量、无自动驱逐/TTL/持久化；相同 expected version 只有一个 writer 成功；版本不回绕；只显式删除精确版本的终态元数据
+- 隔离：application/scene 继续唯一配对；跨 application 的 Job 访问按 `NotFound` 处理；两个业务不串联
+- Artifact：Job 持有 1–16 个已验证 metadata 副本；Repository 不读取、拥有或删除 artifact 内容
+- 验证：Windows Debug/Release 各注册 598 项（593 passed、5 explicitly skipped、0 failed）；WSL Ubuntu 24.04 GCC 13.3.0 Debug/Release 各注册 826 项（825 passed、1 explicitly skipped、0 failed）；Application 65/65、Repository 40/40 四配置均 passed；warning 0
 - 应用边界：`weld_inspection/post_weld` 与 `welding_guidance/pre_weld` 完全独立，不自动串联
 - 真实性边界：PTV2 质量评价为 `quality_assessment=not_implemented`；WeldAgent 不得生成真实 joint values、控制机器人或发送 URL
-- 未实现：HTTP Application API、ApplicationJob Repository、Artifact I/O、Worker Protocol、PTV2/WeldAgent adapter、cancel/kill
+- 未实现：versioned HTTP Application API、持久化 Repository、Artifact I/O/Store、Worker Protocol、PTV2/WeldAgent adapter、worker cancel/kill
 - Phase 0 提交：`5fbcec0 docs: complete phase 0 architecture design`
 - Phase 1 最终实现提交：`63b30cffcbe3e621af33664721b3675a647bd1a1`
 - Phase 2 起始 HEAD / main / origin/main：`6065d91b277c07ed04e64b3f08034788965e6ac1`

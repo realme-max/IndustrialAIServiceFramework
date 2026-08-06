@@ -56,6 +56,31 @@ set_tests_properties(
 )
 
 add_executable(
+  iaisf_application_repository_tests
+  application/test_application_job_id.cpp
+  application/test_application_job.cpp
+  application/test_application_job_repository.cpp
+)
+target_compile_features(iaisf_application_repository_tests PRIVATE cxx_std_17)
+target_link_libraries(
+  iaisf_application_repository_tests
+  PRIVATE
+    iaisf::application_repository
+    GTest::gtest
+    GTest::gtest_main
+    Threads::Threads
+)
+iaisf_enable_project_warnings(iaisf_application_repository_tests)
+gtest_add_tests(
+  TARGET iaisf_application_repository_tests
+  TEST_LIST IAISF_APPLICATION_REPOSITORY_TESTS
+)
+set_tests_properties(
+  ${IAISF_APPLICATION_REPOSITORY_TESTS}
+  PROPERTIES LABELS "unit;application;repository" TIMEOUT 20
+)
+
+add_executable(
   iaisf_logging_tests
   log/test_async_logger.cpp
   log/test_logger_metrics.cpp

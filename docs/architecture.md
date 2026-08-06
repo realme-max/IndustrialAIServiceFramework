@@ -3,12 +3,12 @@
 ## 1. 文档状态
 
 - 项目：IndustrialAIServiceFramework
-- 阶段：Phase 9B-1A Application Domain Final Hardening
+- 阶段：Phase 9B-2 Application Job Repository Core
 - 日期：2026-08-06
-- 状态：`PHASE_9B_1_APPLICATION_DOMAIN_FOUNDATION_HARDENED`（本地双平台验证，未提交）
+- 状态：`PHASE_9B_2_APPLICATION_JOB_VALUE_INVARIANT_HARDENED`（本地双平台验证，未提交）
 - 目标平台：portable C++17 application core；既有服务运行目标仍为 Linux x86_64
 
-本文同时记录已实现的既有服务栈和 Phase 9B-1 应用领域基础。只有明确列入已实现边界的类才是当前能力；历史阶段验证记录保留，不代表 Phase 9 外部 worker 已实现。
+本文同时记录已实现的既有服务栈和 Phase 9B-1/9B-2 应用领域与 Repository 核心。只有明确列入已实现边界的类才是当前能力；历史阶段验证记录保留，不代表 Phase 9 外部 worker 已实现。
 
 ### Phase 9B-1 应用层边界
 
@@ -16,7 +16,16 @@
 它定义唯一身份映射 `weld_inspection/post_weld` 与 `welding_guidance/pre_weld`、集中式
 Application Job 状态转换和无路径的 `ArtifactRef`。两个应用互相独立，不自动串联。
 
-PTV2/WeldAgent adapter、HTTP Application API、Repository、Artifact I/O 和 Worker Protocol
+Phase 9B-2 新增 `ApplicationJobId`、不可变公开 `ApplicationJobSnapshot`、
+`IApplicationJobRepository` 和 `InMemoryApplicationJobRepository`。Repository 使用有界
+内存和单临界区乐观并发：create/transition/erase 失败不部分写入，成功 transition 的 version
+精确增加 1，`UINT64_MAX` fail-closed。跨 application 访问与未知 ID 都返回 `NotFound`。
+返回 snapshot 是独立副本；终态仅能按精确版本显式删除，且删除不操作 artifact。
+`ApplicationJobId` 与 `ApplicationJobSnapshot` 的 move 为 copy-preserving：源/目标均保持
+合法，assignment 采用 copy-then-swap 强失败不变性。Snapshot 产生新值前重新校验完整
+Domain 不变量；Repository 四个 ID 入口也独立 fail-closed，非法语法返回 `InvalidArgument`。
+
+PTV2/WeldAgent adapter、HTTP Application API、持久化 Repository、Artifact I/O 和 Worker Protocol
 均未实现。PTV2 的质量评价必须写为 `quality_assessment=not_implemented`；WeldAgent
 边界禁止真实 joint values、机器人控制和 URL 发送。详细契约见 `docs/application_layer.md`。
 

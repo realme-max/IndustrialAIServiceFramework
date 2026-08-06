@@ -2,9 +2,9 @@
 
 ## 当前阶段
 
-Phase 9A 已完成只读设计审计。Phase 9B-1 只建立跨平台、无 I/O 的应用领域基础：
-`ApplicationIdentity`、`ApplicationJobState` 和 `ArtifactRef`。HTTP Application API、
-Repository、Artifact 存储及 Worker Protocol 均尚未实现。
+Phase 9A 已完成只读设计审计。Phase 9B-1 建立跨平台、无 I/O 的应用领域基础；
+Phase 9B-2 在其上增加 `ApplicationJobId`、`ApplicationJobSnapshot`、Repository contract
+和有界内存实现。当前仍没有 HTTP Application API、持久化、Artifact I/O 或 Worker Protocol。
 
 ## 独立应用边界
 
@@ -15,8 +15,27 @@ Repository、Artifact 存储及 Worker Protocol 均尚未实现。
 | `weld_inspection` | `post_weld` | 未来可接入 PTV2 的焊缝/背景分割和几何提取；当前没有独立质量算法，必须报告 `quality_assessment=not_implemented` |
 | `welding_guidance` | `pre_weld` | 未来可接入 WeldAgent 的检测与人工复核流程；不得生成或宣称真实 joint values，不得控制机器人或发送 controller URL |
 
-交叉组合一律 fail-closed。PTV2 不是 WeldAgent 的上游或下游，Phase 9B-1 也不包含
+交叉组合一律 fail-closed。PTV2 不是 WeldAgent 的上游或下游，Phase 9B-2 也不包含
 二者的 adapter 或 worker。
+
+## ApplicationJobId 与 Snapshot
+
+`ApplicationJobId` 是大小写敏感的 opaque 强类型：长度 1–64 ASCII bytes，首字符为
+字母或数字，后续只允许字母、数字、`_` 和 `-`。它拒绝空白、控制字符、NUL、非 ASCII、
+`.`、斜杠、反斜杠、盘符、UNC 和 URL；Repository 不生成、重写或规范化 ID。
+
+ID 使用显式 copy-preserving move：移动构造和移动赋值复制底层值，源对象和目标对象都
+保持相同合法 ID，不使用空字符串哨兵，也不依赖 moved-from `std::string` 的实现结果。
+copy/move assignment 先构造完整副本，再通过无分配 `swap` 提交，因此分配失败时目标值不变。
+
+`ApplicationJobSnapshot` 固定从 `Accepted`、version 1 开始，`created_at == updated_at`。
+它持有 1–16 个经过 `validate_artifact_ref()` 的独立输入副本，并拒绝重复 `artifact_id`。
+16 是当前保守的内存元数据硬上限，防止尚无 wire/store 层时出现无界 vector；后续协议
+只能在不放宽该 Domain 上限的前提下增加更严格限制。时间由调用者显式传入，测试不依赖
+系统时钟或等待。公开访问器只暴露 const 值视图，不暴露 Repository 内部可变引用。
+Snapshot 采用相同的 copy-preserving move 与先复制后 swap 策略；移动后源 snapshot 仍含
+合法 ID 和完整 artifact 集合，并可继续安全执行 `transitioned()`。create 和 transitioned
+都会重新校验 ID、application/scene、state/version/time 与 artifact 集合的完整不变量。
 
 ## Application Job 状态机
 
@@ -58,19 +77,44 @@ Repository、Artifact 存储及 Worker Protocol 均尚未实现。
 `application/vnd.iaisf.pointcloud.xyz-f32le`，但本阶段没有解析器，也没有把 PTV2 的
 `x y z label` 评估输入固化为生产格式。
 
+## Repository contract 与并发语义
+
+`IApplicationJobRepository` 支持 `create`、按 application 隔离的 `get`、带
+`expected_version` 的原子 `transition`、终态 `erase_terminal`、`size` 和 `capacity`。
+失败通过 `ApplicationRepositoryFailure` 结构化区分 invalid argument、duplicate ID、
+not found、capacity exceeded、version conflict、version exhausted、invalid transition、
+invalid timestamp 和 internal failure；调用方不得解析错误文本。
+
+`InMemoryApplicationJobRepository` 使用单 mutex 保护有界记录表。create/transition/erase
+在一个临界区内完成检查和提交；失败不改变 size、state、version 或 timestamp。成功转换
+调用 Phase 9B-1 的 `validate_transition()`，version 精确增加 1；`UINT64_MAX` 永久
+fail-closed，不回绕。相同版本的并发更新只有一个提交成功，其余返回 `VersionConflict`。
+返回值均为独立 snapshot。ID 存在但 application 不匹配与未知 ID 都返回 `NotFound`。
+所有 Repository ID 入口均先调用 `ApplicationJobId::valid()`：语法无效 ID 返回
+`InvalidArgument` 且不触碰记录；该策略与合法 ID 的跨 application `NotFound` 隔离语义不同。
+
+Repository 不启动线程、不触发回调、不做自动驱逐/TTL/重启恢复。终态只有携带精确版本
+才能显式删除，删除只释放元数据容量，不访问、拥有或删除 Artifact 内容。
+
 ## 构建和所有权边界
 
 `iaisf_application_core` / `iaisf::application_core` 是 C++17 portable static target，
 仅 PUBLIC 依赖 `iaisf::core`。它不依赖 Reactor、TCP/HTTP、Service、TaskManager、
 PluginRuntime、Threads、filesystem I/O、TensorRT、CUDA、Qt 或 Python。
 
-本阶段对象均为调用者持有的普通值；没有线程、后台活动、网络资源或销毁顺序约束。
+`iaisf_application_repository` / `iaisf::application_repository` PUBLIC 依赖
+`iaisf::application_core`，仅为内部 mutex 实现链接标准 Threads；它不依赖 HTTP、Reactor、
+Service、Task、Plugin、JSON、filesystem、数据库或平台 API。Repository 由调用者独占持有，
+没有后台线程和跨模块销毁顺序约束。
+
+Domain 对象均为调用者持有的普通值；没有线程、后台活动、网络资源或销毁顺序约束。
 返回 `Result` 的解析和验证函数需要在失败路径构造包含 `std::string` 的 `Error`，因此不
 声明 `noexcept`；纯 enum/string 查询、`is_terminal` 和内部 bool 检查仍保持 `noexcept`。
 
 ## 后续边界
 
-下一小阶段建议先定义 versioned Application API contract 和独立的 ApplicationJob
-Repository 接口，再设计 Artifact 存储与跨进程 Worker Protocol。不得为了复用现有
+Phase 9B-3 建议只定义 versioned HTTP/JSON Application API，将稳定 Domain/Repository
+错误映射到明确状态码，并保持 snapshot 输出有界；持久化、Artifact Store 与跨进程
+Worker Protocol 仍应留在后续阶段。不得为了复用现有
 `/v1/tasks` 将多阶段 WeldAgent 强行包装成 `IAlgorithmPlugin`，也不得在协议稳定前接入
 真实 PTV2、WeldAgent、GPU 或机器人。
