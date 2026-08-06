@@ -1,4 +1,5 @@
 #include <chrono>
+#include <utility>
 
 #include <gtest/gtest.h>
 
@@ -87,6 +88,22 @@ TEST(RuntimeOptionsTest, ServiceDefaultsUseConfigurationWorkerDefault) {
               config.runtime.worker_threads);
     EXPECT_EQ(service.value().pool_options().queue_capacity,
               config.runtime.task_queue_capacity);
+}
+
+TEST(RuntimeOptionsTest, RejectsMissingCurrentPlatformLibrary) {
+    auto config = default_app_config();
+    config.plugins.runtime.dynamic_loading_enabled = true;
+    iaisf::DynamicPluginModuleConfig module;
+    module.id = "platform";
+#if defined(_WIN32)
+    module.linux_library = "fixture.so";
+#else
+    module.windows_library = "fixture.dll";
+#endif
+    config.plugins.runtime.modules.push_back(std::move(module));
+    const auto result = make_runtime_options(config);
+    ASSERT_FALSE(result);
+    EXPECT_EQ(result.error().code, ErrorCode::ConfigError);
 }
 
 } // namespace

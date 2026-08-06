@@ -1,5 +1,6 @@
 #include "iaisf/plugin/abi/plugin_abi_adapter.hpp"
 
+#include <cstddef>
 #include <cstdlib>
 #include <new>
 #include <string>
@@ -13,6 +14,38 @@
 
 namespace iaisf::plugin::abi {
 namespace {
+
+constexpr std::size_t initialize_field_end() noexcept {
+    return offsetof(iaisf_plugin_api, initialize) +
+           sizeof(((iaisf_plugin_api*)nullptr)->initialize);
+}
+
+bool has_initialize_callback(const iaisf_plugin_api& api) noexcept {
+    return api.struct_size >= initialize_field_end() &&
+           api.initialize != nullptr;
+}
+
+Result<std::string> serialize_config(
+    const nlohmann::json& config,
+    const PluginLimits& limits) {
+    try {
+        auto storage = config.dump();
+        if (storage.size() > limits.max_input_bytes()) {
+            return Result<std::string>::failure(make_error(
+                ErrorCode::ResourceExhausted,
+                "plugin configuration exceeds configured byte limit"));
+        }
+        return Result<std::string>::success(std::move(storage));
+    } catch (const std::bad_alloc&) {
+        return Result<std::string>::failure(make_error(
+            ErrorCode::ResourceExhausted,
+            "plugin configuration serialization allocation failed"));
+    } catch (...) {
+        return Result<std::string>::failure(make_error(
+            ErrorCode::InvalidArgument,
+            "plugin configuration serialization failed"));
+    }
+}
 
 struct OutputContext {
     std::string* output{nullptr};
@@ -64,11 +97,29 @@ Result<PluginMetadata> copy_metadata(const iaisf_plugin_metadata& value) {
 
 Result<std::shared_ptr<AbiPluginAdapter>> AbiPluginAdapter::create(
     iaisf_plugin_api api,
-    PluginLimits limits) {
+    PluginLimits limits,
+    nlohmann::json config) {
     auto api_valid = validate_plugin_api(api);
     if (!api_valid) {
         return Result<std::shared_ptr<AbiPluginAdapter>>::failure(
             std::move(api_valid).error());
+    }
+
+    auto config_storage = serialize_config(config, limits);
+    if (!config_storage) {
+        return Result<std::shared_ptr<AbiPluginAdapter>>::failure(
+            std::move(config_storage).error());
+    }
+    const bool config_is_empty_object = config.is_object() && config.empty();
+    if (!config_is_empty_object && !has_initialize_callback(api)) {
+        return Result<std::shared_ptr<AbiPluginAdapter>>::failure(make_error(
+            ErrorCode::InvalidState,
+            "non-empty plugin configuration requires initialize callback"));
+    }
+    if (!has_initialize_callback(api)) {
+        // The caller may have supplied only the v1 prefix.  Never inspect the
+        // optional tail unless struct_size proves that it is present.
+        api.initialize = nullptr;
     }
 
     iaisf_plugin_metadata metadata{};
@@ -81,6 +132,11 @@ Result<std::shared_ptr<AbiPluginAdapter>> AbiPluginAdapter::create(
         return Result<std::shared_ptr<AbiPluginAdapter>>::failure(make_error(
             ErrorCode::InternalError,
             "plugin metadata callback failed"));
+    }
+    auto status_valid = validate_status(status);
+    if (!status_valid) {
+        return Result<std::shared_ptr<AbiPluginAdapter>>::failure(
+            std::move(status_valid).error());
     }
     if (status != IAISF_PLUGIN_STATUS_OK) {
         return Result<std::shared_ptr<AbiPluginAdapter>>::failure(make_error(
@@ -104,7 +160,8 @@ Result<std::shared_ptr<AbiPluginAdapter>> AbiPluginAdapter::create(
             api,
             std::move(limits),
             std::move(metadata_copy).value(),
-            nullptr));
+            nullptr,
+            std::move(config_storage).value()));
         status = api.create(
             api.plugin_context, &adapter->host_, &adapter->instance_);
     } catch (...) {
@@ -114,11 +171,7 @@ Result<std::shared_ptr<AbiPluginAdapter>> AbiPluginAdapter::create(
     }
     if (status != IAISF_PLUGIN_STATUS_OK || adapter->instance_ == nullptr) {
         if (adapter && adapter->instance_ != nullptr) {
-            try {
-                api.destroy(adapter->instance_);
-            } catch (...) {
-            }
-            adapter->instance_ = nullptr;
+            (void)adapter->destroy_instance_locked();
         }
         return Result<std::shared_ptr<AbiPluginAdapter>>::failure(make_error(
             status == IAISF_PLUGIN_STATUS_OUT_OF_MEMORY
@@ -133,11 +186,14 @@ AbiPluginAdapter::AbiPluginAdapter(
     iaisf_plugin_api api,
     PluginLimits limits,
     PluginMetadata metadata,
-    iaisf_plugin_handle* instance) noexcept
+    iaisf_plugin_handle* instance,
+    std::string config_storage) noexcept
     : api_(api),
       limits_(std::move(limits)),
       metadata_(std::move(metadata)),
-      instance_(instance) {
+      instance_(instance),
+      config_storage_(std::move(config_storage)),
+      initialize_supported_(has_initialize_callback(api)) {
     host_.abi_version = IAISF_PLUGIN_ABI_VERSION;
     host_.struct_size = sizeof(host_);
     host_.log = &AbiPluginAdapter::default_log;
@@ -147,14 +203,6 @@ AbiPluginAdapter::AbiPluginAdapter(
 
 AbiPluginAdapter::~AbiPluginAdapter() noexcept {
     (void)shutdown();
-    std::unique_lock<std::shared_mutex> lock(lifecycle_mutex_);
-    if (instance_ != nullptr) {
-        try {
-            api_.destroy(instance_);
-        } catch (...) {
-        }
-        instance_ = nullptr;
-    }
 }
 
 PluginMetadata AbiPluginAdapter::metadata() const {
@@ -162,12 +210,39 @@ PluginMetadata AbiPluginAdapter::metadata() const {
 }
 
 Result<void> AbiPluginAdapter::initialize() {
-    std::shared_lock<std::shared_mutex> lock(lifecycle_mutex_);
+    std::unique_lock<std::shared_mutex> lock(lifecycle_mutex_);
     if (instance_ == nullptr) {
         return Result<void>::failure(make_error(
             ErrorCode::InvalidState,
             "plugin ABI instance is unavailable"));
     }
+    if (shutdown_called_ || destroy_called_) {
+        return Result<void>::failure(make_error(
+            ErrorCode::InvalidState,
+            "plugin ABI instance is stopped"));
+    }
+    if (initialized_) {
+        return Result<void>::success();
+    }
+    if (initialize_supported_) {
+        const iaisf_plugin_bytes_view config{
+            reinterpret_cast<const uint8_t*>(config_storage_.data()),
+            config_storage_.size()};
+        iaisf_plugin_status_t status = IAISF_PLUGIN_STATUS_INTERNAL_ERROR;
+        try {
+            status = api_.initialize(instance_, config);
+        } catch (...) {
+            return Result<void>::failure(make_error(
+                ErrorCode::InternalError,
+                "plugin initialize callback failed"));
+        }
+        auto mapped = map_status(
+            status, ErrorCode::InternalError, "plugin initialize failed");
+        if (!mapped) {
+            return mapped;
+        }
+    }
+    initialized_ = true;
     return Result<void>::success();
 }
 
@@ -178,7 +253,8 @@ Result<void> AbiPluginAdapter::validate_input(const nlohmann::json& input) const
         return Result<void>::failure(std::move(serialized).error());
     }
     std::shared_lock<std::shared_mutex> lock(lifecycle_mutex_);
-    if (instance_ == nullptr || shutdown_called_) {
+    if (instance_ == nullptr || shutdown_called_ || destroy_called_ ||
+        (initialize_supported_ && !initialized_)) {
         return Result<void>::failure(make_error(
             ErrorCode::InvalidState,
             "plugin ABI instance is stopped"));
@@ -205,7 +281,8 @@ Result<nlohmann::json> AbiPluginAdapter::execute(
     std::string output;
     OutputContext output_context{&output, limits_.max_output_bytes()};
     std::shared_lock<std::shared_mutex> lock(lifecycle_mutex_);
-    if (instance_ == nullptr || shutdown_called_) {
+    if (instance_ == nullptr || shutdown_called_ || destroy_called_ ||
+        (initialize_supported_ && !initialized_)) {
         return Result<nlohmann::json>::failure(make_error(
             ErrorCode::InvalidState,
             "plugin ABI instance is stopped"));
@@ -242,7 +319,23 @@ Result<nlohmann::json> AbiPluginAdapter::execute(
 
 Result<void> AbiPluginAdapter::shutdown() {
     std::unique_lock<std::shared_mutex> lock(lifecycle_mutex_);
-    if (shutdown_called_ || instance_ == nullptr) {
+    if (destroy_called_ || instance_ == nullptr) {
+        return Result<void>::success();
+    }
+    if (initialize_supported_ && !initialized_) {
+        if (!destroy_instance_locked()) {
+            return Result<void>::failure(make_error(
+                ErrorCode::InternalError,
+                "plugin destroy callback failed"));
+        }
+        return Result<void>::success();
+    }
+    if (shutdown_called_) {
+        if (!destroy_instance_locked()) {
+            return Result<void>::failure(make_error(
+                ErrorCode::InternalError,
+                "plugin destroy callback failed"));
+        }
         return Result<void>::success();
     }
     shutdown_called_ = true;
@@ -250,12 +343,46 @@ Result<void> AbiPluginAdapter::shutdown() {
     try {
         status = api_.shutdown(instance_);
     } catch (...) {
-        return Result<void>::failure(make_error(
+        auto mapped = Result<void>::failure(make_error(
             ErrorCode::InternalError,
             "plugin shutdown callback failed"));
+        const bool destroy_succeeded = destroy_instance_locked();
+        if (!destroy_succeeded) {
+            return Result<void>::failure(make_error(
+                ErrorCode::InternalError,
+                "plugin destroy callback failed"));
+        }
+        return mapped;
     }
-    return map_status(
+    auto mapped = map_status(
         status, ErrorCode::InternalError, "plugin shutdown failed");
+    const bool destroy_succeeded = destroy_instance_locked();
+    if (!mapped) {
+        return mapped;
+    }
+    if (!destroy_succeeded) {
+        return Result<void>::failure(make_error(
+            ErrorCode::InternalError,
+            "plugin destroy callback failed"));
+    }
+    return Result<void>::success();
+}
+
+bool AbiPluginAdapter::destroy_instance_locked() noexcept {
+    if (destroy_called_ || instance_ == nullptr) {
+        instance_ = nullptr;
+        destroy_called_ = true;
+        return true;
+    }
+    bool succeeded = true;
+    try {
+        api_.destroy(instance_);
+    } catch (...) {
+        succeeded = false;
+    }
+    instance_ = nullptr;
+    destroy_called_ = true;
+    return succeeded;
 }
 
 void AbiPluginAdapter::default_log(
@@ -293,6 +420,9 @@ iaisf_plugin_status_t AbiPluginAdapter::collect_output(
         output_context->output->size() >
             output_context->maximum_bytes - chunk.size) {
         return IAISF_PLUGIN_STATUS_OUT_OF_MEMORY;
+    }
+    if (chunk.size == 0U) {
+        return IAISF_PLUGIN_STATUS_OK;
     }
     try {
         output_context->output->append(
@@ -334,6 +464,10 @@ Result<void> AbiPluginAdapter::map_status(
     const iaisf_plugin_status_t status,
     const ErrorCode fallback,
     const char* const operation) const {
+    auto status_valid = validate_status(status);
+    if (!status_valid) {
+        return status_valid;
+    }
     if (status == IAISF_PLUGIN_STATUS_OK) {
         return Result<void>::success();
     }

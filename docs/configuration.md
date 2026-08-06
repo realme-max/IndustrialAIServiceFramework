@@ -78,3 +78,42 @@ Windows VS2022 Debug/Release 均为 `380/380`，本地 WSL Ubuntu 24.04 GCC
 Debug/Release 均为 `596/596`；两平台 version/config smoke 均成功，项目源码和测试
 编译 warning 为 0。当前未提交改动尚无对应 GitHub Actions 运行证据，本地 WSL 结果
 不得描述为远端 CI。
+## Phase 8G-4D 动态插件启动配置
+
+`plugins.runtime` 是一次性启动配置，不支持运行期加载、reload、目录扫描、
+PATH 搜索、远程下载或 HTTP 插件管理。字段为：
+
+```json
+{
+  "plugins": {
+    "runtime": {
+      "dynamic_loading_enabled": true,
+      "root": "plugins",
+      "max_modules": 16,
+      "modules": [
+        {
+          "id": "vision_plugin",
+          "enabled": true,
+          "library": {
+            "linux": "libvision.so",
+            "windows": "vision.dll"
+          },
+          "config": {}
+        }
+      ]
+    }
+  }
+}
+```
+
+`library` 也可使用单个相对文件名。平台对象必须显式包含当前平台名称，
+不会自动猜测扩展名。模块 id 使用 `[A-Za-z0-9][A-Za-z0-9._-]{0,63}`；
+绝对路径、`..`、反斜杠、控制字符和空名称都会被拒绝。配置对象的未知字段、
+重复 key、类型错误以及 JSON 深度、节点数、字符串和紧凑序列化字节超限均
+fail-closed。
+
+`--config` 只执行解析和 RuntimeOptions 校验，不打开动态模块或创建服务线程。
+`--serve` 按静态注册 → 动态加载 → `register_dynamic` → `freeze` → HTTP start
+顺序执行；任一模块失败，Service 创建整体失败并回滚已创建的 adapter/module。
+关闭时仍按 HTTP/TCP cleanup、Task drain/join、PluginRuntime shutdown 的顺序
+释放动态插件。

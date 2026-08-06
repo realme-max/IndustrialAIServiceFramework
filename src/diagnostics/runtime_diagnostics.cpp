@@ -129,6 +129,10 @@ Result<RuntimeDiagnosticsSnapshot> RuntimeDiagnostics::snapshot() const {
         }
         if (const auto runtime = plugin_runtime_.lock()) {
             result.plugins.available = true;
+            result.plugins.dynamic_loading_enabled =
+                runtime->dynamic_loading_enabled();
+            result.plugins.dynamic_module_count =
+                runtime->dynamic_module_count();
             result.plugins.state = runtime->state();
             result.plugins.registered_count = runtime->size();
             result.plugins.active_executions =
@@ -203,12 +207,16 @@ Result<std::string> to_json(const RuntimeDiagnosticsSnapshot& snapshot,
             plugin_entries.push_back({
                 {"operation", entry.operation},
                 {"version", entry.metadata.version},
+                {"origin", entry.origin},
+                {"module_id", entry.module_id},
                 {"state", plugin_entry_state_name(entry.state)},
                 {"managed", entry.managed_lifecycle},
                 {"active_executions", entry.active_execution_count}});
         }
         root["plugins"] = {
             {"available", snapshot.plugins.available},
+            {"dynamic_loading_enabled", snapshot.plugins.dynamic_loading_enabled},
+            {"dynamic_module_count", snapshot.plugins.dynamic_module_count},
             {"state", plugin_runtime_state_name(snapshot.plugins.state)},
             {"registered_count", snapshot.plugins.registered_count},
             {"active_executions", snapshot.plugins.active_executions},

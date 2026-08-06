@@ -7,6 +7,7 @@
 #include <utility>
 
 #include "iaisf/core/error.hpp"
+#include "iaisf/plugin/dynamic_plugin_adapter.hpp"
 #include "iaisf/plugin/plugin_metadata.hpp"
 
 namespace iaisf::plugin {
@@ -198,6 +199,33 @@ void PluginRuntime::initialize_metrics() noexcept {
             return metrics_->get_counter(
                 "plugin_runtime_registration_failures_total");
         });
+    dynamic_creation_metric_ = metric_or_existing<Counter>(
+        [this] {
+            return metrics_->create_counter(
+                "plugin_dynamic_plugin_creations_total");
+        },
+        [this] {
+            return metrics_->get_counter(
+                "plugin_dynamic_plugin_creations_total");
+        });
+    dynamic_creation_failure_metric_ = metric_or_existing<Counter>(
+        [this] {
+            return metrics_->create_counter(
+                "plugin_dynamic_plugin_creation_failures_total");
+        },
+        [this] {
+            return metrics_->get_counter(
+                "plugin_dynamic_plugin_creation_failures_total");
+        });
+    dynamic_unload_failures_metric_ = metric_or_existing<Counter>(
+        [this] {
+            return metrics_->create_counter(
+                "plugin_dynamic_unload_failures_total");
+        },
+        [this] {
+            return metrics_->get_counter(
+                "plugin_dynamic_unload_failures_total");
+        });
     initializations_metric_ = metric_or_existing<Counter>(
         [this] {
             return metrics_->create_counter(
@@ -345,32 +373,14 @@ PluginRuntimeState PluginRuntime::state() const noexcept {
 
 Result<void> PluginRuntime::register_plugin(
     std::shared_ptr<const IAlgorithmPlugin> plugin) {
-    bool committed = false;
-    RegistrationMetricsGuard registration_guard{
-        registration_failures_metric_, committed};
     if (!plugin) {
         return Result<void>::failure(make_error(
             ErrorCode::InvalidArgument,
             "plugin must not be null"));
     }
-
-    std::unique_lock<std::mutex> lifecycle_lock(lease_state_->mutex);
-    if (lease_state_->state != PluginRuntimeState::Configuring) {
-        return Result<void>::failure(make_error(
-            ErrorCode::InvalidState,
-            "plugin runtime is not configuring"));
-    }
-
     PluginMetadata metadata;
     try {
         metadata = plugin->metadata();
-        auto valid = validate_metadata(metadata, limits_);
-        if (!valid) {
-            return Result<void>::failure(fixed_error(
-                valid.error().code,
-                valid.error().message,
-                limits_.max_error_message_bytes()));
-        }
     } catch (const std::bad_alloc&) {
         return Result<void>::failure(fixed_internal_error(
             "plugin metadata allocation failed"));
@@ -384,13 +394,6 @@ Result<void> PluginRuntime::register_plugin(
         return Result<void>::failure(fixed_internal_error(
             "plugin metadata failed"));
     }
-
-    auto slot = manager_->validate_registration_slot(metadata.operation);
-    if (!slot) {
-        return slot;
-    }
-
-    const auto plugin_for_registry = plugin;
     std::shared_ptr<IManagedAlgorithmPlugin> lifecycle;
     try {
         auto mutable_plugin = std::const_pointer_cast<IAlgorithmPlugin>(
@@ -401,12 +404,101 @@ Result<void> PluginRuntime::register_plugin(
         return Result<void>::failure(fixed_internal_error(
             "plugin lifecycle inspection failed"));
     }
+    return register_plugin_transaction(
+        std::move(plugin), std::move(metadata), std::move(lifecycle),
+        "static", {}, false);
+}
+
+Result<void> PluginRuntime::register_dynamic(
+    std::shared_ptr<DynamicPluginAdapter> plugin,
+    DynamicPluginRegistrationOptions options) {
+    const auto fail = [this](Error error) {
+        if (dynamic_creation_failure_metric_) {
+            dynamic_creation_failure_metric_->increment();
+        }
+        return Result<void>::failure(std::move(error));
+    };
+    if (!plugin) {
+        return fail(make_error(
+            ErrorCode::InvalidArgument,
+            "dynamic plugin must not be null"));
+    }
+    if (options.module_id.empty() ||
+        options.module_id.size() > limits_.max_name_bytes()) {
+        return fail(make_error(
+            ErrorCode::InvalidArgument,
+            "dynamic plugin module id is invalid"));
+    }
+    PluginMetadata metadata;
+    try {
+        metadata = plugin->metadata();
+    } catch (const std::bad_alloc&) {
+        return fail(fixed_internal_error(
+            "dynamic plugin metadata allocation failed"));
+    } catch (...) {
+        return fail(fixed_internal_error("dynamic plugin metadata failed"));
+    }
+    auto base = std::static_pointer_cast<const IAlgorithmPlugin>(plugin);
+    auto lifecycle = std::static_pointer_cast<IManagedAlgorithmPlugin>(
+        std::move(plugin));
+    auto result = register_plugin_transaction(
+        std::move(base), std::move(metadata), std::move(lifecycle),
+        "dynamic", std::move(options.module_id), true);
+    if (result) {
+        if (dynamic_creation_metric_) {
+            dynamic_creation_metric_->increment();
+        }
+    } else if (dynamic_creation_failure_metric_) {
+        dynamic_creation_failure_metric_->increment();
+    }
+    return result;
+}
+
+Result<void> PluginRuntime::register_plugin_transaction(
+    std::shared_ptr<const IAlgorithmPlugin> plugin,
+    PluginMetadata metadata,
+    std::shared_ptr<IManagedAlgorithmPlugin> lifecycle,
+    std::string origin,
+    std::string module_id,
+    const bool erase_on_failure) {
+    bool committed = false;
+    RegistrationMetricsGuard registration_guard{
+        registration_failures_metric_, committed};
+    if (!plugin) {
+        return Result<void>::failure(make_error(
+            ErrorCode::InvalidArgument, "plugin must not be null"));
+    }
+    std::unique_lock<std::mutex> lifecycle_lock(lease_state_->mutex);
+    if (lease_state_->state != PluginRuntimeState::Configuring) {
+        return Result<void>::failure(make_error(
+            ErrorCode::InvalidState, "plugin runtime is not configuring"));
+    }
+    try {
+        auto valid = validate_metadata(metadata, limits_);
+        if (!valid) {
+            return Result<void>::failure(fixed_error(
+                valid.error().code, valid.error().message,
+                limits_.max_error_message_bytes()));
+        }
+    } catch (const std::bad_alloc&) {
+        return Result<void>::failure(
+            fixed_internal_error("plugin metadata allocation failed"));
+    } catch (...) {
+        return Result<void>::failure(
+            fixed_internal_error("plugin metadata validation failed"));
+    }
+    auto slot = manager_->validate_registration_slot(metadata.operation);
+    if (!slot) {
+        return slot;
+    }
 
     std::shared_ptr<detail::PluginRuntimeEntry> entry;
     try {
         entry = std::make_shared<detail::PluginRuntimeEntry>();
         entry->operation = metadata.operation;
         entry->metadata = metadata;
+        entry->origin = std::move(origin);
+        entry->module_id = std::move(module_id);
         entry->managed_lifecycle = static_cast<bool>(lifecycle);
         entry->lifecycle = lifecycle;
         const auto previous = entries_.find(entry->operation);
@@ -429,15 +521,28 @@ Result<void> PluginRuntime::register_plugin(
                 limits_.max_error_message_bytes()));
         }
     } catch (const std::bad_alloc&) {
-        return Result<void>::failure(fixed_internal_error(
-            "unable to allocate plugin runtime entry"));
-    } catch (const std::exception&) {
-        return Result<void>::failure(fixed_internal_error(
-            "unable to create plugin runtime entry"));
+        return Result<void>::failure(
+            fixed_internal_error("unable to allocate plugin runtime entry"));
     } catch (...) {
-        return Result<void>::failure(fixed_internal_error(
-            "unable to create plugin runtime entry"));
+        return Result<void>::failure(
+            fixed_internal_error("unable to create plugin runtime entry"));
     }
+
+    auto mark_failure = [&](const bool shutdown_failed) {
+        if (erase_on_failure) {
+            entries_.erase(entry->operation);
+            if (shutdown_failed) {
+                set_state_locked(PluginRuntimeState::Failed);
+            }
+            return;
+        }
+        set_entry_state_locked(entry, PluginEntryState::Failed);
+        entry->lifecycle.reset();
+        if (shutdown_failed) {
+            entry->shutdown_failed = true;
+            set_state_locked(PluginRuntimeState::Failed);
+        }
+    };
 
     if (lifecycle) {
         set_entry_state_locked(entry, PluginEntryState::Initializing);
@@ -468,13 +573,6 @@ Result<void> PluginRuntime::register_plugin(
             }
             initialization_error = fixed_internal_error(
                 "plugin initialization allocation failed");
-        } catch (const std::exception&) {
-            initialization_failed = true;
-            if (initialization_failures_metric_) {
-                initialization_failures_metric_->increment();
-            }
-            initialization_error = fixed_internal_error(
-                "plugin initialization failed");
         } catch (...) {
             initialization_failed = true;
             if (initialization_failures_metric_) {
@@ -494,12 +592,7 @@ Result<void> PluginRuntime::register_plugin(
         --lease_state_->registrations_in_progress;
         lease_state_->changed.notify_all();
         if (initialization_failed) {
-            set_entry_state_locked(entry, PluginEntryState::Failed);
-            entry->lifecycle.reset();
-            if (rollback_failed) {
-                entry->shutdown_failed = true;
-                set_state_locked(PluginRuntimeState::Failed);
-            }
+            mark_failure(rollback_failed);
             return Result<void>::failure(std::move(*initialization_error));
         }
     }
@@ -507,43 +600,37 @@ Result<void> PluginRuntime::register_plugin(
     if (lifecycle) {
         try {
             managed_plugins_.push_back(ManagedPlugin{entry});
-        } catch (const std::bad_alloc&) {
+        } catch (...) {
+            lifecycle_lock.unlock();
             bool rollback_failed = false;
             try {
                 rollback_failed = !lifecycle->shutdown();
             } catch (...) {
                 rollback_failed = true;
             }
-            set_entry_state_locked(entry, PluginEntryState::Failed);
-            entry->lifecycle.reset();
-            if (rollback_failed) {
-                entry->shutdown_failed = true;
-                set_state_locked(PluginRuntimeState::Failed);
-            }
+            lifecycle_lock.lock();
+            mark_failure(rollback_failed);
             return Result<void>::failure(fixed_internal_error(
                 "plugin lifecycle registration allocation failed"));
         }
     }
 
     auto registered = manager_->register_plugin_with_validated_metadata(
-        plugin_for_registry, std::move(metadata));
+        plugin, metadata);
     if (!registered) {
         if (lifecycle) {
             managed_plugins_.pop_back();
+            lifecycle_lock.unlock();
             bool rollback_failed = false;
             try {
                 rollback_failed = !lifecycle->shutdown();
             } catch (...) {
                 rollback_failed = true;
             }
-            set_entry_state_locked(entry, PluginEntryState::Failed);
-            entry->lifecycle.reset();
-            if (rollback_failed) {
-                entry->shutdown_failed = true;
-                set_state_locked(PluginRuntimeState::Failed);
-            }
+            lifecycle_lock.lock();
+            mark_failure(rollback_failed);
         } else {
-            set_entry_state_locked(entry, PluginEntryState::Failed);
+            mark_failure(false);
         }
         return registered;
     }
@@ -599,6 +686,21 @@ const PluginLimits& PluginRuntime::limits() const noexcept {
     return limits_;
 }
 
+void PluginRuntime::set_dynamic_loading_observation(
+    const bool enabled,
+    const std::size_t module_count) noexcept {
+    dynamic_loading_enabled_.store(enabled, std::memory_order_release);
+    dynamic_module_count_.store(module_count, std::memory_order_release);
+}
+
+bool PluginRuntime::dynamic_loading_enabled() const noexcept {
+    return dynamic_loading_enabled_.load(std::memory_order_acquire);
+}
+
+std::size_t PluginRuntime::dynamic_module_count() const noexcept {
+    return dynamic_module_count_.load(std::memory_order_acquire);
+}
+
 Result<PluginEntrySnapshot> PluginRuntime::entry_snapshot(
     const std::string_view operation) const {
     try {
@@ -621,6 +723,8 @@ Result<PluginEntrySnapshot> PluginRuntime::entry_snapshot(
         return Result<PluginEntrySnapshot>::success(PluginEntrySnapshot{
             entry.operation,
             entry.metadata,
+            entry.origin,
+            entry.module_id,
             entry.managed_lifecycle,
             entry.state,
             entry.active_executions,
@@ -650,6 +754,8 @@ Result<std::vector<PluginEntrySnapshot>> PluginRuntime::entry_snapshots()
             snapshots.push_back(PluginEntrySnapshot{
                 entry.operation,
                 entry.metadata,
+                entry.origin,
+                entry.module_id,
                 entry.managed_lifecycle,
                 entry.state,
                 entry.active_executions,
@@ -897,6 +1003,18 @@ Result<void> PluginRuntime::shutdown() {
             entry_shutdown_failed = true;
             if (!first_error.has_value()) {
                 first_error = fixed_internal_error("plugin shutdown failed");
+            }
+        }
+        if (auto* const dynamic =
+                dynamic_cast<DynamicPluginAdapter*>(entry->lifecycle.get());
+            dynamic != nullptr && !dynamic->release_module()) {
+            entry_shutdown_failed = true;
+            if (dynamic_unload_failures_metric_) {
+                dynamic_unload_failures_metric_->increment();
+            }
+            if (!first_error.has_value()) {
+                first_error = fixed_internal_error(
+                    "dynamic plugin module unload failed");
             }
         }
         lock.lock();

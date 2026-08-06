@@ -79,7 +79,8 @@ Result<ServiceOptions> ServiceOptions::create(
     const bool metrics_enabled,
     std::string metrics_endpoint,
     const bool diagnostics_enabled,
-    std::string diagnostics_endpoint) {
+    std::string diagnostics_endpoint,
+    DynamicPluginOptions dynamic_plugins) {
     auto valid = validate_cross_limits(
         tcp_options,
         http_limits,
@@ -126,6 +127,22 @@ Result<ServiceOptions> ServiceOptions::create(
             ErrorCode::InvalidArgument,
             "diagnostics endpoint conflicts with a service route"));
     }
+    if (dynamic_plugins.root.empty() || dynamic_plugins.max_modules == 0U ||
+        dynamic_plugins.modules.size() > dynamic_plugins.max_modules) {
+        return Result<ServiceOptions>::failure(make_error(
+            ErrorCode::InvalidArgument,
+            "dynamic plugin options are outside supported ranges"));
+    }
+    const std::size_t static_plugin_count =
+        (enable_echo ? 1U : 0U) + (enable_mock_vision ? 1U : 0U);
+    if (static_plugin_count > plugin_limits.max_plugins() ||
+        (dynamic_plugins.enabled &&
+         dynamic_plugins.modules.size() >
+             plugin_limits.max_plugins() - static_plugin_count)) {
+        return Result<ServiceOptions>::failure(make_error(
+            ErrorCode::InvalidArgument,
+            "enabled static and dynamic plugins exceed plugin capacity"));
+    }
     return Result<ServiceOptions>::success(ServiceOptions{
         std::move(tcp_options),
         std::move(http_limits),
@@ -140,7 +157,8 @@ Result<ServiceOptions> ServiceOptions::create(
         metrics_enabled,
         std::move(metrics_endpoint),
         diagnostics_enabled,
-        std::move(diagnostics_endpoint)});
+        std::move(diagnostics_endpoint),
+        std::move(dynamic_plugins)});
 }
 
 Result<ServiceOptions> ServiceOptions::defaults() {
@@ -208,7 +226,8 @@ ServiceOptions::ServiceOptions(
     const bool metrics_enabled,
     std::string metrics_endpoint,
     const bool diagnostics_enabled,
-    std::string diagnostics_endpoint) noexcept
+    std::string diagnostics_endpoint,
+    DynamicPluginOptions dynamic_plugins) noexcept
     : tcp_options_(std::move(tcp_options)),
       http_limits_(std::move(http_limits)),
       pool_options_(pool_options),
@@ -222,7 +241,8 @@ ServiceOptions::ServiceOptions(
       metrics_enabled_(metrics_enabled),
       metrics_endpoint_(std::move(metrics_endpoint)),
       diagnostics_enabled_(diagnostics_enabled),
-      diagnostics_endpoint_(std::move(diagnostics_endpoint)) {}
+      diagnostics_endpoint_(std::move(diagnostics_endpoint)),
+      dynamic_plugins_(std::move(dynamic_plugins)) {}
 
 const net::tcp::TcpServerOptions& ServiceOptions::tcp_options() const noexcept {
     return tcp_options_;
@@ -273,6 +293,10 @@ bool ServiceOptions::diagnostics_enabled() const noexcept {
 
 const std::string& ServiceOptions::diagnostics_endpoint() const noexcept {
     return diagnostics_endpoint_;
+}
+
+const DynamicPluginOptions& ServiceOptions::dynamic_plugins() const noexcept {
+    return dynamic_plugins_;
 }
 
 }  // namespace iaisf::service

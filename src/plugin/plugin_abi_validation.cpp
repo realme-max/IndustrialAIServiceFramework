@@ -36,18 +36,86 @@ Result<void> validate_header(
     const char* const subject) {
     if (abi_version != IAISF_PLUGIN_ABI_VERSION) {
         return Result<void>::failure(make_error(
-            ErrorCode::InvalidArgument,
+            ErrorCode::InvalidState,
             std::string(subject) + " ABI version is unsupported"));
     }
     if (struct_size < minimum_size) {
         return Result<void>::failure(make_error(
-            ErrorCode::InvalidArgument,
+            ErrorCode::InvalidState,
             std::string(subject) + " struct is smaller than its ABI prefix"));
     }
     return Result<void>::success();
 }
 
 }  // namespace
+
+bool is_known_status(const iaisf_plugin_status_t status) noexcept {
+    switch (status) {
+    case IAISF_PLUGIN_STATUS_OK:
+    case IAISF_PLUGIN_STATUS_INVALID_ARGUMENT:
+    case IAISF_PLUGIN_STATUS_ABI_MISMATCH:
+    case IAISF_PLUGIN_STATUS_STRUCT_TOO_SMALL:
+    case IAISF_PLUGIN_STATUS_METADATA_INVALID:
+    case IAISF_PLUGIN_STATUS_VALIDATION_FAILED:
+    case IAISF_PLUGIN_STATUS_EXECUTION_FAILED:
+    case IAISF_PLUGIN_STATUS_SHUTDOWN_FAILED:
+    case IAISF_PLUGIN_STATUS_OUT_OF_MEMORY:
+    case IAISF_PLUGIN_STATUS_INTERNAL_ERROR:
+        return true;
+    }
+    return false;
+}
+
+Result<void> validate_status(const iaisf_plugin_status_t status) {
+    if (is_known_status(status)) {
+        return Result<void>::success();
+    }
+    return Result<void>::failure(make_error(
+        ErrorCode::InternalError,
+        "plugin ABI returned an unknown status code"));
+}
+
+Result<void> validate_api_response(
+    const iaisf_plugin_status_t status,
+    const std::uint32_t requested_abi_version,
+    const std::uint32_t host_api_struct_size,
+    const std::uint32_t output_api_capacity,
+    const iaisf_plugin_api* const output_api) {
+    auto status_valid = validate_status(status);
+    if (!status_valid) {
+        return status_valid;
+    }
+    if (status != IAISF_PLUGIN_STATUS_OK) {
+        const auto code = status == IAISF_PLUGIN_STATUS_OUT_OF_MEMORY
+                              ? ErrorCode::ResourceExhausted
+                              : ErrorCode::InvalidState;
+        return Result<void>::failure(make_error(
+            code,
+            "plugin ABI entry negotiation failed"));
+    }
+    if (output_api == nullptr) {
+        return Result<void>::failure(make_error(
+            ErrorCode::InvalidState,
+            "plugin ABI entry returned a null API pointer"));
+    }
+    if (requested_abi_version != IAISF_PLUGIN_ABI_VERSION ||
+        host_api_struct_size < minimum_size_for_host()) {
+        return Result<void>::failure(make_error(
+            ErrorCode::InvalidState,
+            "plugin ABI entry received an unsupported host prefix"));
+    }
+    if (output_api_capacity < minimum_size_for_api()) {
+        return Result<void>::failure(make_error(
+            ErrorCode::InvalidState,
+            "plugin ABI entry output capacity is too small"));
+    }
+    if (output_api->struct_size > output_api_capacity) {
+        return Result<void>::failure(make_error(
+            ErrorCode::InvalidState,
+            "plugin ABI entry reported a struct larger than its capacity"));
+    }
+    return validate_plugin_api(*output_api);
+}
 
 Result<void> validate_string_view(
     const iaisf_plugin_string_view value,
@@ -78,7 +146,7 @@ Result<void> validate_host_api(const iaisf_plugin_host_api& host) {
     if (host.log == nullptr || host.allocate == nullptr ||
         host.deallocate == nullptr) {
         return Result<void>::failure(make_error(
-            ErrorCode::InvalidArgument,
+            ErrorCode::InvalidState,
             "plugin host API has a required callback missing"));
     }
     return Result<void>::success();
@@ -97,8 +165,25 @@ Result<void> validate_plugin_api(const iaisf_plugin_api& api) {
         api.validate == nullptr || api.execute == nullptr ||
         api.shutdown == nullptr || api.destroy == nullptr) {
         return Result<void>::failure(make_error(
-            ErrorCode::InvalidArgument,
+            ErrorCode::InvalidState,
             "plugin API has a required callback missing"));
+    }
+    return Result<void>::success();
+}
+
+Result<void> validate_bytes_view(
+    const iaisf_plugin_bytes_view value,
+    const std::size_t maximum,
+    const char* const field) {
+    if (value.size > maximum) {
+        return Result<void>::failure(make_error(
+            ErrorCode::InvalidArgument,
+            std::string(field) + " exceeds its byte limit"));
+    }
+    if (value.size != 0U && value.data == nullptr) {
+        return Result<void>::failure(make_error(
+            ErrorCode::InvalidArgument,
+            std::string(field) + " has a null data pointer"));
     }
     return Result<void>::success();
 }

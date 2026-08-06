@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cctype>
 #include <cstdint>
 #include <exception>
 #include <fstream>
@@ -18,6 +19,8 @@
 #include <vector>
 
 #include <nlohmann/json.hpp>
+
+#include "iaisf/core/json_value_limits.hpp"
 
 namespace iaisf {
 namespace {
@@ -103,6 +106,90 @@ bool contains_control_character(const std::string_view value) {
             const auto character = static_cast<unsigned char>(raw_character);
             return character < 0x20U || character == 0x7FU;
         });
+}
+
+bool valid_dynamic_module_id(const std::string_view value) noexcept {
+    if (value.empty() || value.size() > kMaxDynamicPluginModuleIdBytes) {
+        return false;
+    }
+    const auto is_alpha_numeric = [](const unsigned char character) noexcept {
+        return (character >= static_cast<unsigned char>('a') &&
+                character <= static_cast<unsigned char>('z')) ||
+               (character >= static_cast<unsigned char>('A') &&
+                character <= static_cast<unsigned char>('Z')) ||
+               (character >= static_cast<unsigned char>('0') &&
+                character <= static_cast<unsigned char>('9'));
+    };
+    if (!is_alpha_numeric(static_cast<unsigned char>(value.front()))) {
+        return false;
+    }
+    for (const auto raw : value.substr(1U)) {
+        const auto character = static_cast<unsigned char>(raw);
+        if (!is_alpha_numeric(character) && character != '.' &&
+            character != '_' && character != '-') {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool valid_dynamic_library_name(const std::string_view value) noexcept {
+    if (value.empty() || contains_control_character(value) ||
+        value.find('\\') != std::string_view::npos || value.front() == '/') {
+        return false;
+    }
+    if (value.size() >= 2U &&
+        std::isalpha(static_cast<unsigned char>(value.front())) != 0 &&
+        value[1] == ':') {
+        return false;
+    }
+    std::size_t begin = 0U;
+    while (begin <= value.size()) {
+        const auto end = value.find('/', begin);
+        const auto length = end == std::string_view::npos
+                                ? value.size() - begin
+                                : end - begin;
+        const auto component = value.substr(begin, length);
+        if (component.empty() || component == "." || component == "..") {
+            return false;
+        }
+        if (end == std::string_view::npos) {
+            break;
+        }
+        begin = end + 1U;
+    }
+    return true;
+}
+
+bool valid_dynamic_root_name(const std::string_view value) noexcept {
+    return valid_dynamic_library_name(value);
+}
+
+Result<void> validate_dynamic_config_value(
+    const Json &value,
+    const PluginLimitConfig &limits,
+    std::string &serialized) {
+    auto checked = validate_json_value(
+        value,
+        JsonValueLimits{
+            static_cast<std::size_t>(limits.max_input_bytes),
+            static_cast<std::size_t>(limits.max_json_depth),
+            static_cast<std::size_t>(limits.max_json_elements),
+            static_cast<std::size_t>(limits.max_string_bytes)},
+        "plugins.runtime.modules.config");
+    if (!checked) {
+        return Result<void>::failure(std::move(checked).error());
+    }
+    try {
+        serialized = value.dump();
+    } catch (const std::bad_alloc &) {
+        return config_failure(
+            "plugins.runtime.modules.config exceeds allocation limits");
+    } catch (...) {
+        return config_failure(
+            "plugins.runtime.modules.config is not serializable JSON");
+    }
+    return Result<void>::success();
 }
 
 bool is_known_log_level(const LogLevel level) noexcept {
@@ -646,6 +733,165 @@ Result<void> apply_plugin_switch(const Json &plugins, const char *const key,
     return Result<void>::success();
 }
 
+Result<void> apply_dynamic_library(
+    const Json &library,
+    DynamicPluginModuleConfig &module) {
+    if (library.is_string()) {
+        const auto value = library.get<std::string>();
+        if (!valid_dynamic_library_name(value)) {
+            return config_failure(
+                "plugins.runtime.modules.library is not a safe relative path");
+        }
+        module.generic_library = value;
+        return Result<void>::success();
+    }
+    auto object = require_object(library, "plugins.runtime.modules.library");
+    if (!object) {
+        return object;
+    }
+    auto fields = reject_unknown_fields(
+        library, {"linux", "windows"}, "plugins.runtime.modules.library");
+    if (!fields) {
+        return fields;
+    }
+    bool found = false;
+    for (const auto platform : {"linux", "windows"}) {
+        if (!library.contains(platform)) {
+            continue;
+        }
+        if (!library.at(platform).is_string()) {
+            return config_failure(
+                std::string{"plugins.runtime.modules.library."} + platform +
+                " must be a string");
+        }
+        const auto value = library.at(platform).get<std::string>();
+        if (!valid_dynamic_library_name(value)) {
+            return config_failure(
+                std::string{"plugins.runtime.modules.library."} + platform +
+                " is not a safe relative path");
+        }
+        found = true;
+        if (std::string_view{platform} == "linux") {
+            module.linux_library = value;
+        } else {
+            module.windows_library = value;
+        }
+    }
+    if (!found) {
+        return config_failure(
+            "plugins.runtime.modules.library must define a platform library");
+    }
+    return Result<void>::success();
+}
+
+Result<void> apply_dynamic_runtime_config(
+    const Json &plugins,
+    AppConfig &config) {
+    if (!plugins.contains("runtime")) {
+        return Result<void>::success();
+    }
+    const Json &runtime = plugins.at("runtime");
+    auto object = require_object(runtime, "plugins.runtime");
+    if (!object) {
+        return object;
+    }
+    auto fields = reject_unknown_fields(
+        runtime, {"dynamic_loading_enabled", "root", "max_modules", "modules"},
+        "plugins.runtime");
+    if (!fields) {
+        return fields;
+    }
+    if (runtime.contains("dynamic_loading_enabled")) {
+        if (!runtime.at("dynamic_loading_enabled").is_boolean()) {
+            return config_failure(
+                "plugins.runtime.dynamic_loading_enabled must be a boolean");
+        }
+        config.plugins.runtime.dynamic_loading_enabled =
+            runtime.at("dynamic_loading_enabled").get<bool>();
+    }
+    if (runtime.contains("root")) {
+        if (!runtime.at("root").is_string()) {
+            return config_failure("plugins.runtime.root must be a string");
+        }
+        const auto root = runtime.at("root").get<std::string>();
+        if (root.size() > kMaxDynamicPluginRootBytes ||
+            !valid_dynamic_root_name(root)) {
+            return config_failure(
+                "plugins.runtime.root must be a safe relative path");
+        }
+        config.plugins.runtime.root = root;
+    }
+    if (runtime.contains("max_modules")) {
+        auto value = read_size(runtime.at("max_modules"),
+                               "plugins.runtime.max_modules",
+                               kMaxDynamicPluginModules);
+        if (!value) {
+            return Result<void>::failure(std::move(value).error());
+        }
+        config.plugins.runtime.max_modules = value.value();
+    }
+    if (!runtime.contains("modules")) {
+        return Result<void>::success();
+    }
+    if (!runtime.at("modules").is_array()) {
+        return config_failure("plugins.runtime.modules must be an array");
+    }
+    const auto &modules = runtime.at("modules");
+    if (modules.size() > kMaxDynamicPluginModules) {
+        return config_failure("plugins.runtime.modules exceeds the maximum count");
+    }
+    config.plugins.runtime.modules.clear();
+    config.plugins.runtime.modules.reserve(modules.size());
+    for (const auto &raw_module : modules) {
+        auto module_object = require_object(raw_module,
+                                            "plugins.runtime.modules[]");
+        if (!module_object) {
+            return module_object;
+        }
+        auto module_fields = reject_unknown_fields(
+            raw_module, {"id", "enabled", "library", "config"},
+            "plugins.runtime.modules[]");
+        if (!module_fields) {
+            return module_fields;
+        }
+        if (!raw_module.contains("id") || !raw_module.at("id").is_string()) {
+            return config_failure(
+                "plugins.runtime.modules[].id must be a string");
+        }
+        DynamicPluginModuleConfig module;
+        module.id = raw_module.at("id").get<std::string>();
+        if (!valid_dynamic_module_id(module.id)) {
+            return config_failure(
+                "plugins.runtime.modules[].id has an invalid format");
+        }
+        if (raw_module.contains("enabled")) {
+            if (!raw_module.at("enabled").is_boolean()) {
+                return config_failure(
+                    "plugins.runtime.modules[].enabled must be a boolean");
+            }
+            module.enabled = raw_module.at("enabled").get<bool>();
+        }
+        if (!raw_module.contains("library")) {
+            return config_failure(
+                "plugins.runtime.modules[].library is required");
+        }
+        auto library = apply_dynamic_library(raw_module.at("library"), module);
+        if (!library) {
+            return library;
+        }
+        if (raw_module.contains("config")) {
+            auto config_value = validate_dynamic_config_value(
+                raw_module.at("config"), config.plugins.limits,
+                module.config_json);
+            if (!config_value) {
+                return config_value;
+            }
+        }
+        config.plugins.runtime.modules.push_back(std::move(module));
+    }
+    return Result<void>::success();
+}
+
 Result<void> apply_plugin_config(const Json &root, AppConfig &config) {
     if (!root.contains("plugins")) {
         return Result<void>::success();
@@ -656,7 +902,7 @@ Result<void> apply_plugin_config(const Json &root, AppConfig &config) {
         return object;
     }
     auto fields = reject_unknown_fields(
-        plugins, {"echo", "mock_vision", "limits"}, "plugins");
+        plugins, {"echo", "mock_vision", "limits", "runtime"}, "plugins");
     if (!fields) {
         return fields;
     }
@@ -670,7 +916,11 @@ Result<void> apply_plugin_config(const Json &root, AppConfig &config) {
     if (!mock) {
         return mock;
     }
-    return apply_plugin_limits(plugins, config);
+    auto limits = apply_plugin_limits(plugins, config);
+    if (!limits) {
+        return limits;
+    }
+    return apply_dynamic_runtime_config(plugins, config);
 }
 
 Result<void> apply_task_api_config(const Json &root, AppConfig &config) {
@@ -1045,7 +1295,8 @@ AppConfig default_app_config() {
         PluginConfig{true, true,
                      PluginLimitConfig{128, 128, 128, 64, 1024, 1024,
                                        512 * 1024, 512 * 1024, 64, 100000,
-                                       512 * 1024, 64, 128}},
+                                       512 * 1024, 64, 128},
+                     DynamicPluginRuntimeConfig{false, "plugins", 16U, {}}},
         TaskApiConfig{256, 128},
         LoggingConfig{LogLevel::Info, 1024U, 32U, 64U, 1000U,
                       LoggingConsoleConfig{true},
@@ -1094,6 +1345,49 @@ Result<void> validate_app_config(const AppConfig &config) {
         config.runtime.task_queue_capacity > kMaxTaskQueueCapacity) {
         return config_failure(
             "runtime.task_queue_capacity is outside the allowed range");
+    }
+    if (config.plugins.runtime.root.empty() ||
+        config.plugins.runtime.root.size() > kMaxDynamicPluginRootBytes ||
+        contains_control_character(config.plugins.runtime.root) ||
+        !valid_dynamic_root_name(config.plugins.runtime.root) ||
+        config.plugins.runtime.max_modules == 0U ||
+        config.plugins.runtime.max_modules > kMaxDynamicPluginModules) {
+        return config_failure(
+            "plugins.runtime values are outside supported ranges");
+    }
+    std::set<std::string> dynamic_ids;
+    std::size_t enabled_dynamic_modules = 0U;
+    for (const auto &module : config.plugins.runtime.modules) {
+        if (!valid_dynamic_module_id(module.id) ||
+            !dynamic_ids.insert(module.id).second) {
+            return config_failure(
+                "plugins.runtime.modules contains a duplicate or invalid id");
+        }
+        if (!module.generic_library.has_value() &&
+            !module.linux_library.has_value() &&
+            !module.windows_library.has_value()) {
+            return config_failure(
+                "plugins.runtime.modules library is missing");
+        }
+        if (module.enabled) {
+            ++enabled_dynamic_modules;
+        }
+    }
+    if (enabled_dynamic_modules > config.plugins.runtime.max_modules) {
+        return config_failure(
+            "enabled dynamic plugins exceed plugins.runtime.max_modules");
+    }
+    const std::size_t enabled_static_plugins =
+        (config.plugins.enable_echo ? 1U : 0U) +
+        (config.plugins.enable_mock_vision ? 1U : 0U);
+    const auto configured_plugin_limit = static_cast<std::size_t>(
+        config.plugins.limits.max_plugins);
+    if (enabled_static_plugins > configured_plugin_limit ||
+        (config.plugins.runtime.dynamic_loading_enabled &&
+         enabled_dynamic_modules >
+             configured_plugin_limit - enabled_static_plugins)) {
+        return config_failure(
+            "enabled static and dynamic plugins exceed plugins.limits.max_plugins");
     }
     if (!is_known_log_level(config.logging.level)) {
         return config_failure("logging.level is invalid");

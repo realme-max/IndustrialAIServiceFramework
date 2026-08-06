@@ -2,10 +2,10 @@
 
 ## 1. 状态与范围
 
-Phase 6 跨平台静态插件系统已完成，当前状态：
+Phase 6 跨平台静态插件系统已完成；当前动态插件最终本地审计状态：
 
 ```text
-PHASE_7_SERVICE_INTEGRATION_COMPLETED
+PHASE_8G_FINAL_DYNAMIC_PLUGIN_HARDENED
 ```
 
 Windows VS2022 Debug/Release 已各通过 316/316 CTest，其中 Task Runtime 97、
@@ -556,3 +556,241 @@ HTTP plugin APIs remain unimplemented.
 
 Implementation status:
 `PHASE_8G_3_STABLE_C_ABI_CONTRACT_IMPLEMENTED`.
+
+## Phase 8G-4A ABI entry hardening
+
+The stable C boundary now exposes the cross-platform `IAISF_PLUGIN_EXPORT`
+and `IAISF_PLUGIN_CALL` macros. Linux exports use default visibility and
+Windows exports use `__declspec(dllexport)` with `__cdecl`; every ABI callback
+uses the same calling-convention macro. The fixed entry symbol is
+`iaisf_plugin_get_api_v1`, represented by `iaisf_plugin_get_api_v1_fn`. This
+phase still does not load a shared library or resolve a filesystem path.
+
+Entry negotiation is fail-closed. The host clears its output table, passes its
+host prefix size and output capacity, and validates the returned status,
+version, prefix size, required callbacks, non-null output pointer, and the
+reported `struct_size <= output capacity` invariant. Unknown status values are
+`InternalError`; version, prefix, capacity and callback contract failures are
+`InvalidState`. Validation reads only the common prefix and never guesses the
+meaning of an appended field.
+
+The API table is append-only. Version 1 keeps the original required callback
+prefix and appends an optional `initialize(instance, compact_config)` hook.
+An older table whose `struct_size` ends at `destroy` remains valid and may use
+an empty configuration. A non-empty JSON configuration requires the initialize
+field; a newer table performs `create -> initialize -> execute -> shutdown ->
+destroy`. If initialization fails, the adapter destroys the instance and does
+not call shutdown. If initialization succeeds, shutdown and destroy are both
+required even when shutdown reports an error. Configuration is serialized to
+compact UTF-8 JSON bytes and is bounded by the existing plugin input limit.
+
+Host byte/string views use explicit pointer-plus-length ownership. A null
+pointer with a non-zero length is invalid; a zero-length view is valid. The
+host retains ownership for the duration of the callback, and plugin output is
+copied through the bounded output callback. No STL type, exception, RTTI,
+allocator ownership, or C++ virtual interface crosses the ABI.
+
+The C and C++ include tests compile the entry symbol, export/calling
+convention declarations, status negotiation, short and oversized structures,
+missing callbacks, unknown statuses, prefix compatibility, and initialize
+success/failure lifecycle. No dynamic library is built in this phase.
+
+Implementation status:
+`PHASE_8G_4A_ABI_ENTRY_HARDENING_IMPLEMENTED`.
+
+## Phase 8G-4B dynamic module and safe-path foundation
+
+`detail::DynamicModule` is a move-only RAII wrapper around a native module
+handle.  It owns the handle returned by the platform loader, releases it in a
+`noexcept` destructor, and exposes only symbol resolution; it does not create
+an ABI instance or register an operation with `PluginRuntime`.
+
+On Linux, opening uses `dlopen` with `RTLD_NOW | RTLD_LOCAL`.  `dlerror()` is
+cleared before opening and the error text is copied immediately after a
+failed `dlopen` or `dlsym`; `RTLD_GLOBAL` is never used.  On Windows, the
+loader converts the path to UTF-16 and uses `LoadLibraryExW` with
+`LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_DEFAULT_DIRS`, then
+resolves symbols with `GetProcAddress`.  The Windows implementation does not
+use `LoadLibraryA` or mutate the process DLL search path.  Platform details
+are mapped to the stable framework errors (`SystemError` for module-open
+failure and `NotFound` for a missing symbol).
+
+`SafePathResolver` accepts only a safe relative UTF-8 library name below a
+canonical plugin root.  It rejects absolute, drive-letter, UNC, `..`, `.`,
+empty-segment, backslash, control-character, and invalid-UTF-8 inputs.  The
+root, every existing path component, and the library itself must not be a
+symlink or reparse point; the canonical candidate must be a regular file and
+remain lexically inside the canonical root.  This is containment and
+filesystem-object validation only: signing, hashing, permissions, directory
+scanning, and remote-plugin policy are intentionally outside this phase.
+
+`DynamicPluginLoader` composes the resolver and module wrapper.  Its options
+contain a canonical `plugin_root`; each `DynamicPluginModuleSpec` has an
+identifier and a relative `.so` (Linux) or `.dll` (Windows) path.  Canonical
+paths are tracked in a deterministic set, so loading the same normalized
+library twice is rejected.  The loader returns a module handle only: ABI entry
+negotiation, instance creation, validation/execution, runtime registration,
+configuration, hot reload, and service/HTTP integration remain unimplemented
+and are reserved for Phase 8G-4C or later.
+
+The test fixture is a CMake `MODULE` library that exports only
+`iaisf_test_symbol`; it does not implement or invoke the production ABI.  The
+dynamic-loader suite covers invalid and valid loads, symbol success/failure,
+move ownership, duplicate normalized paths, and safe-path rejection.  Tests
+use known temporary paths and no sleeps or directory scans.  Symlink/reparse
+tests run where the platform permits creation; the Windows validation
+environment skips those two cases when the process lacks symlink privilege.
+
+Implementation status:
+`PHASE_8G_4B_DYNAMIC_LOADER_IMPLEMENTED`.
+
+## Phase 8G-4C dynamic adapter and registration transaction
+
+`DynamicPluginAdapter` retains a shared `detail::DynamicModule` together with
+the negotiated C ABI table and opaque instance.  The adapter is move-disabled
+and exposes the existing `IAlgorithmPlugin` and `IManagedAlgorithmPlugin`
+interfaces.  Its lifecycle is `Prepared -> Created -> Initialized ->
+Draining -> Stopped`; creation, initialization, execution, shutdown, and
+destroy failures transition to a terminal `Failed`/`Stopped` result without
+letting exception text cross the ABI boundary.  The module member is declared
+before the instance/lifecycle state so destruction runs as
+`shutdown -> destroy -> adapter fields -> DynamicModule`.
+
+All ABI callbacks are wrapped in `try/catch`.  Validation and execution copy
+input bytes into host-owned storage; execution output is collected through a
+bounded callback, parsed as JSON, checked for UTF-8/JSON limits, and never
+retains a plugin-owned pointer.  A non-empty configuration requires the
+append-only `initialize` callback; an old prefix with an empty configuration
+remains compatible.  Initialization failure destroys the instance and does
+not call ABI shutdown.  Successful initialization always attempts shutdown
+and destroy, while destroy remains exactly-once even when shutdown fails.
+
+`DynamicPluginLoader::load_plugin` now performs the complete preparation path:
+safe-path resolution, module load, fixed entry-symbol lookup, ABI negotiation,
+metadata validation/copy, and adapter creation.  It still does not publish to
+the runtime.  The loader does not implement configuration discovery, hot
+reload, remote modules, HTTP exposure, or process isolation.
+
+`PluginRuntime::register_dynamic` is the only publication entry point.  It
+requires a bounded module identifier and executes a transaction under the
+existing Configuring state: validate metadata, check operation and capacity,
+initialize the adapter, publish the registry entry, then mark it Ready.  Any
+failure shuts down/destroys the adapter as appropriate and erases the dynamic
+entry, so no failed operation or diagnostics record remains.  Static
+registration keeps its existing failed-entry observation behavior.  Dynamic
+entries expose only `origin: "dynamic"` and the caller-supplied `module_id` in
+diagnostics; library paths, configuration, and exception text are never
+returned.  The adapter/module remains alive through `PluginExecutionLease`.
+
+The runtime adds the label-free counters
+`plugin_dynamic_plugin_creations_total` and
+`plugin_dynamic_plugin_creation_failures_total`; metric updates are best
+effort and cannot change load or registration outcomes.  No dynamic operation
+labels are created.
+
+The CMake fixture `iaisf_dynamic_fixture_plugin` exports a real
+`iaisf_plugin_get_api_v1` table and exercises create, initialize, validate,
+execute, shutdown, and destroy through the host adapter.  The dynamic adapter
+test suite covers successful loading, invalid JSON and oversized output,
+initialization/shutdown failure cleanup, missing initialize compatibility,
+ABI exception isolation, transactional duplicate/capacity/initialization
+rollback, origin/module diagnostics, and module lifetime during an execution
+lease.  Tests use deterministic futures/ownership scopes and no sleeps.
+
+Implementation status:
+`PHASE_8G_4C_DYNAMIC_PLUGIN_ADAPTER_IMPLEMENTED`.
+
+## Phase 8G-4D startup configuration and service integration
+
+Dynamic modules are startup-only configuration.  `plugins.runtime` accepts
+`dynamic_loading_enabled`, a relative `root`, a bounded `max_modules`, and an
+array of `{id, enabled, library, config}` entries.  Module identifiers use
+`[A-Za-z0-9][A-Za-z0-9._-]{0,63}`.  Library values are either one safe relative
+name or an explicit `linux`/`windows` object; there is no extension guessing,
+directory scan, PATH search, reload, or remote download.  Configuration rejects
+unknown fields, duplicate keys, unsafe paths, missing current-platform names,
+and JSON values over the configured plugin depth/node/string/serialized-byte
+limits.  Legacy static `echo` and `mock_vision` configuration remains valid.
+
+`RuntimeOptions` resolves the platform-specific library name and carries an
+owned `DynamicPluginOptions` value.  `IndustrialAiService::create` performs
+the startup transaction after static registration and before `PluginRuntime::freeze`:
+create loader, load every enabled module, register every adapter, then freeze.
+Any failure returns an error before a service is published; local runtime and
+adapter ownership rolls back module instances and releases module handles.
+The HTTP server is created only after this transaction succeeds.  Shutdown
+continues to drain HTTP/TCP and tasks before `PluginRuntime::shutdown`, which
+invokes dynamic shutdown/destroy and releases modules.
+
+Two label-free metrics are best effort: `plugin_dynamic_modules_loaded` is a
+gauge and `plugin_dynamic_load_failures_total` is a counter.  Diagnostics add
+only `dynamic_loading_enabled` and `dynamic_module_count`; root, library,
+configuration, paths, and exception text remain private.  Dynamic plugin
+loading is not exposed through HTTP and does not support runtime management.
+
+Configuration, RuntimeOptions, service rollback, platform selection, and real
+fixture startup tests cover disabled compatibility, valid loading, invalid
+IDs/paths/schema, missing platform libraries, JSON limits, startup failure,
+duplicate/capacity rejection, and fixture-backed task admission.
+
+Implementation status:
+`PHASE_8G_4D_DYNAMIC_PLUGIN_CONFIGURATION_IMPLEMENTED`.
+
+## Phase 8G-4E final hardening audit
+
+The final audit keeps the complete path explicit: Config -> Loader -> Adapter
+-> PluginRuntime -> Task adapter -> TaskManager/HTTP. Dynamic adapters retain a
+shared `DynamicModule`; `PluginRuntime` waits for every execution lease before
+calling lifecycle shutdown and releasing the module. Startup failures are
+transactional and leave no published Service or registry entry.
+
+The fixed dynamic observability set now also includes
+`plugin_dynamic_unload_failures_total`. Native unload clears the handle even if
+`dlclose`/`FreeLibrary` reports failure; the failure is counted and converted
+to a bounded shutdown error. Missing or wrong-type metrics are treated as
+unavailable and never change plugin behavior.
+
+Lifecycle tests cover create, initialize, execute, shutdown and destroy
+failures, including exceptions. Diagnostics tests verify that the dynamic
+section exposes only bounded state/count/origin/module-id fields and does not
+leak paths, root, config, native handles or exception text. Safe-path tests
+cover drive/UNC forms, symlinks/reparse points and an explicit permission
+restriction skip where the host cannot enforce mode bits.
+
+Final status is local hardening only until the resulting commit has a fresh
+Linux Debug/Release workflow run; no hot reload, remote plugin, sandbox or
+process isolation is included.
+
+## Phase 8G-4E final hardening and release audit
+
+The final audit covers Config -> RuntimeOptions -> DynamicPluginLoader ->
+DynamicModule -> stable C ABI -> DynamicPluginAdapter -> PluginRuntime ->
+Task adapter -> TaskManager -> HTTP. PluginRuntime is the publication boundary:
+it validates metadata and initializes an adapter before exposing the operation.
+Execution leases keep the adapter and module alive; shutdown waits for all
+leases, calls shutdown/destroy, then releases the native handle. Failed startup
+paths roll back before a Service is published.
+
+The fixed dynamic metrics are `plugin_dynamic_modules_loaded` (gauge),
+`plugin_dynamic_load_failures_total` (counter), and
+`plugin_dynamic_unload_failures_total` (counter). They are label-free and best
+effort. Native unload clears the handle even when `dlclose`/`FreeLibrary`
+reports failure. Diagnostics exposes only copied operation/version/origin,
+module-id, state and count fields; paths, root, configuration, handles,
+payloads and exception text remain private.
+
+The real platform MODULE fixture and in-process fake ABI tests cover valid
+create/initialize/execute/shutdown/destroy, create/initialize/execute/shutdown/
+destroy failures and exceptions, transaction rollback, lease lifetime, metric
+unavailability/type failure, diagnostics privacy, and safe-path drive/UNC,
+symlink/reparse and permission handling. Permission enforcement uses an
+explicit skip when the host cannot provide it.
+
+Local final evidence is WSL Ubuntu 24.04 Debug `761/761` and Release `761/761`
+(one explicit permission skip in each), and Windows VS2022 Debug and Release
+(533 registered, 528 passed, five explicit environment skips, zero failures).
+Project source and test compiler warnings are zero. No new GitHub Actions run
+exists for this uncommitted worktree; the existing workflow already builds the
+dynamic targets and fixture. ASan/UBSan were not run because the current local
+build has no sanitizer configuration. Hot reload, remote plugins, process
+isolation and sandboxing remain out of scope.

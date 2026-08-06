@@ -389,4 +389,61 @@ TEST(AppConfigTest, RejectsConfigurationLargerThanOneMiB) {
     EXPECT_EQ(result.error().code, iaisf::ErrorCode::ConfigError);
 }
 
+TEST(AppConfigTest, ParsesDisabledDynamicRuntimeForLegacyCompatibility) {
+    const ScopedConfigFile file{R"({
+      "plugins": {"echo": {"enabled": true}, "runtime": {
+        "dynamic_loading_enabled": false,
+        "root": "plugins",
+        "max_modules": 16,
+        "modules": []
+      }}
+    })"};
+    const auto result = iaisf::load_app_config(file.path());
+    ASSERT_TRUE(result) << result.error().message;
+    EXPECT_FALSE(result.value().plugins.runtime.dynamic_loading_enabled);
+    EXPECT_TRUE(result.value().plugins.runtime.modules.empty());
+}
+
+TEST(AppConfigTest, ParsesDynamicModuleAndCompactConfig) {
+    const ScopedConfigFile file{R"({
+      "plugins": {"limits": {"max_plugins": 8}, "runtime": {
+        "dynamic_loading_enabled": true,
+        "root": "plugins",
+        "max_modules": 4,
+        "modules": [{"id": "vision_plugin", "enabled": true,
+          "library": {"linux": "fixture_dynamic_plugin.so", "windows": "fixture_dynamic_plugin.dll"},
+          "config": {"threshold": 0.5}}]
+      }}
+    })"};
+    const auto result = iaisf::load_app_config(file.path());
+    ASSERT_TRUE(result) << result.error().message;
+    ASSERT_EQ(result.value().plugins.runtime.modules.size(), 1U);
+    const auto &module = result.value().plugins.runtime.modules.front();
+    EXPECT_EQ(module.id, "vision_plugin");
+    EXPECT_EQ(module.linux_library, "fixture_dynamic_plugin.so");
+    EXPECT_EQ(module.windows_library, "fixture_dynamic_plugin.dll");
+    EXPECT_EQ(module.config_json, R"({"threshold":0.5})");
+}
+
+TEST(AppConfigTest, RejectsDynamicModuleSchemaAndUnsafePaths) {
+    expect_config_error(
+        R"({"plugins":{"runtime":{"unknown":true}}})");
+    expect_config_error(
+        R"({"plugins":{"runtime":{"modules":[{"id":"bad id","library":"x.so"}]}}})");
+    expect_config_error(
+        R"({"plugins":{"runtime":{"modules":[{"id":"ok","library":"../x.so"}]}}})");
+    expect_config_error(
+        R"({"plugins":{"runtime":{"modules":[{"id":"ok","library":{"linux":42}}]}}})");
+}
+
+TEST(AppConfigTest, RejectsDynamicPluginConfigBeyondJsonLimits) {
+    const std::string oversized(600000U, 'x');
+    const ScopedConfigFile file{
+        std::string{"{\"plugins\":{\"runtime\":{\"modules\":[{\"id\":\"x\",\"library\":\"x.so\",\"config\":\""} +
+        oversized + "\"}]}}}"};
+    const auto result = iaisf::load_app_config(file.path());
+    ASSERT_FALSE(result);
+    EXPECT_EQ(result.error().code, iaisf::ErrorCode::ResourceExhausted);
+}
+
 }  // namespace

@@ -262,6 +262,114 @@ set_tests_properties(
   PROPERTIES LABELS "unit;plugin" TIMEOUT 10
 )
 
+add_library(
+  iaisf_test_fixture_plugin
+  MODULE
+  plugin/fixtures/valid_fixture_plugin.cpp
+)
+target_compile_features(iaisf_test_fixture_plugin PRIVATE cxx_std_17)
+target_include_directories(
+  iaisf_test_fixture_plugin
+  PRIVATE
+    "${PROJECT_SOURCE_DIR}/include"
+)
+set_target_properties(
+  iaisf_test_fixture_plugin
+  PROPERTIES
+    PREFIX ""
+)
+
+add_library(
+  iaisf_dynamic_fixture_plugin
+  MODULE
+  plugin/fixtures/fixture_dynamic_plugin.cpp
+)
+target_compile_features(iaisf_dynamic_fixture_plugin PRIVATE cxx_std_17)
+target_include_directories(
+  iaisf_dynamic_fixture_plugin
+  PRIVATE
+    "${PROJECT_SOURCE_DIR}/include"
+)
+set_target_properties(
+  iaisf_dynamic_fixture_plugin
+  PROPERTIES
+    PREFIX ""
+)
+
+add_executable(
+  iaisf_plugin_loader_tests
+  plugin/test_dynamic_module.cpp
+  plugin/test_plugin_safe_path.cpp
+)
+target_compile_features(iaisf_plugin_loader_tests PRIVATE cxx_std_17)
+target_compile_definitions(
+  iaisf_plugin_loader_tests
+  PRIVATE
+    IAISF_TEST_FIXTURE_PATH="$<TARGET_FILE:iaisf_test_fixture_plugin>"
+    IAISF_DYNAMIC_FIXTURE_PATH="$<TARGET_FILE:iaisf_dynamic_fixture_plugin>"
+)
+target_link_libraries(
+  iaisf_plugin_loader_tests
+  PRIVATE
+    iaisf::plugin
+    GTest::gtest
+    GTest::gtest_main
+    Threads::Threads
+)
+add_dependencies(
+  iaisf_plugin_loader_tests
+  iaisf_test_fixture_plugin
+  iaisf_dynamic_fixture_plugin
+)
+iaisf_enable_project_warnings(iaisf_plugin_loader_tests)
+
+gtest_add_tests(
+  TARGET iaisf_plugin_loader_tests
+  TEST_LIST IAISF_PLUGIN_LOADER_TESTS
+)
+set_tests_properties(
+  ${IAISF_PLUGIN_LOADER_TESTS}
+  PROPERTIES
+    LABELS "unit;plugin;dynamic_loader"
+    TIMEOUT 10
+)
+
+add_executable(
+  iaisf_dynamic_plugin_adapter_tests
+  plugin/test_dynamic_plugin_adapter.cpp
+)
+target_compile_features(iaisf_dynamic_plugin_adapter_tests PRIVATE cxx_std_17)
+target_compile_definitions(
+  iaisf_dynamic_plugin_adapter_tests
+  PRIVATE
+    IAISF_DYNAMIC_FIXTURE_PATH="$<TARGET_FILE:iaisf_dynamic_fixture_plugin>"
+)
+target_link_libraries(
+  iaisf_dynamic_plugin_adapter_tests
+  PRIVATE
+    iaisf::plugin
+    iaisf::diagnostics
+    GTest::gtest
+    GTest::gtest_main
+    Threads::Threads
+)
+add_dependencies(
+  iaisf_dynamic_plugin_adapter_tests
+  iaisf_dynamic_fixture_plugin
+)
+iaisf_enable_project_warnings(iaisf_dynamic_plugin_adapter_tests)
+
+gtest_add_tests(
+  TARGET iaisf_dynamic_plugin_adapter_tests
+  TEST_LIST IAISF_DYNAMIC_PLUGIN_ADAPTER_TESTS
+)
+set_tests_properties(
+  ${IAISF_DYNAMIC_PLUGIN_ADAPTER_TESTS}
+  PROPERTIES
+    LABELS "unit;plugin;dynamic_loader"
+    TIMEOUT 10
+)
+
 add_executable(
   iaisf_task_api_tests
   api/test_task_http_api.cpp
@@ -396,6 +504,12 @@ if(TARGET iaisf_service)
       GTest::gtest_main
       Threads::Threads
   )
+  target_compile_definitions(
+    iaisf_service_tests
+    PRIVATE
+      IAISF_DYNAMIC_FIXTURE_PATH="$<TARGET_FILE:iaisf_dynamic_fixture_plugin>"
+  )
+  add_dependencies(iaisf_service_tests iaisf_dynamic_fixture_plugin)
   iaisf_enable_project_warnings(iaisf_service_tests)
 
   gtest_add_tests(

@@ -613,7 +613,7 @@ TEST(PluginRuntimeTest, MetricsFailureDoesNotAffectPluginExecution) {
         "echo", nlohmann::json{{"payload", "metrics"}});
     ASSERT_TRUE(result);
     EXPECT_EQ(result.value(), "metrics");
-    EXPECT_EQ(metrics.size(), 16U);
+    EXPECT_EQ(metrics.size(), 19U);
 }
 
 TEST(PluginRuntimeTest, EntryTransitionsThroughInitializingAndReady) {

@@ -3,7 +3,8 @@
 ## 1. 当前状态
 
 - 项目：IndustrialAIServiceFramework
-- 当前分支：`phase/7-service-integration`
+- 当前分支：`phase/8-timer-infrastructure`
+- 当前状态：`PHASE_8G_FINAL_DYNAMIC_PLUGIN_HARDENED`（本地未提交审计；无新的远端 CI run）
 - Phase 0 提交：`5fbcec0 docs: complete phase 0 architecture design`
 - Phase 1 最终实现提交：`63b30cffcbe3e621af33664721b3675a647bd1a1`
 - Phase 2 起始 HEAD / main / origin/main：`6065d91b277c07ed04e64b3f08034788965e6ac1`
@@ -1453,3 +1454,50 @@ Active stop 不保证触发请求返回 503；连接可能在响应生成前关�
 - 不可破坏：TimerQueue/EventLoop stop、TCP/HTTP timeout、DeferredCleanup、TaskManager shutdown 和 signal owner 语义。
 - 本地验证：Windows VS2022 Debug/Release `380/380`，WSL Ubuntu 24.04 GCC Debug/Release `596/596`；两平台 version/config smoke 成功，源码/测试 warning 0。
 - 当前风险：远端 CI 尚未验证；WSL 直接构建当前 Windows 挂载工作区而非另一份 Linux clone；NTFS/WSL 时间戳可能产生非编译器的 clock-skew 提示。
+## Phase 8G-4D handoff
+
+- 当前分支：`phase/8-timer-infrastructure`；本轮未 commit/push。
+- 当前状态：`PHASE_8G_4D_DYNAMIC_PLUGIN_CONFIGURATION_IMPLEMENTED`。
+- 配置：`plugins.runtime.dynamic_loading_enabled/root/max_modules/modules[]`；module id、库路径、平台选择、JSON config 均在启动前严格校验。
+- 运行时：`AppConfig` 保持 portable；`RuntimeOptions` 解析当前平台库；`ServiceOptions` 仅保存已验证的运行参数。
+- 启动事务：PluginRuntime configuring → 静态注册 → DynamicPluginLoader load → register_dynamic → freeze → Task adapter → HTTP start。任何失败都不发布 Service，并由局部 RAII 释放 adapter/module、撤销 signal owner。
+- 关闭顺序未改变：HTTP/TCP cleanup → TaskManager drain/join → PluginRuntime shutdown → dynamic adapter shutdown/destroy/module release。
+- 诊断字段仅为 `dynamic_loading_enabled` 和 `dynamic_module_count`；不输出 root、库路径、配置或异常文本。
+- 指标为 `plugin_dynamic_modules_loaded`（gauge）和 `plugin_dynamic_load_failures_total`（counter），更新失败不影响启动主流程。
+- Fixture：`iaisf_dynamic_fixture_plugin`，用于配置和 Service 集成测试；不代表真实工业算法。
+- 验证：WSL Debug/Release `752/752`；Windows Debug/Release 各 524 个测试（520 passed、4 个已知环境 skipped）；warning=0；diff-check 通过。当前没有远程 Linux CI 证据。
+- 禁止提前实现：热加载、HTTP plugin management API、远程下载、进程隔离、Phase 9 及真实 AI/GPU。
+## Phase 8G-4E final hardening handoff
+
+- Current branch: `phase/8-timer-infrastructure`; HEAD remains
+  `44e79a6e5706dc793057eea4a36fac1504b2be53`. This worktree is intentionally
+  uncommitted and unpushed. Local status is
+  `PHASE_8G_FINAL_DYNAMIC_PLUGIN_HARDENED`; no fresh GitHub Actions run exists
+  for this source.
+- Verified chain: AppConfig → RuntimeOptions → DynamicPluginLoader →
+  DynamicModule → stable C ABI → DynamicPluginAdapter → PluginRuntime → Task
+  adapter/TaskManager → HTTP. Startup is transactional and no Service is
+  published until all modules are loaded, registered, initialized and frozen.
+- Shutdown order remains HTTP/TCP cleanup → task drain/join → PluginRuntime
+  draining. Leases drain before adapter shutdown/destroy and native module
+  release. Native unload always clears the handle; failure is bounded and
+  counted by `plugin_dynamic_unload_failures_total`.
+- Dynamic metrics are `plugin_dynamic_modules_loaded` (gauge),
+  `plugin_dynamic_load_failures_total` and
+  `plugin_dynamic_unload_failures_total` (counters), with no labels and
+  best-effort updates. Diagnostics `/debug/status` exposes copied
+  operation/version/origin/module-id and lifecycle/count fields only; it never
+  outputs path, root, config, native handle, payload or exception text.
+- Fixtures/tests cover valid platform MODULE lifecycle plus deterministic fake
+  create, initialize, execute, shutdown and destroy failures/exceptions,
+  rollback, lease lifetime, metric unavailability, diagnostics privacy and
+  safe-path absolute/drive/UNC/parent/control/symlink/reparse/permission cases.
+  Permission restriction is an explicit skip if the host cannot enforce it.
+- Final local matrix: WSL Ubuntu 24.04 Debug `761/761` and Release `761/761`
+  (one explicit permission skip each); Windows VS2022 Debug and Release each
+  registered 533, passed 528, skipped five environment cases and failed zero.
+  Project source/test compiler warnings were zero. Windows also reports
+  non-fatal `pwsh.exe` lookup diagnostics from the applocal helper.
+- ASan/UBSan were not executed because no sanitizer build configuration is
+  enabled; no workflow was changed. Hot reload, remote loading, plugin
+  marketplace, process isolation and sandboxing remain forbidden.

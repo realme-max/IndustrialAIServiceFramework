@@ -2,7 +2,7 @@
 
 面向工业 AI 应用的 C++ 高性能任务服务框架。
 
-> 当前结论：`PHASE_8C_2_CONFIGURATION_SYSTEM_IMPLEMENTED`。Phase 8C-2 已完成严格 JSON 配置、运行时映射和基础 `--serve` 组合；Windows 与本地 WSL Debug/Release 回归通过，尚未记录当前未提交改动对应的 GitHub Actions CI。
+> 当前结论：`PHASE_8G_FINAL_DYNAMIC_PLUGIN_HARDENED`（本地未提交审计）。Phase 8G 动态插件链路已完成最终本地质量审计；新的远端 Linux CI 仍需在提交后绑定，不把本地结果冒充远端证据。
 
 ## 项目定位
 
@@ -475,3 +475,48 @@ Debug 和 Release 均 configure/build 成功，CTest 均为 `497/497`，0 failed
 `IndustrialAiServiceTest.ActiveHttpStopWaitsForDeferredCleanupBeforeJoiningTasks` 在 Debug/Release 均通过。active 请求触发 stop 不保证返回 503，连接可能在响应生成前关闭，已开始发送的 response 不得截断；普通 Stopping 阶段的新 POST 仍返回 503。顺序为 `TcpServer cleanup → HttpServer stopped → DeferredCleanup → TaskManager shutdown/join → Service Stopped`。
 
 尚未执行 50 次重复稳定性测试（`ctest --repeat until-fail:50`）。当前尚未实现常驻 `--serve` CLI、timerfd/signalfd、自动任务超时、动态插件、真实 AI/GPU、数据库、异步日志和 benchmark；Phase 8 尚未开始。
+
+## Phase 8G-4E Dynamic Plugin Final Hardening (local audit)
+
+本轮本地审计状态为 `PHASE_8G_FINAL_DYNAMIC_PLUGIN_HARDENED`。完整启动链路为：
+
+```text
+AppConfig → RuntimeOptions → DynamicPluginLoader → DynamicModule
+          → Stable C ABI → DynamicPluginAdapter → PluginRuntime
+          → Task adapter → TaskManager / HTTP API
+```
+
+动态插件仅在启动事务中加载。PluginRuntime 在执行 lease 全部释放后才调用
+shutdown/destroy 并释放 native module；任一 create、initialize、注册、ABI、容量或
+Service 启动错误都会在发布 Service 前回滚。ABI 异常被转换为有界错误，不会退出 worker。
+固定、无 label 的动态指标包括 `plugin_dynamic_modules_loaded`、
+`plugin_dynamic_load_failures_total` 和 `plugin_dynamic_unload_failures_total`；指标不可用或
+类型不匹配时不影响插件执行。`/debug/status` 仅输出有界的状态、计数、origin 和 module_id，
+不输出路径、root、config、native handle、输入输出或异常文本。
+
+真实 MODULE fixture 与确定性 fake ABI 测试覆盖正常生命周期、create/initialize/execute/
+shutdown/destroy 失败及异常、事务回滚、lease 生命周期、metrics 注入失败、诊断隐私和安全路径。
+Linux/Windows 的 symlink/reparse 与权限限制均为显式测试；宿主机无法执行权限限制时记录明确 skip。
+不包含热加载、远程插件、插件市场、进程隔离或 sandbox。
+
+最终本地矩阵：WSL Ubuntu 24.04 Debug 和 Release 各 `761/761`，每个配置 1 个权限能力显式
+skip、0 failures；Windows VS2022 Debug 和 Release 各注册 533 项，528 passed、5 个环境相关
+显式 skip、0 failures。项目 C/C++ 源码和测试 warning 均为 0。Windows 构建中出现的非致命
+`pwsh.exe` lookup 信息来自本机 Visual Studio applocal helper，不是项目编译 warning。
+
+本轮未创建新的 GitHub Actions run（工作区仍未提交），因此本地结果不冒充远程 CI 证据；现有
+workflow 已构建插件、fixture、loader/adapter tests 和 Service targets。当前构建未启用 sanitizer，
+因此 ASan/UBSan 未执行且未修改 workflow。未 commit、未 push。
+# Phase 8G-4D Dynamic Plugin Configuration and Service Integration
+
+当前工作区实现了启动期动态插件配置与 Service 集成，状态为
+`PHASE_8G_4D_DYNAMIC_PLUGIN_CONFIGURATION_IMPLEMENTED`。配置入口是
+`plugins.runtime`；模块只在启动事务中按当前平台显式选择库文件，禁止目录扫描、PATH 搜索、热加载和远程下载。
+
+启动顺序为：创建 `PluginRuntime` → 注册内置/静态插件 → 创建 `DynamicPluginLoader` 并加载所有启用模块 →
+`register_dynamic` → `freeze` → 创建 Task adapter → 启动 HTTP。任一动态模块失败都会使 Service 创建失败，
+已创建的 adapter/module 由 RAII 回滚；关闭仍遵循 HTTP/TCP cleanup → TaskManager drain/join → PluginRuntime shutdown。
+
+本轮新增真实 fixture 动态插件、配置校验和 Service 集成测试。WSL Ubuntu Debug/Release 均为 752/752，
+Windows VS2022 Debug/Release 均为 524 个测试、520 passed、4 skipped（既有环境相关），项目源码和测试 warning 均为 0。
+这些是本地回归结果，当前没有为本轮提交绑定 GitHub Actions run。

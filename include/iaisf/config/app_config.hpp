@@ -5,6 +5,7 @@
 #include <filesystem>
 #include <optional>
 #include <string>
+#include <vector>
 
 #include "iaisf/core/result.hpp"
 #include "iaisf/logging/log_level.hpp"
@@ -22,6 +23,9 @@ inline constexpr std::uintmax_t kMaxLogFileBytes = 1ULL * 1024ULL * 1024ULL * 10
 inline constexpr std::size_t kMaxLogArchives = 1000U;
 inline constexpr std::size_t kMaxMetricsEndpointBytes = 128U;
 inline constexpr std::size_t kMaxDiagnosticsEndpointBytes = 128U;
+inline constexpr std::size_t kMaxDynamicPluginModules = 128U;
+inline constexpr std::size_t kMaxDynamicPluginModuleIdBytes = 64U;
+inline constexpr std::size_t kMaxDynamicPluginRootBytes = 256U;
 
 struct ServiceConfig {
     std::string name;
@@ -103,10 +107,31 @@ struct PluginLimitConfig {
     std::int64_t max_capability_bytes{};
 };
 
+/** Portable description of one startup-time dynamic plugin module. */
+struct DynamicPluginModuleConfig {
+    std::string id;
+    bool enabled{true};
+    std::optional<std::string> generic_library;
+    std::optional<std::string> linux_library;
+    std::optional<std::string> windows_library;
+    // Compact JSON is kept as bytes so AppConfig remains a value object and
+    // platform selection is deferred to RuntimeOptions.
+    std::string config_json{"{}"};
+};
+
+/** Startup-only dynamic plugin configuration; no reload semantics. */
+struct DynamicPluginRuntimeConfig {
+    bool dynamic_loading_enabled{false};
+    std::string root{"plugins"};
+    std::size_t max_modules{16U};
+    std::vector<DynamicPluginModuleConfig> modules;
+};
+
 struct PluginConfig {
     bool enable_echo{};
     bool enable_mock_vision{};
     PluginLimitConfig limits;
+    DynamicPluginRuntimeConfig runtime;
 };
 
 struct TaskApiConfig {

@@ -171,6 +171,10 @@ add_library(
   src/plugin/plugin_metadata.cpp
   src/plugin/plugin_abi_adapter.cpp
   src/plugin/plugin_abi_validation.cpp
+  src/plugin/dynamic_plugin_adapter.cpp
+  src/plugin/detail/dynamic_module.cpp
+  src/plugin/detail/dynamic_plugin_loader.cpp
+  src/plugin/detail/plugin_safe_path.cpp
   src/plugin/plugin_task_adapter.cpp
   src/plugin/plugin_runtime.cpp
 )
@@ -188,6 +192,7 @@ target_link_libraries(
     iaisf::task
     iaisf::core
     nlohmann_json::nlohmann_json
+    ${CMAKE_DL_LIBS}
 )
 iaisf_enable_project_warnings(iaisf_plugin)
 

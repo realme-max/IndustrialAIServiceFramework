@@ -1,6 +1,7 @@
 #pragma once
 
 #include <condition_variable>
+#include <atomic>
 #include <cstddef>
 #include <map>
 #include <memory>
@@ -19,6 +20,8 @@
 #include "iaisf/plugin/plugin_manager.hpp"
 
 namespace iaisf::plugin {
+
+class DynamicPluginAdapter;
 
 enum class PluginRuntimeState {
     Configuring,
@@ -42,10 +45,16 @@ enum class PluginEntryState {
 struct PluginEntrySnapshot {
     std::string operation;
     PluginMetadata metadata;
+    std::string origin{"static"};
+    std::string module_id;
     bool managed_lifecycle{false};
     PluginEntryState state{PluginEntryState::Registered};
     std::size_t active_execution_count{0U};
     bool shutdown_failed{false};
+};
+
+struct DynamicPluginRegistrationOptions {
+    std::string module_id;
 };
 
 namespace detail {
@@ -53,6 +62,8 @@ namespace detail {
 struct PluginRuntimeEntry {
     std::string operation;
     PluginMetadata metadata;
+    std::string origin{"static"};
+    std::string module_id;
     bool managed_lifecycle{false};
     PluginEntryState state{PluginEntryState::Registered};
     std::size_t active_executions{0U};
@@ -120,8 +131,8 @@ private:
  *
  * PluginRuntime is intentionally independent from TaskManager and HTTP. Its
  * closures may be borrowed by those layers, but the runtime never owns them.
- * Static plugins remain supported; dynamic loading is deliberately outside
- * this phase.
+ * Static plugins remain supported; startup-time dynamic adapters use the same
+ * transactional registry and frozen execution boundary.
  */
 class PluginRuntime final {
 public:
@@ -149,6 +160,11 @@ public:
         return register_plugin(std::move(plugin));
     }
 
+    /** Registers an already-created dynamic adapter transactionally. */
+    [[nodiscard]] Result<void> register_dynamic(
+        std::shared_ptr<DynamicPluginAdapter> plugin,
+        DynamicPluginRegistrationOptions options);
+
     /** Freezes registration and enables concurrent invocation. */
     [[nodiscard]] Result<void> freeze();
 
@@ -156,6 +172,12 @@ public:
     [[nodiscard]] std::size_t size() const noexcept;
     [[nodiscard]] std::size_t active_execution_count() const noexcept;
     [[nodiscard]] const PluginLimits& limits() const noexcept;
+    /** Records startup-only dynamic loading facts for diagnostics. */
+    void set_dynamic_loading_observation(
+        bool enabled,
+        std::size_t module_count) noexcept;
+    [[nodiscard]] bool dynamic_loading_enabled() const noexcept;
+    [[nodiscard]] std::size_t dynamic_module_count() const noexcept;
 
     /** Returns a stable copy of one entry's lifecycle observation. */
     [[nodiscard]] Result<PluginEntrySnapshot> entry_snapshot(
@@ -197,6 +219,14 @@ private:
         const std::shared_ptr<detail::PluginRuntimeEntry>& entry,
         PluginEntryState state) noexcept;
 
+    [[nodiscard]] Result<void> register_plugin_transaction(
+        std::shared_ptr<const IAlgorithmPlugin> plugin,
+        PluginMetadata metadata,
+        std::shared_ptr<IManagedAlgorithmPlugin> lifecycle,
+        std::string origin,
+        std::string module_id,
+        bool erase_on_failure);
+
     [[nodiscard]] Result<void> validate_for_execution(
         std::string_view operation,
         const nlohmann::json& input) const;
@@ -217,6 +247,9 @@ private:
     PluginLimits limits_;
     MetricsRegistry* const metrics_{nullptr};
     std::shared_ptr<Counter> registrations_metric_;
+    std::shared_ptr<Counter> dynamic_creation_metric_;
+    std::shared_ptr<Counter> dynamic_creation_failure_metric_;
+    std::shared_ptr<Counter> dynamic_unload_failures_metric_;
     std::shared_ptr<Counter> registration_failures_metric_;
     std::shared_ptr<Counter> initializations_metric_;
     std::shared_ptr<Counter> initialization_failures_metric_;
@@ -232,6 +265,8 @@ private:
     std::shared_ptr<Gauge> state_metric_;
     std::shared_ptr<Histogram> validate_duration_metric_;
     std::shared_ptr<Histogram> execute_duration_metric_;
+    std::atomic<bool> dynamic_loading_enabled_{false};
+    std::atomic<std::size_t> dynamic_module_count_{0U};
 };
 
 }  // namespace iaisf::plugin

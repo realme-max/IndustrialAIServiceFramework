@@ -2,6 +2,7 @@
 
 #include <chrono>
 #include <cstdint>
+#include <filesystem>
 #include <optional>
 #include <utility>
 
@@ -27,6 +28,28 @@ as_timeout(const std::optional<std::int64_t> milliseconds) {
         return std::nullopt;
     }
     return std::chrono::milliseconds{*milliseconds};
+}
+
+Result<std::filesystem::path> select_dynamic_library(
+    const DynamicPluginModuleConfig &module) {
+    const std::optional<std::string>* selected = nullptr;
+    if (module.generic_library.has_value()) {
+        selected = &module.generic_library;
+    } else {
+#if defined(_WIN32)
+        selected = &module.windows_library;
+#else
+        selected = &module.linux_library;
+#endif
+    }
+    if (selected == nullptr || !selected->has_value() ||
+        selected->value().empty()) {
+        return Result<std::filesystem::path>::failure(make_error(
+            ErrorCode::ConfigError,
+            "dynamic plugin has no library for the current platform"));
+    }
+    return Result<std::filesystem::path>::success(
+        std::filesystem::path{selected->value()});
 }
 
 } // namespace
@@ -59,6 +82,11 @@ const net::tcp::Ipv4Endpoint &RuntimeOptions::bind_endpoint() const noexcept {
 
 const ServiceOptions &RuntimeOptions::service_options() const noexcept {
     return service_options_;
+}
+
+const DynamicPluginOptions&
+RuntimeOptions::dynamic_plugin_options() const noexcept {
+    return service_options_.dynamic_plugins();
 }
 
 Result<RuntimeOptions> make_runtime_options(const AppConfig &config) {
@@ -162,6 +190,27 @@ Result<RuntimeOptions> make_runtime_options(const AppConfig &config) {
         }
     }
 
+    DynamicPluginOptions dynamic_plugins;
+    dynamic_plugins.enabled = config.plugins.runtime.dynamic_loading_enabled;
+    dynamic_plugins.root = std::filesystem::path{config.plugins.runtime.root};
+    dynamic_plugins.max_modules = config.plugins.runtime.max_modules;
+    if (dynamic_plugins.enabled) {
+        dynamic_plugins.modules.reserve(config.plugins.runtime.modules.size());
+        for (const auto &configured : config.plugins.runtime.modules) {
+            if (!configured.enabled) {
+                continue;
+            }
+            auto library = select_dynamic_library(configured);
+            if (!library) {
+                return Result<RuntimeOptions>::failure(
+                    std::move(library).error());
+            }
+            dynamic_plugins.modules.push_back(DynamicPluginModuleOptions{
+                configured.id, std::move(library).value(),
+                configured.config_json});
+        }
+    }
+
     auto service = ServiceOptions::create(
         std::move(tcp).value(), std::move(http).value(), pool,
         std::move(tasks).value(), std::move(plugins).value(),
@@ -170,7 +219,7 @@ Result<RuntimeOptions> make_runtime_options(const AppConfig &config) {
         as_timeout(config.http.header_timeout_ms),
         as_timeout(config.http.body_timeout_ms), config.metrics.enabled,
         config.metrics.endpoint, config.diagnostics.enabled,
-        config.diagnostics.endpoint);
+        config.diagnostics.endpoint, std::move(dynamic_plugins));
     if (!service) {
         return config_failure<RuntimeOptions>(service.error());
     }
