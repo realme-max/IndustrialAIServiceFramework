@@ -4,6 +4,11 @@
 #include <vector>
 
 #include "iaisf/api/task_http_api.hpp"
+#include "iaisf/application/application_executor.hpp"
+#include "iaisf/application/application_http_api.hpp"
+#include "iaisf/application/application_job_id_generator.hpp"
+#include "iaisf/application/application_job_clock.hpp"
+#include "iaisf/application/application_artifacts.hpp"
 #include "iaisf/core/result.hpp"
 #include "iaisf/diagnostics/runtime_diagnostics.hpp"
 #include "iaisf/http/http_server.hpp"
@@ -79,6 +84,15 @@ public:
         http::HttpServer::Ptr http_server,
         std::shared_ptr<health::HealthChecker> health_checker,
         std::shared_ptr<diagnostics::RuntimeDiagnostics> diagnostics,
+        std::unique_ptr<application::LocalArtifactResolver> application_resolver,
+        std::unique_ptr<application::LocalProcessRunner> application_process_runner,
+        std::unique_ptr<application::Ptv2WeldInspectionAdapter> application_ptv2,
+        std::unique_ptr<application::WeldAgentWeldingGuidanceAdapter> application_weld_agent,
+        std::unique_ptr<application::InMemoryApplicationJobRepository> application_repository,
+        std::unique_ptr<application::OsApplicationJobIdGenerator> application_id_generator,
+        std::unique_ptr<application::IApplicationJobClock> application_clock,
+        std::unique_ptr<application::ApplicationExecutor> application_executor,
+        application::ApplicationHttpApi::Ptr application_api,
         std::shared_ptr<SignalShutdownState> signal_shutdown_state) noexcept;
 
     [[nodiscard]] Result<void> start();
@@ -109,6 +123,15 @@ private:
     api::TaskHttpApi::Ptr task_api_;
     std::shared_ptr<health::HealthChecker> health_checker_;
     std::shared_ptr<diagnostics::RuntimeDiagnostics> diagnostics_;
+    std::unique_ptr<application::LocalArtifactResolver> application_resolver_;
+    std::unique_ptr<application::LocalProcessRunner> application_process_runner_;
+    std::unique_ptr<application::OsApplicationJobIdGenerator> application_id_generator_;
+    std::unique_ptr<application::IApplicationJobClock> application_clock_;
+    std::unique_ptr<application::Ptv2WeldInspectionAdapter> application_ptv2_;
+    std::unique_ptr<application::WeldAgentWeldingGuidanceAdapter> application_weld_agent_;
+    std::unique_ptr<application::InMemoryApplicationJobRepository> application_repository_;
+    std::unique_ptr<application::ApplicationExecutor> application_executor_;
+    application::ApplicationHttpApi::Ptr application_api_;
     http::HttpServer::Ptr http_server_;
     std::shared_ptr<SignalShutdownState> signal_shutdown_state_;
     net::EventLoop::DeferredCleanup stop_continuation_;

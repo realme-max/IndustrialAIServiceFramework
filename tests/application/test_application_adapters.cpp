@@ -216,6 +216,30 @@ TEST(ApplicationAdapterTest, Ptv2ParsesFixtureAndRegistersArtifacts) {
     EXPECT_NE(runner.last_.arguments[5].find("pointcloud.ptv2.txt"), std::string::npos);
 }
 
+#if !defined(_WIN32)
+TEST(ApplicationAdapterTest, ConvertsKnownPtv2PathsForWslWindowsProcess) {
+    Fixture fixture;
+    auto resolver = LocalArtifactResolver::make(fixture.artifacts);
+    ASSERT_TRUE(resolver);
+    FakeRunner runner(FakeRunner::Kind::Fail);
+    auto adapter = Ptv2WeldInspectionAdapter::create(
+        {"/mnt/e/bin/weld_trt_demo.exe", "/mnt/e/models/engine.plan",
+         "/mnt/e/models/plugin.dll", {}, fixture.scratch, fixture.outputs,
+         std::chrono::seconds{5}, 1024U, 1024U, 4096U}, *resolver.value(), runner);
+    ASSERT_TRUE(adapter);
+    auto snapshot = fixture.snapshot(IndustrialApplication::WeldInspection,
+                                     ScenePhase::PostWeld,
+                                     inspection_submission().value(), "job-wsl-paths");
+    ASSERT_TRUE(snapshot);
+    EXPECT_FALSE(adapter.value()->execute(snapshot.value()));
+    ASSERT_GE(runner.last_.arguments.size(), 8U);
+    EXPECT_EQ(runner.last_.arguments[1], "E:\\models\\engine.plan");
+    EXPECT_EQ(runner.last_.arguments[3], "E:\\models\\plugin.dll");
+    EXPECT_NE(runner.last_.arguments[5].find("pointcloud.ptv2.txt"), std::string::npos);
+    EXPECT_NE(runner.last_.arguments[7].find("ptv2"), std::string::npos);
+}
+#endif
+
 TEST(ApplicationAdapterTest, GenericMaterializerRemainsThreeColumns) {
     Fixture fixture;
     auto resolver = LocalArtifactResolver::make(fixture.artifacts);
@@ -264,6 +288,13 @@ TEST(ApplicationAdapterTest, WeldAgentMapsRequestedTypeAndDoesNotEnableRobot) {
     EXPECT_FALSE(guidance.robot_execution_allowed);
     EXPECT_TRUE(runner.agent_cloud_is_three_column);
     EXPECT_TRUE(guidance.start.has_value());
+    EXPECT_TRUE(guidance.end.has_value());
+    EXPECT_TRUE(guidance.corner.has_value());
+    EXPECT_TRUE(guidance.x_axis.has_value());
+    EXPECT_TRUE(guidance.y_axis.has_value());
+    EXPECT_TRUE(guidance.z_axis.has_value());
+    ASSERT_TRUE(guidance.waiting_reason.has_value());
+    EXPECT_FALSE(guidance.waiting_reason->empty());
     ASSERT_NE(std::find(runner.last_.arguments.begin(), runner.last_.arguments.end(), "l"),
               runner.last_.arguments.end());
 }

@@ -270,7 +270,12 @@ public:
     Fd(const Fd&) = delete;
     Fd& operator=(const Fd&) = delete;
     int get() const noexcept { return value_; }
-    int release() noexcept { const int value = value_; value_ = -1; return value; }
+    void close() noexcept {
+        if (value_ >= 0) {
+            (void)::close(value_);
+            value_ = -1;
+        }
+    }
 private:
     int value_;
 };
@@ -303,8 +308,27 @@ Result<void> drain_fd(
 Result<ProcessResult> run_linux(const ProcessSpec& spec) {
     int stdout_pipe[2]{};
     int stderr_pipe[2]{};
-    if (::pipe(stdout_pipe) != 0 || ::pipe(stderr_pipe) != 0) {
-        if (stdout_pipe[0] > 0) { ::close(stdout_pipe[0]); ::close(stdout_pipe[1]); }
+    const auto create_pipe = [](int (&pipe_fds)[2]) {
+        if (::pipe(pipe_fds) != 0) {
+            return false;
+        }
+        if (::fcntl(pipe_fds[0], F_SETFD, FD_CLOEXEC) != 0 ||
+            ::fcntl(pipe_fds[1], F_SETFD, FD_CLOEXEC) != 0) {
+            (void)::close(pipe_fds[0]);
+            (void)::close(pipe_fds[1]);
+            pipe_fds[0] = -1;
+            pipe_fds[1] = -1;
+            return false;
+        }
+        return true;
+    };
+    if (!create_pipe(stdout_pipe)) {
+        return failure<ProcessResult>(ErrorCode::SystemError,
+                                      "process pipe creation failed");
+    }
+    if (!create_pipe(stderr_pipe)) {
+        (void)::close(stdout_pipe[0]);
+        (void)::close(stdout_pipe[1]);
         return failure<ProcessResult>(ErrorCode::SystemError,
                                       "process pipe creation failed");
     }
@@ -324,13 +348,27 @@ Result<ProcessResult> run_linux(const ProcessSpec& spec) {
                                       "process creation failed");
     }
     if (child == 0) {
-        ::dup2(stdout_write.get(), STDOUT_FILENO);
-        ::dup2(stderr_write.get(), STDERR_FILENO);
-        if (!spec.working_directory.empty()) {
-            ::chdir(spec.working_directory.c_str());
+        if (::dup2(stdout_write.get(), STDOUT_FILENO) < 0 ||
+            ::dup2(stderr_write.get(), STDERR_FILENO) < 0) {
+            ::_exit(126);
         }
-        stdout_read.release(); stdout_write.release();
-        stderr_read.release(); stderr_write.release();
+        if (stdout_read.get() > STDERR_FILENO) {
+            (void)::close(stdout_read.get());
+        }
+        if (stdout_write.get() > STDERR_FILENO) {
+            (void)::close(stdout_write.get());
+        }
+        if (stderr_read.get() > STDERR_FILENO) {
+            (void)::close(stderr_read.get());
+        }
+        if (stderr_write.get() > STDERR_FILENO) {
+            (void)::close(stderr_write.get());
+        }
+        if (!spec.working_directory.empty()) {
+            if (::chdir(spec.working_directory.c_str()) != 0) {
+                ::_exit(126);
+            }
+        }
         std::vector<char*> argv;
         std::string executable = spec.executable.string();
         argv.push_back(executable.data());
@@ -341,13 +379,21 @@ Result<ProcessResult> run_linux(const ProcessSpec& spec) {
         ::execv(executable.c_str(), argv.data());
         ::_exit(127);
     }
-    stdout_write.release(); stderr_write.release();
+    stdout_write.close();
+    stderr_write.close();
     ProcessResult result;
     const auto started = std::chrono::steady_clock::now();
     bool stdout_open = true; bool stderr_open = true;
     bool output_failed = false;
+    bool kill_sent = false;
     bool waited = false;
     int wait_status = 0;
+    const auto kill_child = [&] {
+        if (!kill_sent && !waited) {
+            (void)::kill(child, SIGKILL);
+            kill_sent = true;
+        }
+    };
     while (!waited || stdout_open || stderr_open) {
         auto read_stdout = drain_fd(
             stdout_read.get(), result.stdout_text, spec.max_stdout_bytes, stdout_open);
@@ -355,19 +401,19 @@ Result<ProcessResult> run_linux(const ProcessSpec& spec) {
             stderr_read.get(), result.stderr_text, spec.max_stderr_bytes, stderr_open);
         if (!read_stdout || !read_stderr) {
             output_failed = true;
-            ::kill(child, SIGKILL);
+            kill_child();
         }
         if (!waited) {
             const pid_t waited_pid = ::waitpid(child, &wait_status, WNOHANG);
             if (waited_pid == child) waited = true;
             else if (waited_pid < 0 && errno != EINTR) {
                 output_failed = true;
-                ::kill(child, SIGKILL);
+                kill_child();
             }
         }
         if (!waited && std::chrono::steady_clock::now() - started >= spec.timeout) {
             result.timed_out = true;
-            ::kill(child, SIGKILL);
+            kill_child();
         }
         if (waited && !stdout_open && !stderr_open) break;
         struct pollfd fds[2] = {

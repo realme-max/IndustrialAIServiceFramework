@@ -2,6 +2,7 @@
 
 #include <chrono>
 #include <filesystem>
+#include <future>
 #include <string>
 
 #include "iaisf/application/application_process.hpp"
@@ -47,6 +48,27 @@ TEST(ApplicationProcessTest, LocalRunnerRejectsInvalidLimitsWithoutLaunching) {
     ASSERT_FALSE(result);
     EXPECT_EQ(result.error().code, ErrorCode::InvalidArgument);
 }
+
+#if !defined(_WIN32)
+TEST(ApplicationProcessTest, NativeProcessOutputAndEofReturnPromptly) {
+    auto runner = LocalProcessRunner::create();
+    ASSERT_TRUE(runner);
+    const ProcessSpec spec{
+        std::filesystem::path{"/usr/bin/printf"}, {"runner-ok"}, {},
+        std::chrono::seconds{2}, 1024U, 1024U};
+    auto future = std::async(std::launch::async, [&] {
+        return runner.value()->run(spec);
+    });
+    ASSERT_EQ(future.wait_for(std::chrono::seconds{2}),
+              std::future_status::ready);
+    const auto result = future.get();
+    ASSERT_TRUE(result);
+    EXPECT_EQ(result.value().exit_code, 0);
+    EXPECT_FALSE(result.value().timed_out);
+    EXPECT_EQ(result.value().stdout_text, "runner-ok");
+    EXPECT_TRUE(result.value().stderr_text.empty());
+}
+#endif
 
 }  // namespace
 }  // namespace iaisf::application

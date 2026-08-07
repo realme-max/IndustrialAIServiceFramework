@@ -77,6 +77,38 @@ std::string path_text(const std::filesystem::path& path) {
     return path.u8string();
 }
 
+// WSL can start a Windows PE executable through execv, but that executable
+// does not understand Linux's /mnt/<drive>/... spelling for its path
+// arguments.  Convert only adapter-owned, known path arguments; ordinary
+// request values never pass through this helper.
+std::string windows_child_path_text(const std::filesystem::path& path) {
+    const auto text = path_text(path);
+#if !defined(_WIN32)
+    if (text.size() >= 7U && text.rfind("/mnt/", 0U) == 0U &&
+        ((text[5] >= 'a' && text[5] <= 'z') ||
+         (text[5] >= 'A' && text[5] <= 'Z')) && text[6] == '/') {
+        const std::filesystem::path lexical{text};
+        for (const auto& component : lexical) {
+            if (component == "..") {
+                return text;
+            }
+        }
+        std::string converted;
+        converted.reserve(text.size() + 2U);
+        converted.push_back(
+            text[5] >= 'a' && text[5] <= 'z'
+                ? static_cast<char>(text[5] - ('a' - 'A'))
+                : text[5]);
+        converted.append(":\\");
+        for (std::size_t index = 7U; index < text.size(); ++index) {
+            converted.push_back(text[index] == '/' ? '\\' : text[index]);
+        }
+        return converted;
+    }
+#endif
+    return text;
+}
+
 std::optional<double> finite_number(const nlohmann::json& object,
                                     const char* key) {
     if (!object.contains(key) || !object.at(key).is_number()) return std::nullopt;
@@ -329,10 +361,10 @@ Ptv2WeldInspectionAdapter::execute(const ApplicationJobSnapshot& snapshot) {
         spec.timeout = options_.timeout;
         spec.max_stdout_bytes = options_.max_stdout_bytes;
         spec.max_stderr_bytes = options_.max_stderr_bytes;
-        spec.arguments = {"--engine", path_text(options_.engine), "--plugin",
-                          path_text(options_.plugin), "--cloud",
-                          path_text(bridged.value()), "--output",
-                          path_text(output_dir)};
+        spec.arguments = {"--engine", windows_child_path_text(options_.engine),
+                          "--plugin", windows_child_path_text(options_.plugin),
+                          "--cloud", windows_child_path_text(bridged.value()),
+                          "--output", windows_child_path_text(output_dir)};
         const auto process = runner_.run(spec);
         (void)materializer_->cleanup(job);
         if (!process) return Result<ApplicationExecutionResult>::failure(process.error());
@@ -451,10 +483,10 @@ WeldAgentWeldingGuidanceAdapter::execute(const ApplicationJobSnapshot& snapshot)
         const std::string weld_type_arg = guidance->weld_type().mode() == WeldTypeMode::Auto
                                               ? std::string{"auto"}
                                               : std::string{to_string(type.value())};
-        spec.arguments = {path_text(options_.orchestrator), "--mode", "pointcloud", "--task-id",
-                          job, "--cloud", path_text(materialized.value().text_path), "--weld-type",
+        spec.arguments = {windows_child_path_text(options_.orchestrator), "--mode", "pointcloud", "--task-id",
+                          job, "--cloud", windows_child_path_text(materialized.value().text_path), "--weld-type",
                           weld_type_arg, "--tool-config",
-                          path_text(options_.tool_config), "--no-open-view"};
+                          windows_child_path_text(options_.tool_config), "--no-open-view"};
         const auto process = runner_.run(spec);
         (void)materializer_->cleanup(job);
         if (!process) return Result<ApplicationExecutionResult>::failure(process.error());
@@ -521,7 +553,6 @@ WeldAgentWeldingGuidanceAdapter::execute(const ApplicationJobSnapshot& snapshot)
             guidance->human_checkpoint() == HumanCheckpointPolicy::Required) {
             result.disposition = GuidanceResultDisposition::WaitingHuman;
             result.waiting_reason = std::string{"human review is required"};
-            result.corner.reset();
         }
         result.robot_execution_allowed = false;
         const auto checked = validate_execution_result(result, IndustrialApplication::WeldingGuidance);

@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "iaisf/api/task_api_limits.hpp"
+#include "iaisf/application/application_adapters.hpp"
 #include "iaisf/core/result.hpp"
 #include "iaisf/http/http_limits.hpp"
 #include "iaisf/net/tcp/tcp_server.hpp"
@@ -29,6 +30,17 @@ struct DynamicPluginOptions {
     std::vector<DynamicPluginModuleOptions> modules;
 };
 
+struct ApplicationRuntimeOptions {
+    bool enabled{false};
+    std::filesystem::path artifact_root;
+    std::filesystem::path scratch_root;
+    std::filesystem::path output_root;
+    std::size_t repository_capacity{1024U};
+    std::size_t queue_capacity{128U};
+    application::Ptv2AdapterOptions ptv2;
+    application::WeldAgentAdapterOptions weld_agent;
+};
+
 /** Validated aggregate configuration for the Phase 7 composition root. */
 class ServiceOptions final {
 public:
@@ -49,7 +61,8 @@ public:
         std::string metrics_endpoint = "/metrics",
         bool diagnostics_enabled = false,
         std::string diagnostics_endpoint = "/debug/status",
-        DynamicPluginOptions dynamic_plugins = {});
+        DynamicPluginOptions dynamic_plugins = {},
+        ApplicationRuntimeOptions applications = {});
     [[nodiscard]] static Result<ServiceOptions> defaults();
 
     [[nodiscard]] const net::tcp::TcpServerOptions& tcp_options() const noexcept;
@@ -69,6 +82,7 @@ public:
     [[nodiscard]] bool diagnostics_enabled() const noexcept;
     [[nodiscard]] const std::string& diagnostics_endpoint() const noexcept;
     [[nodiscard]] const DynamicPluginOptions& dynamic_plugins() const noexcept;
+    [[nodiscard]] const ApplicationRuntimeOptions& applications() const noexcept;
 
 private:
     ServiceOptions(
@@ -86,7 +100,8 @@ private:
         std::string metrics_endpoint,
         bool diagnostics_enabled,
         std::string diagnostics_endpoint,
-        DynamicPluginOptions dynamic_plugins) noexcept;
+        DynamicPluginOptions dynamic_plugins,
+        ApplicationRuntimeOptions applications) noexcept;
 
     net::tcp::TcpServerOptions tcp_options_;
     http::HttpLimits http_limits_;
@@ -103,6 +118,7 @@ private:
     bool diagnostics_enabled_{false};
     std::string diagnostics_endpoint_;
     DynamicPluginOptions dynamic_plugins_;
+    ApplicationRuntimeOptions applications_;
 };
 
 }  // namespace iaisf::service

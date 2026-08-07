@@ -26,6 +26,9 @@ inline constexpr std::size_t kMaxDiagnosticsEndpointBytes = 128U;
 inline constexpr std::size_t kMaxDynamicPluginModules = 128U;
 inline constexpr std::size_t kMaxDynamicPluginModuleIdBytes = 64U;
 inline constexpr std::size_t kMaxDynamicPluginRootBytes = 256U;
+inline constexpr std::size_t kMaxApplicationPathBytes = 512U;
+inline constexpr std::size_t kMaxApplicationQueueCapacity = 100000U;
+inline constexpr std::size_t kMaxApplicationRepositoryCapacity = 100000U;
 
 struct ServiceConfig {
     std::string name;
@@ -170,6 +173,33 @@ struct DiagnosticsConfig {
     std::string endpoint{"/debug/status"};
 };
 
+struct ApplicationPtv2Config {
+    std::string executable;
+    std::string working_directory;
+    std::string engine;
+    std::string plugin;
+    std::int64_t timeout_ms{300000};
+};
+
+struct ApplicationWeldAgentConfig {
+    std::string python_executable;
+    std::string project_root;
+    std::string orchestrator;
+    std::string tool_config;
+    std::int64_t timeout_ms{300000};
+};
+
+struct ApplicationsConfig {
+    bool enabled{false};
+    std::string artifact_root;
+    std::string scratch_root;
+    std::string output_root;
+    std::size_t repository_capacity{1024U};
+    std::size_t queue_capacity{128U};
+    ApplicationPtv2Config ptv2;
+    ApplicationWeldAgentConfig weld_agent;
+};
+
 /** Portable, resource-free application configuration value. */
 struct AppConfig {
     std::uint32_t schema_version{};
@@ -183,6 +213,7 @@ struct AppConfig {
     LoggingConfig logging;
     MetricsConfig metrics;
     DiagnosticsConfig diagnostics;
+    ApplicationsConfig applications;
 };
 
 [[nodiscard]] AppConfig default_app_config();
