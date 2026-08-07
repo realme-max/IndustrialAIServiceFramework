@@ -1068,10 +1068,34 @@ Repository value copy
 ```
 
 Inspection 与 guidance 只能携带各自 spec；交叉 application/scene/spec 组合 fail-closed。
-Snapshot transition 只改变 state/version/time，spec 保持逐字值相等。Domain 尚未创建 HTTP
-route、ID generator、clock、dispatcher 或 Service 入口。
+Snapshot transition 只改变 state/version/time，spec 保持逐字值相等。Phase 9B-3A-3A 新增
+独立的 `iaisf_application_api_primitives`：Job ID generator 只产生候选 ID，使用 CSPRNG
+降低碰撞概率；Repository `create()` 才是进程内成功 Job 唯一性的最终裁决点，当前尚未实现
+碰撞重试，Job ID 也不是授权凭证。clock 只提供 validated system time；二者不访问 Repository，
+也不创建 HTTP route、dispatcher 或 Service 入口。
 
-本地验证已重新生成四套构建树：Windows VS2022 Debug/Release 全量各 `607 registered /
-602 passed / 5 explicitly skipped / 0 failed`，WSL Ubuntu 24.04 GCC Debug/Release 各
-`835 / 834 / 1 / 0`；Application label 四套均 `74/74`，warning 为 0。WSL 结果不作为
-GitHub Actions 证据。
+本地验证已重新生成四套构建树：Windows VS2022 Debug/Release 全量各 `642 registered /
+637 passed / 5 explicitly skipped / 0 failed`，WSL Ubuntu 24.04 GCC Debug/Release 各
+`871 / 870 / 1 / 0`；Application label Windows 为 `103/103`、WSL 为 `104/104`，新增
+api_primitives Windows 为 `18/18`、Linux 为 `19/19`（含 Linux-only getrandom seam），warning
+为 0。WSL 结果不作为 GitHub Actions 证据。
+
+### Phase 9B-3A-3A primitives ownership
+
+```text
+ApplicationJobIdGenerator (virtual interface)
+              │
+              ├── OsApplicationJobIdGenerator
+              │     └── platform entropy reader (BCrypt/getrandom)
+              └── ApplicationJobId::parse() canonical validation
+
+IApplicationJobClock
+              └── SystemApplicationJobClock (one system_clock read/call)
+```
+
+The generator and clock are independent, thread-safe-by-default value services.
+Only their interfaces are public; deterministic entropy/clock and Linux syscall
+seams live under `src/application/detail` for tests and are not installed.
+The generator and generation result are intentionally non-movable; ordinary
+copy operations preserve their source and destination invariants. Allocation-
+bearing operations return structured failures and do not claim `noexcept`.

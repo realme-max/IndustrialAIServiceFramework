@@ -137,14 +137,16 @@ transition 和 Repository create 均验证 application/scene/spec 三方匹配�
 transition 和终态删除不会丢失 specification。当前 Domain 仍允许 1–16 个 ArtifactRef；
 后续 HTTP v1 会暂时限制为恰好一个点云输入，直到 artifact role 被正式定义。
 
-本阶段没有 JSON/HTTP API、Task API/route、ID generator、clock、幂等、dispatcher、worker、
-Artifact I/O/Store、AppConfig、RuntimeOptions 或 Service 组合。
+本阶段没有 JSON/HTTP API、Task API/route、幂等、dispatcher、worker、Artifact I/O/Store、
+AppConfig、RuntimeOptions 或 Service 组合；Job ID generator 和 clock 仅在后续
+Phase 9B-3A-3A 的独立 primitives target 中实现。
 
-本阶段本地验证：Application label 在 Windows VS2022 Debug/Release 与 WSL Ubuntu 24.04
-GCC Debug/Release 均为 74 registered、74 passed、0 explicitly skipped、0 failed；完整
-CTest 分别为 Windows `607/602/5/0`（registered/passed/skipped/failed）和 WSL
-`835/834/1/0`。四套配置均重新生成并编译，项目源码/测试 warning 为 0；WSL 结果不代表
-GitHub Actions。
+Phase 9B-3A-3A 加固后的本地验证：Windows VS2022 Debug/Release 各注册 642 项（637 passed、5
+explicitly skipped、0 failed），WSL Ubuntu 24.04 GCC Debug/Release 各注册 871 项（870
+passed、1 explicitly skipped、0 failed）；Application label Windows 为 103/103、WSL 为
+104/104，`iaisf_application_api_primitives_tests` Windows 为 18/18、Linux 为 19/19（含
+1 个 Linux-only getrandom seam 测试）。项目源码/测试 warning 为 0；WSL
+结果不代表 GitHub Actions。
 
 ## Phase 9B-3A-2 Strict Application JSON Contract
 
@@ -163,3 +165,30 @@ data, quality assessment or internal errors. This phase has no HTTP route and
 does not migrate the existing Task API parser. Status URL construction, JSON
 construction and serialization are contained by the public `Result` exception
 boundary; allocation-bearing public functions do not claim `noexcept`.
+
+## Phase 9B-3A-3A Job ID Generator and Clock
+
+The stable Phase 9B-3A-2 base is commit `4d3284febd95907ecdf20f0b96aa2ab1f5044855`
+(Linux CI run `31140290934`). The current Phase 9B-3A-3A worktree is local and
+uncommitted.
+
+`iaisf_application_api_primitives` depends publicly only on
+`iaisf::application_core`. `OsApplicationJobIdGenerator` reads 128 bits from
+the platform CSPRNG on every call: `BCryptGenRandom` on Windows and Linux
+`getrandom` with flags zero, retrying EINTR and short reads. It encodes
+`WeldInspection` as `wi_` and `WeldingGuidance` as `wg_`, followed by 32
+lowercase hexadecimal bytes, then validates the final 35-byte value through
+`ApplicationJobId::parse()`. No timestamp, client input, artifact hash,
+collision retry, Repository access or singleton is involved. CSPRNG entropy
+only reduces candidate collision probability; Repository `create()` is the
+final authority for process-local successful Job uniqueness, 9B-3A-3A has no
+collision retry, and Job IDs are not authorization credentials. Failure categories
+are `InvalidApplication`, `EntropyUnavailable`, `ResourceFailure` and
+`InternalFailure`, with bounded fixed messages.
+
+`IApplicationJobClock` and `SystemApplicationJobClock` are independent of the
+generator. The system clock is read once per call; pre-epoch and unrepresentable
+Unix-millisecond values fail closed using checked integer ratio arithmetic, with
+no floating-point boundary decision. Test-only deterministic entropy, clock and
+Linux getrandom syscall seams are private to the test target and are not exposed
+in installed public headers.

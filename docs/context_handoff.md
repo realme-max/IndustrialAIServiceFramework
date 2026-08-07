@@ -4,9 +4,9 @@
 
 - 项目：IndustrialAIServiceFramework
 - 当前分支：`phase/9-industrial-ai-application-layer`
-- 当前状态：`PHASE_9B_3A_2_STRICT_APPLICATION_JSON_CONTRACT_HARDENED`（本地四配置验证；未提交）
-- 当前工作：Phase 9B-3A-2 strict JSON contract primitives 已完成窄范围加固但未提交；不包含 HTTP route、Task API 或 Service 集成。
-- 当前基线 HEAD：`3f446effbfea92b3904c02c7bb01586557e7b110`
+- 当前状态：`PHASE_9B_3A_3A_APPLICATION_JOB_ID_GENERATOR_AND_CLOCK_COMPLETED`（本地四配置验证；未提交）
+- 当前工作：Phase 9B-3A-3A 已完成 OS CSPRNG Job ID generator、system clock 与 API primitives target；不包含 HTTP route、Task API、Service 或 Worker 集成。
+- 当前基线 HEAD：`4d3284febd95907ecdf20f0b96aa2ab1f5044855`
 - Phase 9A：只读 Application Integration Design Audit 已完成
 - Phase 9B-1：新增 `iaisf_application_core` / `iaisf::application_core`，仅依赖 `iaisf::core`
 - Phase 9B-1A：返回分配型 `Result` 的解析/验证 API 不声明 `noexcept`；纯查询和 bool 检查保留 `noexcept`
@@ -15,10 +15,10 @@
 - Repository：固定非零容量、无自动驱逐/TTL/持久化；相同 expected version 只有一个 writer 成功；版本不回绕；只显式删除精确版本的终态元数据
 - 隔离：application/scene 继续唯一配对；跨 application 的 Job 访问按 `NotFound` 处理；两个业务不串联
 - Artifact：Job 持有 1–16 个已验证 metadata 副本；Repository 不读取、拥有或删除 artifact 内容
-- 验证：Windows Debug/Release 各注册 624 项（619 passed、5 explicitly skipped、0 failed）；WSL Ubuntu 24.04 GCC 13.3.0 Debug/Release 各注册 852 项（851 passed、1 explicitly skipped、0 failed）；Application 85/85 四配置均 passed，iaisf_api_common 6/6、contract 11/11；warning 0。WSL 结果不是 GitHub Actions 证据
+- 验证：Windows Debug/Release 各注册 642 项（637 passed、5 explicitly skipped、0 failed）；WSL Ubuntu 24.04 GCC 13.3.0 Debug/Release 各注册 871 项（870 passed、1 explicitly skipped、0 failed）；Application Windows 103/103、WSL 104/104，api_primitives Windows 18/18、Linux 19/19（含 Linux-only getrandom seam）；warning 0。WSL 结果不是 GitHub Actions 证据
 - 应用边界：`weld_inspection/post_weld` 与 `welding_guidance/pre_weld` 完全独立，不自动串联
 - 真实性边界：PTV2 质量评价为 `quality_assessment=not_implemented`；WeldAgent 不得生成真实 joint values、控制机器人或发送 URL
-- 未实现：versioned HTTP Application API、持久化 Repository、Artifact I/O/Store、Worker Protocol、PTV2/WeldAgent adapter、worker cancel/kill
+- 未实现：Job ID collision retry/coordinator、versioned HTTP Application API、Service 组合、持久化 Repository、Artifact I/O/Store、Worker Protocol、PTV2/WeldAgent adapter、worker cancel/kill
 - Phase 0 提交：`5fbcec0 docs: complete phase 0 architecture design`
 - Phase 1 最终实现提交：`63b30cffcbe3e621af33664721b3675a647bd1a1`
 - Phase 2 起始 HEAD / main / origin/main：`6065d91b277c07ed04e64b3f08034788965e6ac1`
@@ -1561,3 +1561,44 @@ Active stop 不保证触发请求返回 503；连接可能在响应生成前关�
 - Contract target: 11 tests; API common target: 6 tests. No compiler warning
   was emitted by the changed project sources; WSL Debug GNU make clock-skew
   messages are environment diagnostics only.
+
+## Phase 9B-3A-3A handoff
+
+- Base commit: `4d3284febd95907ecdf20f0b96aa2ab1f5044855`.
+- Previous stable Linux CI: run `31140290934` (Ubuntu 24.04.4, GCC 13.3.0,
+  CMake 3.31.6); it validates the preceding strict JSON checkpoint, not this
+  uncommitted worktree.
+- New target: `iaisf_application_api_primitives`, alias
+  `iaisf::application_api_primitives`; PUBLIC dependency is only
+  `iaisf::application_core`. Windows links `bcrypt`; Linux uses system
+  `getrandom`.
+- `IApplicationJobIdGenerator` is injectable. `OsApplicationJobIdGenerator`
+  reads 16 bytes per call and emits exactly 35 ASCII bytes (`wi_` or `wg_`
+  plus lowercase hex). All-zero entropy is valid. Errors are structured as
+  InvalidApplication, EntropyUnavailable, ResourceFailure or InternalFailure;
+  messages are fixed, bounded and do not echo system details or input.
+- `IApplicationJobClock` and `SystemApplicationJobClock` are independent. A
+  single `system_clock` value is read per call; pre-epoch and unrepresentable
+  signed Unix-millisecond values fail closed. No global clock, sleep or fake
+  production implementation exists.
+- The public generator and `ApplicationJobIdGenerationResult` are both
+  non-movable; ordinary copy construction/assignment preserves source and
+  destination value/error invariants. Private deterministic entropy, clock and Linux
+  getrandom syscall seams are under `src/application/detail` and are included
+  only by the API-primitives tests. Entropy contract violations map to
+  `InternalFailure`, while OS failure/EOF maps to `EntropyUnavailable`.
+- Clock representability uses checked integer duration-ratio arithmetic against
+  signed Unix milliseconds; no floating-point helper is part of the production
+  boundary. `time_point::max()` is the platform-real boundary test.
+- Local full-matrix evidence: Windows Debug/Release `642 registered / 637
+  passed / 5 explicitly skipped / 0 failed`; WSL Ubuntu 24.04 Debug/Release
+  `871 registered / 870 passed / 1 explicitly skipped / 0 failed`. The new
+  test target is 18/18 on Windows and 19/19 on Linux (including one
+  Linux-only getrandom seam test); version/config smoke exits 0; project source
+  and test compiler warnings are 0. WSL is local evidence,
+  not GitHub Actions.
+- Not implemented: collision retry/coordinator, HTTP Application API, Service
+  composition, Worker Protocol, Artifact I/O, PTV2/WeldAgent adapters and
+  Phase 9B-3B work. The two business applications remain independent.
+- Current worktree is uncommitted; do not commit or push until a separate
+  audit authorizes it.

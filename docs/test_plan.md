@@ -2,6 +2,13 @@
 
 ## 1. 状态与原则
 
+> 当前 Phase 9B-3A-3A 加固后的本地最终矩阵：Windows VS2022 Debug 和 Release 各注册 642 项，其中
+> 637 passed、5 explicitly skipped、0 failed；WSL Ubuntu 24.04 GCC 13.3.0 Debug 和 Release
+> 各注册 871 项，其中 870 passed、1 explicitly skipped、0 failed。Application label Windows 为
+> 103/103、WSL 为 104/104；`iaisf_application_api_primitives_tests` Windows 为 18/18、Linux
+> 为 19/19（含 1 个 Linux-only getrandom seam 测试）。WSL 是本地验证，不是 GitHub
+> Actions 证据；项目源码和测试 warning 为 0。
+
 > Phase 9B-3A-1 本地最终矩阵：Windows VS2022 Debug 和 Release 各注册 607 项，其中
 > 602 passed、5 explicitly skipped、0 failed；WSL Ubuntu 24.04 GCC 13.3.0 Debug 和
 > Release 各注册 835 项，其中 834 passed、1 explicitly skipped、0 failed。Application
@@ -953,3 +960,30 @@ status projection states, negative timestamps and the 16 KiB ceiling. The
 `xyz-f32le` relation is tested against the fixed 12-byte-per-point wire
 constant and overflow boundary. The focused strict/contract/status set is
 17/17 in each configuration, and smoke is 2/2 in each configuration.
+
+## Phase 9B-3A-3A API primitives tests
+
+`iaisf_application_api_primitives_tests` contains 18 registered tests on
+Windows and 19 on Linux. The Job ID cases cover canonical prefixes, exact
+35-byte output, lowercase hex, fixed and all-zero entropy, invalid
+applications, OS/reader failure classification, EINTR, short reads, reader
+contract violations, bounded messages, non-movable result copy invariants and
+the non-`noexcept` allocation contract. Linux adds one source-private getrandom
+syscall seam test. The clock cases cover system validity, deterministic fake
+values, epoch boundary, pre-epoch rejection, the real `time_point::max()`
+integer boundary and concurrent reads. No test claims a probability-based
+uniqueness guarantee, and no fixed sleep is used.
+
+The rebuilt local full matrix is:
+
+| Configuration | registered | passed | explicitly skipped | failed |
+|---|---:|---:|---:|---:|
+| Windows VS2022 Debug | 642 | 637 | 5 | 0 |
+| Windows VS2022 Release | 642 | 637 | 5 | 0 |
+| WSL Ubuntu 24.04 Debug | 871 | 870 | 1 | 0 |
+| WSL Ubuntu 24.04 Release | 871 | 870 | 1 | 0 |
+
+The Windows skips are the pre-existing RollingFileSink and SafePathResolver
+environment injections; WSL retains only the explicit permission capability
+skip. These are test-level skips, not workflow-step skips. Version/config smoke
+passed in both platforms. WSL is local validation, not GitHub Actions evidence.

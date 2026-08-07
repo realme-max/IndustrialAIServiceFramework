@@ -3,23 +3,23 @@
 ## 当前结论
 
 ```text
-PHASE_9B_3A_2_STRICT_APPLICATION_JSON_CONTRACT_HARDENED
+PHASE_9B_3A_3A_APPLICATION_JOB_ID_GENERATOR_AND_CLOCK_COMPLETED
 ```
 
 The current implementation checkpoint is
-`PHASE_9B_3A_2_STRICT_APPLICATION_JSON_CONTRACT_HARDENED` (local, uncommitted).
+`PHASE_9B_3A_3A_APPLICATION_JOB_ID_GENERATOR_AND_CLOCK_COMPLETED` (local, uncommitted).
 
-- 当前阶段：Phase 9B-3A-2 Strict Application JSON Contract（本地未提交）
-- 当前实施点：Phase 9B-3A-2 Strict Application JSON Contract（本地未提交）
-- 本阶段仅新增 strict JSON、submit contract 和 status projection；没有 HTTP route、Task API、Service、Repository 或 Artifact I/O 改动。
-- 基线：`3f446effbfea92b3904c02c7bb01586557e7b110`（Phase 9B-3A-1 remote CI checkpoint）
-- 实现状态：新增不可变 submission specification，并在 Job request、Snapshot 和 Repository 中完整保存；本阶段另加入严格 JSON preflight、inspection/guidance submit contract 与有界 status projection；不改变既有 Job 状态矩阵、ArtifactRef 1–16 上限或 application 隔离
-- Windows 验证：Visual Studio 2022 x64 Debug/Release 各注册 624 项，619 passed、5 explicitly skipped、0 failed；Application 85/85，iaisf_api_common 6/6，contract 11/11
-- WSL 验证：Ubuntu 24.04 / GCC 13.3.0 Debug/Release 各注册 852 项，851 passed、1 explicitly skipped、0 failed；Application 85/85，iaisf_api_common 6/6，contract 11/11
+- 当前阶段：Phase 9B-3A-3A Application Job ID Generator and Clock（本地未提交）
+- 当前实施点：OS CSPRNG Job ID generator、system clock 与独立 `iaisf_application_api_primitives` target
+- 本阶段没有 HTTP route、Task API、Service、Repository、Worker Protocol 或 Artifact I/O 改动。
+- 基线：`4d3284febd95907ecdf20f0b96aa2ab1f5044855`（Phase 9B-3A-2 stable checkpoint；Linux CI run `31140290934`）
+- 实现状态：WeldInspection/WeldingGuidance 生成固定 35-byte canonical ID；Windows 使用 BCryptGenRandom，Linux 使用 getrandom；generator 与 generation result 均不可移动，result 保留拷贝不变量；clock 使用整数 ratio 检查 epoch 和 Unix milliseconds 可表示性并 fail-closed。
+- Windows 验证：Visual Studio 2022 x64 Debug/Release 各注册 642 项，637 passed、5 explicitly skipped、0 failed；Application 103/103，api_primitives 18/18
+- WSL 验证：Ubuntu 24.04 / GCC 13.3.0 Debug/Release 各注册 871 项，870 passed、1 explicitly skipped、0 failed；Application 104/104，api_primitives 19/19（含 1 个 Linux-only getrandom seam 测试）
 - warning：项目源码与测试为 0；WSL 本地结果不冒充 GitHub Actions
-- 日期：2026-08-06（Asia/Shanghai）
-- 未实现：versioned HTTP Application API、持久化 Repository、Artifact I/O/Store、Worker Protocol、PTV2/WeldAgent adapter
-- 下一步：Phase 9B-3A-3 仅在本阶段审计完成后规划；versioned HTTP/JSON API 仍属后续范围
+- 日期：2026-08-07（Asia/Shanghai）
+- 未实现：Job ID collision retry/coordinator、versioned HTTP Application API、Service 组合、持久化 Repository、Artifact I/O/Store、Worker Protocol、PTV2/WeldAgent adapter
+- 下一步：Phase 9B-3A-3B 仅在本阶段审计完成后规划；本阶段不进入后续实现
 
 Phase 8A/8B/8C-1 已提供 timerfd、TCP/HTTP timeout 和 signalfd；Phase 8C-2 在不改变
 这些生命周期语义的前提下增加一次性本地 JSON 配置和应用组合。Linux
@@ -1008,3 +1008,33 @@ host `sizeof(float)`. Status JSON allocation and serialization failures are
 contained by `Result<std::string>`. WSL results are local validation, not
 GitHub Actions evidence. The WSL Debug build also emitted environment-only GNU
 make clock-skew diagnostics; project compiler warnings remained zero.
+
+## Phase 9B-3A-3A Application Job ID Generator and Clock
+
+Final local status: `PHASE_9B_3A_3A_APPLICATION_JOB_ID_GENERATOR_AND_CLOCK_COMPLETED`.
+The implementation is based on stable commit `4d3284febd95907ecdf20f0b96aa2ab1f5044855`;
+the current worktree is uncommitted and no remote CI run exists for this phase.
+
+The new portable target `iaisf_application_api_primitives` links publicly only
+to `iaisf::application_core`. Windows uses `BCryptGenRandom`; Linux uses
+`getrandom` with flags zero, retrying EINTR and short reads. Each generated ID
+contains exactly 16 entropy bytes and is validated as exactly 35 ASCII bytes:
+`wi_`/`wg_` plus lowercase hexadecimal. CSPRNG entropy reduces candidate
+collision probability; Repository `create()` is the final process-local
+successful-Job uniqueness authority, collision retry is not implemented here,
+and Job IDs are not authorization credentials. The generator has structured
+bounded failure categories and never performs Repository lookup.
+`IApplicationJobClock` and `SystemApplicationJobClock` read one system clock
+value per call and fail closed for pre-epoch or unrepresentable Unix-ms values.
+
+| Configuration | registered | passed | explicitly skipped | failed | Application | api_primitives |
+|---|---:|---:|---:|---:|---:|---:|
+| Windows VS2022 Debug | 642 | 637 | 5 | 0 | 103/103 | 18/18 |
+| Windows VS2022 Release | 642 | 637 | 5 | 0 | 103/103 | 18/18 |
+| WSL Ubuntu 24.04 Debug | 871 | 870 | 1 | 0 | 104/104 | 19/19 |
+| WSL Ubuntu 24.04 Release | 871 | 870 | 1 | 0 | 104/104 | 19/19 |
+
+Version and example-config smoke exited 0. Project source and test warning
+count was zero. WSL clock-skew messages are mount-time diagnostics only and
+are not compiler warnings. No Phase 9B-3B or HTTP/Service integration was
+started.

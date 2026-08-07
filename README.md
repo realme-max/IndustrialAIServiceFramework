@@ -2,7 +2,7 @@
 
 面向工业 AI 应用的 C++ 高性能任务服务框架。
 
-> 当前结论：`PHASE_9B_3A_2_STRICT_APPLICATION_JSON_CONTRACT_HARDENED`（本地验证，未提交）。Phase 9B-3A-2 增加严格 JSON preflight、两个固定 submit contract 和有界 status projection；本地 WSL 结果不是 GitHub Actions 证据。
+> 当前结论：`PHASE_9B_3A_3A_APPLICATION_JOB_ID_GENERATOR_AND_CLOCK_COMPLETED`（本地四配置验证，未提交）。本阶段只增加 OS CSPRNG Job ID generator、system clock 和独立 API primitives target；没有 HTTP、Service、Worker 或 Artifact I/O。
 
 ## 项目定位
 
@@ -26,7 +26,7 @@ HTTP/TCP Service 和 signalfd 停止链路并进入事件循环。Windows 保留
 - 跨 application 查询或更新统一返回 `NotFound`，不泄露另一应用的 Job 是否存在；`weld_inspection/post_weld` 与 `welding_guidance/pre_weld` 继续完全独立。
 - PTV2 当前定位仅为分割与几何输入；独立质量能力尚未实现，必须标记 `quality_assessment=not_implemented`。
 - WeldAgent 当前边界禁止真实 joint values、机器人控制及 controller URL 发送。
-- Windows VS2022 Debug/Release 本地各注册 624 项：619 passed、5 explicitly skipped、0 failed；WSL Ubuntu Debug/Release 本地各注册 852 项：851 passed、1 explicitly skipped、0 failed。Application 85/85（其中 contract 11 项、api_common 6 项），Repository 41/41 在四套配置均通过，项目源码与测试编译 warning 为 0。Phase 9B-3A-1 的 607/835 矩阵与 Phase 9B-2 的 598/826 矩阵保留在历史记录中。
+- Windows VS2022 Debug/Release 本地各注册 642 项：637 passed、5 explicitly skipped、0 failed；WSL Ubuntu 24.04 GCC Debug/Release 本地各注册 871 项：870 passed、1 explicitly skipped、0 failed。Application label Windows 为 103/103、WSL 为 104/104；`api_primitives` 定向测试 Windows 为 18/18、Linux 为 19/19；项目源码与测试编译 warning 为 0。WSL 是本地证据，不是 GitHub Actions 证据。Phase 9B-3A-2 的旧矩阵保留在历史记录中。
 - versioned HTTP Application API、持久化 Repository、Artifact I/O/Store、Worker Protocol 和两个外部项目 adapter 均未实现。
 - 设计与边界详见 [Application Layer](docs/application_layer.md)。
 
@@ -597,3 +597,54 @@ serialization inside the public `Result<std::string>` exception boundary. It
 adds exact-limit, nested-duplicate, dangerous-field, non-finite-number,
 invalid-UTF-8 and all-status-state coverage without changing the registered
 test count; allocation-bearing public entry points do not claim `noexcept`.
+
+## Phase 9B-3A-3A Application Job ID Generator and Clock
+
+Status: `PHASE_9B_3A_3A_APPLICATION_JOB_ID_GENERATOR_AND_CLOCK_COMPLETED`.
+The current worktree is intentionally uncommitted. The preceding stable
+Phase 9B-3A-2 checkpoint is commit
+`4d3284febd95907ecdf20f0b96aa2ab1f5044855`, validated by Linux CI run
+`31140290934`.
+
+This phase adds the portable `iaisf_application_api_primitives` static target
+and alias `iaisf::application_api_primitives`. `OsApplicationJobIdGenerator`
+uses `BCryptGenRandom` on Windows and `getrandom(..., 0)` on Linux to produce
+exactly 16 bytes of entropy. Canonical IDs are exactly 35 ASCII bytes:
+`wi_`/`wg_` followed by 32 lowercase hexadecimal characters. The generator
+returns structured, bounded failure categories and never performs Repository
+lookup or collision orchestration.
+
+`IApplicationJobClock` and `SystemApplicationJobClock` provide one validated
+`system_clock` read per call. Pre-epoch and unrepresentable Unix-millisecond
+values fail closed. A deterministic fake clock exists only in tests; there is
+no global clock or singleton.
+
+Local validation (not GitHub Actions) completed in all four configurations:
+
+| Configuration | Registered | Passed | Explicit skips | Failed |
+|---|---:|---:|---:|---:|
+| Windows VS2022 Debug | 642 | 637 | 5 | 0 |
+| Windows VS2022 Release | 642 | 637 | 5 | 0 |
+| WSL Ubuntu 24.04 Debug | 871 | 870 | 1 | 0 |
+| WSL Ubuntu 24.04 Release | 871 | 870 | 1 | 0 |
+
+The new `iaisf_application_api_primitives_tests` target executed 18/18 on
+Windows and 19/19 on Linux; the additional Linux-only test exercises the
+source-private `getrandom` seam. Version and example-config smoke commands
+exited 0.
+Compiler warning count was zero for project source and tests; WSL emitted
+only GNU make clock-skew diagnostics caused by the shared Windows/WSL tree.
+
+The generator uses CSPRNG entropy to reduce candidate collision probability;
+Repository `create()` is the final authority for process-local successful Job
+uniqueness, and 9B-3A-3A does not implement collision retry. Job IDs are not
+authorization credentials. This phase does not implement HTTP routes, Service
+composition, Worker Protocol, Artifact I/O, or PTV2/WeldAgent adapters. The
+`weld_inspection/post_weld` and `welding_guidance/pre_weld` applications remain
+independent.
+
+The generator and generation results are non-movable; ordinary copy operations
+preserve both source and destination invariants. Entropy reader contract violations are
+`InternalFailure`, while OS failure/EOF is `EntropyUnavailable`. Clock
+representability is checked with integer duration-ratio arithmetic, and all
+deterministic/syscall seams remain private to tests.

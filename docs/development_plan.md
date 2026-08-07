@@ -2,10 +2,11 @@
 
 ## 1. 执行原则
 
-当前实施点为 **Phase 9B-3A-2（hardened locally, uncommitted）**。Phase 9A 只读设计审计
+当前实施点为 **Phase 9B-3A-3A（completed locally, uncommitted）**。Phase 9A 只读设计审计
 和 Phase 9B-1 portable Application Domain Foundation 已完成；Phase 9B-2 新增强类型 Job ID、
 不可变 snapshot、Repository contract 与有界内存实现，未开始 HTTP Application API、持久化、
-Artifact I/O 或 Worker Protocol。Phase 9B-3 建议只实现 versioned HTTP/JSON Application API。
+Artifact I/O 或 Worker Protocol。Phase 9B-3A-3A 仅实现 Job ID generator/clock primitives；HTTP/JSON API
+仍属后续范围。
 
 项目当前按 Phase 0—10 推进。Phase 2 后将 Reactor Core 与 TCP Transport 分开验收，
 因此后续原计划顺延一阶段。每个阶段只在其验收门槛通过后进入下一阶段，并同步更新：
@@ -594,3 +595,29 @@ boundary around URL/JSON construction and serialization, uses a fixed 12-byte
 `xyz-f32le` point relation rather than host `sizeof(float)`, and adds exact
 limit, malformed-input, dangerous-field and status-state coverage. Phase
 9B-3A-3 remains not started.
+
+## Phase 9B-3A-3A Job ID Generator and Clock (completed locally)
+
+- Add `iaisf_application_api_primitives` with only a PUBLIC dependency on
+  `iaisf::application_core`.
+- Generate exactly 16 bytes of OS CSPRNG entropy per ID; encode `wi_` or `wg_`
+  and 32 lowercase hexadecimal characters; validate via `ApplicationJobId`.
+- Return structured failure categories with bounded fixed messages. Do not
+  perform Repository lookup, collision retry, HTTP mapping or Service startup.
+- Keep both `OsApplicationJobIdGenerator` and its generation result
+  non-movable; retain ordinary copy semantics so source and destination
+  invariants are explicit. Classify reader contract violations as
+  `InternalFailure` rather than entropy unavailability.
+- Add `IApplicationJobClock` and `SystemApplicationJobClock`; read
+  `system_clock` once per call and fail closed before epoch or outside signed
+  Unix-millisecond range.
+- Use checked integer duration-ratio arithmetic for clock representability and
+  keep deterministic entropy/clock/Linux syscall seams private to tests. Do not
+  add HTTP, Worker Protocol, Artifact I/O, PTV2 or WeldAgent integration.
+
+Four local configurations passed with Windows `642 registered / 637 passed /
+5 explicitly skipped / 0 failed` and WSL `871 / 870 / 1 / 0`. The new
+api-primitives target ran 18/18 on Windows and 19/19 on Linux, including one
+Linux-only getrandom seam test; version/config smoke exited 0; compiler
+warning count was zero. WSL is local evidence only. The
+current worktree remains uncommitted and Phase 9B-3A-3B has not started.
