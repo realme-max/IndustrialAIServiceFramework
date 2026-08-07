@@ -650,10 +650,39 @@ representability is checked with integer duration-ratio arithmetic, and all
 deterministic/syscall seams remain private to tests.
 ## Phase 9 Fast Track MVP-1
 
-The local artifact/result domain is implemented in the current uncommitted
-worktree. See [docs/fast_track_mvp1.md](docs/fast_track_mvp1.md). The scope is
+The local artifact/result domain is implemented and committed locally in
+`2d460e6b04dc79b3c49cd77c48613ece5d37ca8a`. See
+[docs/fast_track_mvp1.md](docs/fast_track_mvp1.md). The scope is
 limited to a standard-library Python importer, a filesystem-verifying C++
 artifact resolver, application-specific result values, atomic Repository
 completion, and bounded JSON projections. HTTP, Worker Protocol, Service
-composition, persistence, uploads/downloads and external PTV2/WeldAgent
-adapters remain unimplemented.
+composition, persistence and uploads/downloads are outside MVP-1; the
+independent PTV2/WeldAgent adapters are introduced only by MVP-2 below.
+
+## Phase 9 Fast Track MVP-2
+
+The local MVP-2 checkpoint adds a bounded non-shell process runner, job-private
+XYZ-f32le-to-TXT materialization, controlled output Artifact registration, and
+two independent adapters. `weld_inspection/post_weld` uses the PTV2 adapter;
+`welding_guidance/pre_weld` uses the WeldAgent adapter. Neither adapter mutates
+Repository state or calls the other application. The PTV2 adapter keeps the
+generic three-column materializer unchanged and creates a private `x y z 0`
+bridge solely for the existing PTV2 loader. The fourth value is a compatibility
+placeholder, not ground truth, not a model feature and not a quality score.
+PTV2 output is parsed as segmentation/geometry data only and always reports
+`quality_assessment=not_implemented`. WeldAgent output never permits robot
+execution and never exposes joint values. Windows full CTest registered 657,
+passed 652, with five explicit capability skips and zero failures in both Debug
+and Release; WSL local full CTest registered 886, passed 885, with one explicit
+permission-capability skip and zero failures. The new runtime target passed 9/9
+in Windows Debug/Release and WSL Debug/Release. These are local results, not
+GitHub Actions evidence for this uncommitted work.
+
+The narrow `iaisf_ptv2_adapter_smoke` entrypoint ran the archived PTV2
+executable through `Ptv2WeldInspectionAdapter + LocalProcessRunner` and exited
+0: 2048 total points, 205 weld points, weld ratio 0.10009765625, length
+0.8822024465, and three registered output Artifacts. A real WeldAgent pointcloud
+smoke exited 0 and produced `final_result.json`; its adapter preserves human
+review and `robot_execution_allowed=false`. No automatic chaining, HTTP
+integration, Application Executor, Worker Protocol, robot control, or quality
+assessment is implemented.
