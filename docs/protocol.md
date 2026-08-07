@@ -612,3 +612,17 @@ The fixed `xyz-f32le` artifact contract uses exactly 12 wire bytes per point
 existing 1 GiB artifact limit. Status projection catches allocation and
 standard serialization failures and returns a bounded structured `Result`
 error; it does not emit HTTP headers.
+
+## Phase 9B-3A-3A Job ID and clock boundary
+
+This phase adds no wire endpoint or JSON field. `OsApplicationJobIdGenerator`
+produces only canonical candidate IDs (`wi_`/`wg_` plus 32 lowercase hex
+characters) from 128 bits of OS CSPRNG entropy. The entropy reduces candidate
+collision probability; Repository `create()` is the final authority for
+process-local successful Job uniqueness, and 9B-3A-3A does not implement
+collision retry. Job IDs are not authorization credentials. It does not perform
+Repository admission, HTTP mapping or Service orchestration. The clock
+interface returns a validated `system_clock::time_point`; pre-epoch and
+unrepresentable Unix-millisecond values are failures. The two independent
+business applications remain isolated and no PTV2/WeldAgent workflow is
+introduced.

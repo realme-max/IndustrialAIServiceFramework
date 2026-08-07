@@ -587,3 +587,30 @@ Release 构建和完整 CTest，均为 `596/596`；Release `--version` 与示例
 本次 WSL 直接使用当前 Windows 挂载工作区，不是另一份 Linux clone。NTFS 时间戳可能
 让 make 报告 clock-skew，这不是项目编译 warning。当前工作区未提交，因此尚无对应
 GitHub Actions Debug/Release 证据，不得把本地 WSL 回归描述成远端 CI。
+
+## Phase 9B-3A-3A Application API Primitives 本地验证
+
+本阶段新增 `iaisf_application_api_primitives` 和
+`iaisf_application_api_primitives_tests`。Linux production target 使用
+`src/application/application_job_id_entropy_linux.cpp` 的
+`getrandom(..., 0)` 实现；Windows 目标使用 BCrypt，两个平台不交叉编译
+对方的系统调用。测试 target 通过 private source include 使用确定性 entropy
+reader seam，生产 public include 不暴露该 seam。
+
+当前本地四配置完整矩阵：
+
+| 配置 | registered | passed | explicitly skipped | failed | api_primitives |
+|---|---:|---:|---:|---:|---:|
+| Windows VS2022 Debug | 642 | 637 | 5 | 0 | 18/18 |
+| Windows VS2022 Release | 642 | 637 | 5 | 0 | 18/18 |
+| WSL Ubuntu 24.04 Debug | 871 | 870 | 1 | 0 | 19/19 |
+| WSL Ubuntu 24.04 Release | 871 | 870 | 1 | 0 | 19/19 |
+
+Windows 的 5 个测试级 skip 为既有 RollingFileSink 写/flush 故障注入和
+SafePathResolver symlink/permission 能力限制；WSL 的唯一 skip 是
+`SafePathResolverTest.PermissionFailureIsExplicitlyHandled` 的 runner 权限
+能力限制。它们不是 workflow step skip。版本和示例配置 smoke 均 exit 0。
+
+WSL 结果是本地 Ubuntu 24.04 验证，不是 GitHub Actions 证据；WSL 构建输出
+中的 clock-skew 提示来自 Windows 挂载目录的时间戳，不是项目源代码或测试
+编译 warning。当前阶段不修改 workflow，也没有新的远端 CI run。

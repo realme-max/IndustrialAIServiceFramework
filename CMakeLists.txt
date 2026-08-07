@@ -88,6 +88,51 @@ target_link_libraries(iaisf_application_core PUBLIC iaisf::core)
 iaisf_enable_project_warnings(iaisf_application_core)
 
 add_library(
+  iaisf_application_api_primitives
+  STATIC
+  src/application/application_job_id_generator.cpp
+  src/application/application_job_clock.cpp
+)
+if(WIN32)
+  target_sources(
+    iaisf_application_api_primitives
+    PRIVATE
+      src/application/application_job_id_entropy_windows.cpp
+  )
+elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  target_sources(
+    iaisf_application_api_primitives
+    PRIVATE
+      src/application/application_job_id_entropy_linux.cpp
+  )
+else()
+  target_sources(
+    iaisf_application_api_primitives
+    PRIVATE
+      src/application/application_job_id_entropy_unsupported.cpp
+  )
+endif()
+add_library(iaisf::application_api_primitives ALIAS iaisf_application_api_primitives)
+target_compile_features(iaisf_application_api_primitives PUBLIC cxx_std_17)
+target_include_directories(
+  iaisf_application_api_primitives
+  PUBLIC
+    "$<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>"
+    "$<BUILD_INTERFACE:${IAISF_GENERATED_INCLUDE_DIR}>"
+  PRIVATE
+    "${PROJECT_SOURCE_DIR}/src/application"
+)
+target_link_libraries(
+  iaisf_application_api_primitives
+  PUBLIC
+    iaisf::application_core
+)
+if(WIN32)
+  target_link_libraries(iaisf_application_api_primitives PRIVATE bcrypt)
+endif()
+iaisf_enable_project_warnings(iaisf_application_api_primitives)
+
+add_library(
   iaisf_api_common
   STATIC
   src/api/strict_json.cpp

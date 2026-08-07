@@ -57,6 +57,42 @@ set_tests_properties(
 )
 
 add_executable(
+  iaisf_application_api_primitives_tests
+  application/test_application_job_id_generator.cpp
+  application/test_application_job_clock.cpp
+)
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  target_sources(
+    iaisf_application_api_primitives_tests
+    PRIVATE
+      application/test_application_job_id_entropy_linux.cpp
+  )
+endif()
+target_compile_features(iaisf_application_api_primitives_tests PRIVATE cxx_std_17)
+target_include_directories(
+  iaisf_application_api_primitives_tests
+  PRIVATE
+    "${PROJECT_SOURCE_DIR}/src/application"
+)
+target_link_libraries(
+  iaisf_application_api_primitives_tests
+  PRIVATE
+    iaisf::application_api_primitives
+    GTest::gtest
+    GTest::gtest_main
+    Threads::Threads
+)
+iaisf_enable_project_warnings(iaisf_application_api_primitives_tests)
+gtest_add_tests(
+  TARGET iaisf_application_api_primitives_tests
+  TEST_LIST IAISF_APPLICATION_API_PRIMITIVES_TESTS
+)
+set_tests_properties(
+  ${IAISF_APPLICATION_API_PRIMITIVES_TESTS}
+  PROPERTIES LABELS "unit;application;api_primitives" TIMEOUT 20
+)
+
+add_executable(
   iaisf_api_common_tests
   api/test_strict_json.cpp
 )
