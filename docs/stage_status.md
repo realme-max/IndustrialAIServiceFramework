@@ -1038,3 +1038,17 @@ Version and example-config smoke exited 0. Project source and test warning
 count was zero. WSL clock-skew messages are mount-time diagnostics only and
 are not compiler warnings. No Phase 9B-3B or HTTP/Service integration was
 started.
+## Phase 9 Fast Track MVP-1 (local)
+
+Status: `PHASE_9_FAST_TRACK_MVP_1_LOCAL_ARTIFACT_AND_RESULT_DOMAIN_COMPLETED`.
+
+Implemented locally: `tools/import_pointcloud.py`, `iaisf_application_artifacts`,
+`iaisf_application_results`, typed inspection/guidance execution results,
+snapshot result invariants and Repository atomic `complete()`. Windows VS2022
+Debug/Release and WSL Ubuntu Release were rebuilt after the interface changes.
+WSL results are local evidence, not GitHub Actions evidence. No commit or push
+has been made for this phase.
+
+Not implemented: HTTP result routes, Worker Protocol, Artifact Store,
+persistence, Service integration, PTV2/WeldAgent adapters and automatic
+cross-application composition.

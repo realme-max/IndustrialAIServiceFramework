@@ -228,6 +228,74 @@ InMemoryApplicationJobRepository::transition(
 }
 
 ApplicationRepositoryResult<ApplicationJobSnapshot>
+InMemoryApplicationJobRepository::complete(
+    const ApplicationJobId& job_id,
+    const IndustrialApplication application,
+    const std::uint64_t expected_version,
+    const ApplicationJobState target_state,
+    ApplicationExecutionResult result,
+    const ApplicationJobTimePoint updated_at) {
+    if (!job_id.valid() || !valid_application(application) ||
+        expected_version == 0U ||
+        (target_state != ApplicationJobState::Succeeded &&
+         target_state != ApplicationJobState::WaitingHuman)) {
+        return failure<ApplicationJobSnapshot>(
+            ApplicationRepositoryFailure::InvalidArgument,
+            ErrorCode::InvalidArgument,
+            "application job completion argument is invalid");
+    }
+    try {
+        std::lock_guard<std::mutex> lock(mutex_);
+        const auto found = records_.find(job_id);
+        if (found == records_.end() || found->second.application() != application) {
+            return failure<ApplicationJobSnapshot>(
+                ApplicationRepositoryFailure::NotFound,
+                ErrorCode::NotFound,
+                "application job was not found");
+        }
+        if (found->second.version() != expected_version) {
+            return failure<ApplicationJobSnapshot>(
+                ApplicationRepositoryFailure::VersionConflict,
+                ErrorCode::InvalidState,
+                "application job version does not match");
+        }
+        if (found->second.state() != ApplicationJobState::Running) {
+            return failure<ApplicationJobSnapshot>(
+                ApplicationRepositoryFailure::InvalidTransition,
+                ErrorCode::InvalidState,
+                "only a running application job can be completed");
+        }
+        auto completed = found->second.completed(std::move(result), updated_at);
+        if (!completed) {
+            return failure<ApplicationJobSnapshot>(
+                ApplicationRepositoryFailure::InvalidArgument,
+                completed.error().code,
+                "application job completion result is invalid");
+        }
+        if (completed.value().state() != target_state) {
+            return failure<ApplicationJobSnapshot>(
+                ApplicationRepositoryFailure::InvalidTransition,
+                ErrorCode::InvalidState,
+                "application job result state does not match target state");
+        }
+        ApplicationJobSnapshot response = completed.value();
+        found->second = completed.value();
+        return ApplicationRepositoryResult<ApplicationJobSnapshot>::success(
+            std::move(response));
+    } catch (const std::bad_alloc&) {
+        return failure<ApplicationJobSnapshot>(
+            ApplicationRepositoryFailure::InternalFailure,
+            ErrorCode::ResourceExhausted,
+            "unable to allocate completed application job snapshot");
+    } catch (const std::length_error&) {
+        return failure<ApplicationJobSnapshot>(
+            ApplicationRepositoryFailure::InternalFailure,
+            ErrorCode::ResourceExhausted,
+            "completed application job snapshot exceeds the platform size limit");
+    }
+}
+
+ApplicationRepositoryResult<ApplicationJobSnapshot>
 InMemoryApplicationJobRepository::erase_terminal(
     const ApplicationJobId& job_id,
     const IndustrialApplication application,

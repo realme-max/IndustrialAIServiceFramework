@@ -57,6 +57,31 @@ set_tests_properties(
 )
 
 add_executable(
+  iaisf_application_artifact_result_tests
+  application/test_application_artifacts.cpp
+  application/test_application_execution_result.cpp
+  application/test_application_result_json.cpp
+)
+target_compile_features(iaisf_application_artifact_result_tests PRIVATE cxx_std_17)
+target_link_libraries(
+  iaisf_application_artifact_result_tests
+  PRIVATE
+    iaisf::application_artifacts
+    iaisf::application_results
+    GTest::gtest
+    GTest::gtest_main
+)
+iaisf_enable_project_warnings(iaisf_application_artifact_result_tests)
+gtest_add_tests(
+  TARGET iaisf_application_artifact_result_tests
+  TEST_LIST IAISF_APPLICATION_ARTIFACT_RESULT_TESTS
+)
+set_tests_properties(
+  ${IAISF_APPLICATION_ARTIFACT_RESULT_TESTS}
+  PROPERTIES LABELS "unit;application;artifact_result" TIMEOUT 20
+)
+
+add_executable(
   iaisf_application_api_primitives_tests
   application/test_application_job_id_generator.cpp
   application/test_application_job_clock.cpp
@@ -142,6 +167,7 @@ add_executable(
   application/test_application_job_id.cpp
   application/test_application_job.cpp
   application/test_application_job_repository.cpp
+  application/test_application_job_completion.cpp
 )
 target_compile_features(iaisf_application_repository_tests PRIVATE cxx_std_17)
 target_link_libraries(

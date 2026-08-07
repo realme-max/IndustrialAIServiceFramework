@@ -614,3 +614,10 @@ SafePathResolver symlink/permission 能力限制；WSL 的唯一 skip 是
 WSL 结果是本地 Ubuntu 24.04 验证，不是 GitHub Actions 证据；WSL 构建输出
 中的 clock-skew 提示来自 Windows 挂载目录的时间戳，不是项目源代码或测试
 编译 warning。当前阶段不修改 workflow，也没有新的远端 CI run。
+## Fast Track MVP-1 verification
+
+The WSL Ubuntu 24.04 Release build explicitly rebuilt
+`iaisf_application_artifacts`, `iaisf_application_results`, the application
+core/repository targets and their tests. The resulting CTest matrix was
+879 registered / 878 passed / 1 explicit capability skip / 0 failed. This is
+local WSL evidence only; no Linux CI run was created for the uncommitted work.

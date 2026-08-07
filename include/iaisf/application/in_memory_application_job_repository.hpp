@@ -45,6 +45,14 @@ public:
         ApplicationJobState target_state,
         ApplicationJobTimePoint updated_at) override;
 
+    [[nodiscard]] ApplicationRepositoryResult<ApplicationJobSnapshot> complete(
+        const ApplicationJobId& job_id,
+        IndustrialApplication application,
+        std::uint64_t expected_version,
+        ApplicationJobState target_state,
+        ApplicationExecutionResult result,
+        ApplicationJobTimePoint updated_at) override;
+
     [[nodiscard]] ApplicationRepositoryResult<ApplicationJobSnapshot>
     erase_terminal(
         const ApplicationJobId& job_id,

@@ -648,3 +648,12 @@ preserve both source and destination invariants. Entropy reader contract violati
 `InternalFailure`, while OS failure/EOF is `EntropyUnavailable`. Clock
 representability is checked with integer duration-ratio arithmetic, and all
 deterministic/syscall seams remain private to tests.
+## Phase 9 Fast Track MVP-1
+
+The local artifact/result domain is implemented in the current uncommitted
+worktree. See [docs/fast_track_mvp1.md](docs/fast_track_mvp1.md). The scope is
+limited to a standard-library Python importer, a filesystem-verifying C++
+artifact resolver, application-specific result values, atomic Repository
+completion, and bounded JSON projections. HTTP, Worker Protocol, Service
+composition, persistence, uploads/downloads and external PTV2/WeldAgent
+adapters remain unimplemented.
