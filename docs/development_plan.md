@@ -627,3 +627,14 @@ Completed locally: bounded local point-cloud import, artifact resolver,
 application execution-result values, snapshot result invariants, atomic
 repository completion and result JSON projection. The next phase, if approved,
 must define a Worker Protocol separately; it is not part of this checkpoint.
+
+## Fast Track MVP-2 (local, uncommitted)
+
+Implemented locally: bounded controlled process execution, XYZ-f32le TXT
+materialization, controlled output Artifact registration, and separate PTV2
+post-weld inspection / WeldAgent pre-weld guidance adapters. The PTV2 adapter
+adds a private `x y z 0` bridge for its existing four-column loader while the
+generic materializer remains three-column. The bridge label is not ground
+truth, not a model feature and not a quality score. Not implemented: HTTP or
+Service composition, Repository mutation, Worker Protocol, automatic
+application chaining, robot control, or quality assessment.

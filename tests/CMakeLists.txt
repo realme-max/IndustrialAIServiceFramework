@@ -195,6 +195,29 @@ add_executable(
   log/test_rolling_file_sink.cpp
   log/test_logging_config.cpp
 )
+
+add_executable(
+  iaisf_application_runtime_tests
+  application/test_application_process.cpp
+  application/test_application_adapters.cpp
+)
+target_compile_features(iaisf_application_runtime_tests PRIVATE cxx_std_17)
+target_link_libraries(
+  iaisf_application_runtime_tests
+  PRIVATE
+    iaisf::application_runtime
+    GTest::gtest
+    GTest::gtest_main
+)
+iaisf_enable_project_warnings(iaisf_application_runtime_tests)
+gtest_add_tests(
+  TARGET iaisf_application_runtime_tests
+  TEST_LIST IAISF_APPLICATION_RUNTIME_TESTS
+)
+set_tests_properties(
+  ${IAISF_APPLICATION_RUNTIME_TESTS}
+  PROPERTIES LABELS "unit;application;runtime" TIMEOUT 30
+)
 target_compile_features(iaisf_logging_tests PRIVATE cxx_std_17)
 target_link_libraries(
   iaisf_logging_tests

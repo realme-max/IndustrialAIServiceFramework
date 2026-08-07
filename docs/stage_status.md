@@ -1046,9 +1046,28 @@ Implemented locally: `tools/import_pointcloud.py`, `iaisf_application_artifacts`
 `iaisf_application_results`, typed inspection/guidance execution results,
 snapshot result invariants and Repository atomic `complete()`. Windows VS2022
 Debug/Release and WSL Ubuntu Release were rebuilt after the interface changes.
-WSL results are local evidence, not GitHub Actions evidence. No commit or push
-has been made for this phase.
+WSL results are local evidence, not GitHub Actions evidence. The phase is
+committed locally as `2d460e6b04dc79b3c49cd77c48613ece5d37ca8a`; it has not
+been pushed.
 
 Not implemented: HTTP result routes, Worker Protocol, Artifact Store,
 persistence, Service integration, PTV2/WeldAgent adapters and automatic
 cross-application composition.
+
+## Fast Track MVP-2
+
+Status: `PHASE_9_FAST_TRACK_MVP_2_CONTROLLED_RUNNER_AND_REAL_ADAPTERS_COMPLETED`
+(local, uncommitted). The implementation contains a bounded process runner,
+binary point-cloud TXT materializer, local output Artifact registrar, and
+independent PTV2/WeldAgent adapters. The PTV2 adapter creates a private atomic
+`x y z 0` bridge for the existing four-column loader; the fixed label is not
+ground truth, not a model feature, and not a quality score. No HTTP, Service
+composition, Application Executor, Worker Protocol, Repository mutation,
+automatic chaining, robot control, or quality assessment is included.
+
+Windows Debug/Release full CTest: 657 registered, 652 passed, 5 explicit
+capability skips, 0 failed. WSL Release full CTest: 886 registered, 885 passed,
+1 explicit permission-capability skip, 0 failed. WSL Debug runtime focused
+tests: 9/9. The runtime target passed 9/9 in all four focused runs. These are
+local results, not GitHub Actions evidence. Adapter-mediated PTV2 smoke exited
+0 with 2048 total points, 205 weld points and three registered outputs.

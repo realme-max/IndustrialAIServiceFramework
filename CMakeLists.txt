@@ -233,6 +233,36 @@ target_link_libraries(
 iaisf_enable_project_warnings(iaisf_application_repository)
 
 add_library(
+  iaisf_application_runtime
+  STATIC
+  src/application/application_process.cpp
+  src/application/application_pointcloud.cpp
+  src/application/application_output_artifacts.cpp
+  src/application/application_adapters.cpp
+)
+add_library(iaisf::application_runtime ALIAS iaisf_application_runtime)
+target_compile_features(iaisf_application_runtime PUBLIC cxx_std_17)
+target_include_directories(
+  iaisf_application_runtime
+  PUBLIC
+    "$<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>"
+    "$<BUILD_INTERFACE:${IAISF_GENERATED_INCLUDE_DIR}>"
+)
+target_link_libraries(
+  iaisf_application_runtime
+  PUBLIC
+    iaisf::application_core
+    iaisf::application_artifacts
+    nlohmann_json::nlohmann_json
+)
+  iaisf_enable_project_warnings(iaisf_application_runtime)
+
+  add_executable(iaisf_ptv2_adapter_smoke tools/ptv2_adapter_smoke.cpp)
+  target_compile_features(iaisf_ptv2_adapter_smoke PRIVATE cxx_std_17)
+  target_link_libraries(iaisf_ptv2_adapter_smoke PRIVATE iaisf::application_runtime)
+  iaisf_enable_project_warnings(iaisf_ptv2_adapter_smoke)
+
+add_library(
   iaisf_logging
   STATIC
   src/logging/async_logger.cpp

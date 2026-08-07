@@ -1617,3 +1617,35 @@ result/state/application consistency atomically. Inspection output always
 reports `quality_assessment=not_implemented`; guidance output always reports
 `robot_execution_allowed=false` and contains no joint values or controller
 fields. No automatic PTV2/WeldAgent chaining is present.
+
+## Fast Track MVP-2 handoff
+
+MVP-1 local commit: `2d460e6b04dc79b3c49cd77c48613ece5d37ca8a`
+(`feat: add local artifact and application result domain`). MVP-2 is
+uncommitted. New targets are `iaisf_application_runtime` and
+`iaisf_application_runtime_tests`.
+
+The runtime owns no Repository state. `LocalProcessRunner` is non-shell and
+bounded; materialized input is deleted after the child exits; output files
+must be regular non-symlink files below the configured output root and are
+hashed into manifests. The PTV2 and WeldAgent adapters are independent and
+enforce their application/scene pair. PTV2 quality remains
+`not_implemented`; WeldAgent always reports `robot_execution_allowed=false`.
+
+Windows Debug/Release full CTest each registered 657, passed 652, had five
+explicit capability skips and zero failures. WSL Release full CTest registered
+886, passed 885, had one explicit permission-capability skip and zero failures;
+WSL Debug ran the focused runtime target 9/9. The runtime target passed 9/9 in
+all four focused runs. These are local results, not GitHub Actions evidence.
+
+Adapter-mediated PTV2 smoke evidence: the archived executable, engine, plugin
+and the same 2048-point XYZ data ran through
+`Ptv2WeldInspectionAdapter + LocalProcessRunner` and exited 0. The private
+bridge emitted exactly 2048 four-column rows with fixed label `0`; the result
+contained 205 weld points, weld ratio `0.10009765625`, length `0.8822024465`,
+and three registered output Artifacts. The fourth column is only the existing
+loader compatibility placeholder, not ground truth, not a model feature and
+not a quality score. Scratch cleanup and `quality_assessment=not_implemented`
+were verified. The direct WeldAgent pointcloud smoke exited 0 and produced
+`final_result.json`; its adapter keeps human review and
+`robot_execution_allowed=false`. MVP-2 is locally complete but unpushed.
