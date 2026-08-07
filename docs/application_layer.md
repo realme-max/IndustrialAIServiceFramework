@@ -145,3 +145,21 @@ GCC Debug/Release 均为 74 registered、74 passed、0 explicitly skipped、0 fa
 CTest 分别为 Windows `607/602/5/0`（registered/passed/skipped/failed）和 WSL
 `835/834/1/0`。四套配置均重新生成并编译，项目源码/测试 warning 为 0；WSL 结果不代表
 GitHub Actions。
+
+## Phase 9B-3A-2 Strict Application JSON Contract
+
+The contract layer is separate from the Application Domain and does not expose
+nlohmann JSON types in Domain headers. It parses only two fixed version `1.0`
+roots: post-weld inspection (`segmentation`/`geometry`) and pre-weld guidance
+(`auto` or requested `straight`/`corner`/`l`) with a required human checkpoint.
+Both require exactly one point-cloud artifact with exact metadata fields and
+overflow-safe `size_bytes == point_count * 12` validation. The 12-byte value is
+the fixed XYZ binary32 wire contract and is independent of host `sizeof(float)`.
+
+The status projection emits only schema version, job identity, state, version,
+epoch-millisecond timestamps and a canonical status URL. It intentionally does
+not expose artifacts, hashes, submission specs, results, review/checkpoint
+data, quality assessment or internal errors. This phase has no HTTP route and
+does not migrate the existing Task API parser. Status URL construction, JSON
+construction and serialization are contained by the public `Result` exception
+boundary; allocation-bearing public functions do not claim `noexcept`.

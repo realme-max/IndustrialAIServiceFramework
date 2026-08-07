@@ -928,3 +928,28 @@ warning 为 0。WSL 直接构建当前 Windows 挂载工作区，未使用另一
 | WSL Ubuntu 24.04 GCC Release | 835 | 834 | 1 | 0 |
 
 Windows 的 5 个 skip 是既有 RollingFileSink/SafePath capability 环境项；WSL 的 1 个 skip 是既有 SafePath permission capability 项。四套配置的项目源码和测试编译 warning 均为 0，`git diff --check` 通过。新增覆盖包括：inspection 输出 bitmask 规范化、guidance auto/requested 组合、非法 enum 和 policy、copy/move 源目标不变量、application/scene/spec 匹配、Snapshot transition 保持 spec、Repository 保存 guidance spec 以及跨 application 隔离回归。
+
+## Phase 9B-3A-2 contract tests
+
+The new `api_common` label covers valid JSON, malformed/trailing input,
+duplicate keys at root and nested levels, depth/node/key/string/payload limits,
+invalid UTF-8, comments and non-finite numbers. The `application;contract`
+label covers both fixed submit roots, exact schemas, one-artifact metadata and
+overflow-safe size/point-count consistency, invalid guidance combinations,
+bounded non-echoing errors, canonical output-order independence and status
+projection for later states. Tests use no network, filesystem or sleep.
+
+Phase 9B-3A-2 local full-matrix verification is Windows VS2022 Debug/Release
+`624 registered / 619 passed / 5 explicitly skipped / 0 failed` and WSL Ubuntu
+24.04 GCC Debug/Release `852 registered / 851 passed / 1 explicitly skipped /
+0 failed`. The `api_common` target ran 6 tests and the application contract
+target ran 11 tests. WSL is local validation, not GitHub Actions evidence;
+project source and test compiler warnings were zero.
+The hardening pass adds exact allowed/over-limit checks for payload, depth,
+nodes, keys and strings; non-finite numbers, comments, trailing data and
+invalid UTF-8; root and nested duplicate keys; artifact metadata and unsigned
+field boundaries; inspection/guidance dangerous-field rejection; and all
+status projection states, negative timestamps and the 16 KiB ceiling. The
+`xyz-f32le` relation is tested against the fixed 12-byte-per-point wire
+constant and overflow boundary. The focused strict/contract/status set is
+17/17 in each configuration, and smoke is 2/2 in each configuration.

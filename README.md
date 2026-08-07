@@ -2,7 +2,7 @@
 
 面向工业 AI 应用的 C++ 高性能任务服务框架。
 
-> 当前结论：`PHASE_9B_3A_1_APPLICATION_SUBMISSION_DOMAIN_FOUNDATION_COMPLETED`（本地验证，未提交）。Phase 9B-3A-1 在 Phase 9B-2 基础上增加不可变 application-specific submission specification，并完整保存在 Job/Snapshot/Repository；本地 WSL 结果不是 GitHub Actions 证据。
+> 当前结论：`PHASE_9B_3A_2_STRICT_APPLICATION_JSON_CONTRACT_HARDENED`（本地验证，未提交）。Phase 9B-3A-2 增加严格 JSON preflight、两个固定 submit contract 和有界 status projection；本地 WSL 结果不是 GitHub Actions 证据。
 
 ## 项目定位
 
@@ -26,7 +26,7 @@ HTTP/TCP Service 和 signalfd 停止链路并进入事件循环。Windows 保留
 - 跨 application 查询或更新统一返回 `NotFound`，不泄露另一应用的 Job 是否存在；`weld_inspection/post_weld` 与 `welding_guidance/pre_weld` 继续完全独立。
 - PTV2 当前定位仅为分割与几何输入；独立质量能力尚未实现，必须标记 `quality_assessment=not_implemented`。
 - WeldAgent 当前边界禁止真实 joint values、机器人控制及 controller URL 发送。
-- Windows VS2022 Debug/Release 本地各注册 607 项：602 passed、5 explicitly skipped、0 failed；WSL Ubuntu Debug/Release 本地各注册 835 项：834 passed、1 explicitly skipped、0 failed。Application 74/74（其中 Application Submission 8 项），Repository 41/41 在四套配置均通过，项目源码与测试编译 warning 为 0。上一阶段的 598/826 矩阵保留在历史记录中。
+- Windows VS2022 Debug/Release 本地各注册 624 项：619 passed、5 explicitly skipped、0 failed；WSL Ubuntu Debug/Release 本地各注册 852 项：851 passed、1 explicitly skipped、0 failed。Application 85/85（其中 contract 11 项、api_common 6 项），Repository 41/41 在四套配置均通过，项目源码与测试编译 warning 为 0。Phase 9B-3A-1 的 607/835 矩阵与 Phase 9B-2 的 598/826 矩阵保留在历史记录中。
 - versioned HTTP Application API、持久化 Repository、Artifact I/O/Store、Worker Protocol 和两个外部项目 adapter 均未实现。
 - 设计与边界详见 [Application Layer](docs/application_layer.md)。
 
@@ -559,3 +559,41 @@ checkpoint；不授权机器人，也不表示算法已正确分派。后续 HTT
 | WSL Ubuntu 24.04 GCC Release | 835 | 834 | 1 | 0 | 74/74 |
 
 项目源码和测试编译 warning 均为 0，`git diff --check` 通过。WSL 结果是本地验证，不是 GitHub Actions；本阶段没有 commit、push 或进入 9B-3A-2。
+
+## Phase 9B-3A-2 Strict Application JSON Contract
+
+This phase adds contract primitives only. It does not add an HTTP route,
+listener, Service integration, Job ID generator, clock, Task API migration,
+Repository changes, Artifact I/O, Worker Protocol, PTV2, or WeldAgent.
+
+`iaisf_api_common` performs bounded SAX preflight before DOM construction:
+duplicate keys are rejected at every object depth, malformed UTF-8, comments,
+non-finite numbers and trailing bytes fail closed, and depth, node, key/string
+byte and 4 KiB request limits are centralized. Errors expose stable structured
+categories without echoing request text.
+
+`iaisf_application_contract` parses two fixed version `1.0` roots. Inspection
+accepts exactly one point-cloud artifact and `segmentation`/`geometry` outputs.
+Guidance accepts `auto` or `requested` (`straight`, `corner`, `l`) plus the
+required human checkpoint. The parser stores validated Domain values, not the
+source JSON, and performs overflow-safe `size_bytes == point_count * 12`
+metadata validation. The 12-byte value is the fixed XYZ binary32 wire contract,
+independent of host `sizeof(float)`. Guidance remains a request only; no robot,
+controller, joint-value or automatic execution field is accepted.
+
+The status projection is a bounded JSON body with Unix epoch milliseconds and
+an application-specific status URL. It excludes artifacts, hashes, submission
+specification, results, review data, quality fields and internal errors. The
+Task API remains on its existing parser until the later migration phase.
+
+Local Phase 9B-3A-2 verification: Windows VS2022 Debug/Release each had
+`624 registered / 619 passed / 5 explicitly skipped / 0 failed`; WSL Ubuntu
+24.04 GCC Debug/Release each had `852 registered / 851 passed / 1 explicitly
+skipped / 0 failed`. The new targets ran 6 strict-JSON tests and 11 contract
+tests. WSL is local validation, not GitHub Actions evidence. Project compiler
+warnings were zero; WSL Debug also showed only GNU make clock-skew diagnostics.
+The hardening pass contains status URL construction, JSON construction and
+serialization inside the public `Result<std::string>` exception boundary. It
+adds exact-limit, nested-duplicate, dangerous-field, non-finite-number,
+invalid-UTF-8 and all-status-state coverage without changing the registered
+test count; allocation-bearing public entry points do not claim `noexcept`.

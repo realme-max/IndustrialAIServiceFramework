@@ -4,8 +4,9 @@
 
 - 项目：IndustrialAIServiceFramework
 - 当前分支：`phase/9-industrial-ai-application-layer`
-- 当前状态：`PHASE_9B_3A_1_APPLICATION_SUBMISSION_DOMAIN_FOUNDATION_COMPLETED`（本地四配置验证；未提交）
-- 当前基线 HEAD：`6271ba1909ae27994b427233f365b567222104dd`
+- 当前状态：`PHASE_9B_3A_2_STRICT_APPLICATION_JSON_CONTRACT_HARDENED`（本地四配置验证；未提交）
+- 当前工作：Phase 9B-3A-2 strict JSON contract primitives 已完成窄范围加固但未提交；不包含 HTTP route、Task API 或 Service 集成。
+- 当前基线 HEAD：`3f446effbfea92b3904c02c7bb01586557e7b110`
 - Phase 9A：只读 Application Integration Design Audit 已完成
 - Phase 9B-1：新增 `iaisf_application_core` / `iaisf::application_core`，仅依赖 `iaisf::core`
 - Phase 9B-1A：返回分配型 `Result` 的解析/验证 API 不声明 `noexcept`；纯查询和 bool 检查保留 `noexcept`
@@ -14,7 +15,7 @@
 - Repository：固定非零容量、无自动驱逐/TTL/持久化；相同 expected version 只有一个 writer 成功；版本不回绕；只显式删除精确版本的终态元数据
 - 隔离：application/scene 继续唯一配对；跨 application 的 Job 访问按 `NotFound` 处理；两个业务不串联
 - Artifact：Job 持有 1–16 个已验证 metadata 副本；Repository 不读取、拥有或删除 artifact 内容
-- 验证：Windows Debug/Release 各注册 607 项（602 passed、5 explicitly skipped、0 failed）；WSL Ubuntu 24.04 GCC 13.3.0 Debug/Release 各注册 835 项（834 passed、1 explicitly skipped、0 failed）；Application 74/74 四配置均 passed；warning 0。WSL 结果不是 GitHub Actions 证据
+- 验证：Windows Debug/Release 各注册 624 项（619 passed、5 explicitly skipped、0 failed）；WSL Ubuntu 24.04 GCC 13.3.0 Debug/Release 各注册 852 项（851 passed、1 explicitly skipped、0 failed）；Application 85/85 四配置均 passed，iaisf_api_common 6/6、contract 11/11；warning 0。WSL 结果不是 GitHub Actions 证据
 - 应用边界：`weld_inspection/post_weld` 与 `welding_guidance/pre_weld` 完全独立，不自动串联
 - 真实性边界：PTV2 质量评价为 `quality_assessment=not_implemented`；WeldAgent 不得生成真实 joint values、控制机器人或发送 URL
 - 未实现：versioned HTTP Application API、持久化 Repository、Artifact I/O/Store、Worker Protocol、PTV2/WeldAgent adapter、worker cancel/kill
@@ -1533,3 +1534,30 @@ Active stop 不保证触发请求返回 503；连接可能在响应生成前关�
   explicitly skipped、0 failed。四套配置均重新生成并编译，项目源码/测试 warning 为 0，WSL
   结果不代表 GitHub Actions。
 - 下一阶段不得直接注册 HTTP route；先完成 Domain contract 的边界测试与审计。
+
+## Phase 9B-3A-2 handoff
+
+- Base commit: `3f446effbfea92b3904c02c7bb01586557e7b110`.
+- New targets: `iaisf_api_common` and `iaisf_application_contract`.
+- Contract errors are structured as invalid_json, invalid_request,
+  validation_failed, payload_too_large, resource_failure or internal_failure.
+- Inspection and guidance parsers store validated Domain values only. Status
+  JSON is bounded to 16 KiB and excludes artifacts, hashes, result/review data,
+  quality fields and internal errors.
+- The existing Task API still uses its existing parser; migration is deferred.
+- Status projection constructs its URL, JSON object and serialized body inside
+  the public `Result<std::string>` exception boundary. Allocation-bearing public
+  parse/validation entry points are not declared `noexcept`.
+- The `xyz-f32le` wire relation is `size_bytes == point_count * 12` (three
+  binary32 coordinates), guarded against multiplication overflow and retaining
+  the 1 GiB artifact cap. Tests cover exact/over limits, nested duplicate and
+  dangerous-field rejection, non-finite/invalid-UTF-8 JSON and every public
+  status state. Focused strict/contract/status execution is 17/17 in all four
+  local configurations.
+- Local full CTest after rebuilding both trees: Windows Debug/Release each
+  `624 registered / 619 passed / 5 explicitly skipped / 0 failed`; WSL Ubuntu
+  24.04 GCC Debug/Release each `852 registered / 851 passed / 1 explicitly
+  skipped / 0 failed`.
+- Contract target: 11 tests; API common target: 6 tests. No compiler warning
+  was emitted by the changed project sources; WSL Debug GNU make clock-skew
+  messages are environment diagnostics only.
