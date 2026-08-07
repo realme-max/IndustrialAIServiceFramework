@@ -987,3 +987,17 @@ The Windows skips are the pre-existing RollingFileSink and SafePathResolver
 environment injections; WSL retains only the explicit permission capability
 skip. These are test-level skips, not workflow-step skips. Version/config smoke
 passed in both platforms. WSL is local validation, not GitHub Actions evidence.
+## Fast Track MVP-1 local verification
+
+- Python importer: 2 unittest cases passed.
+- Windows VS2022 x64 Debug: 650 registered, 645 passed, 5 explicit capability
+  skips, 0 failed.
+- Windows VS2022 x64 Release: 650 registered, 645 passed, 5 explicit capability
+  skips, 0 failed.
+- WSL Ubuntu 24.04 Release: 879 registered, 878 passed, 1 explicit capability
+  skip, 0 failed.
+- New artifact/result/completion focused tests: 8/8 passed on Windows Debug;
+  the same targets were built and exercised in WSL Release.
+
+The WSL rows are local validation, not GitHub Actions evidence. Existing
+environment-capability skips remain explicit and are not workflow-step skips.

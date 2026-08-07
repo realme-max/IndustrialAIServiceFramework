@@ -49,7 +49,8 @@ namespace {
     const std::uint64_t version,
     const ApplicationJobTimePoint created_at,
     const ApplicationJobTimePoint updated_at,
-    const std::vector<ArtifactRef>& input_artifacts) {
+    const std::vector<ArtifactRef>& input_artifacts,
+    const std::optional<ApplicationExecutionResult>& execution_result) {
     if (!job_id.valid()) {
         return Result<void>::failure(make_error(
             ErrorCode::InvalidArgument,
@@ -70,7 +71,25 @@ namespace {
     if (!valid_submission) {
         return valid_submission;
     }
-    return validate_inputs(input_artifacts);
+    const auto valid_inputs = validate_inputs(input_artifacts);
+    if (!valid_inputs) {
+        return valid_inputs;
+    }
+    if (state == ApplicationJobState::Succeeded ||
+        state == ApplicationJobState::WaitingHuman) {
+        if (!execution_result.has_value()) {
+            return Result<void>::failure(make_error(
+                ErrorCode::InvalidArgument,
+                "completed application job requires an execution result"));
+        }
+        return validate_execution_result(*execution_result, application);
+    }
+    if (execution_result.has_value()) {
+        return Result<void>::failure(make_error(
+            ErrorCode::InvalidArgument,
+            "non-final application job must not contain an execution result"));
+    }
+    return Result<void>::success();
 }
 
 }  // namespace
@@ -84,7 +103,8 @@ ApplicationJobSnapshot::ApplicationJobSnapshot(
     const std::uint64_t version,
     const ApplicationJobTimePoint created_at,
     const ApplicationJobTimePoint updated_at,
-    std::vector<ArtifactRef> input_artifacts)
+    std::vector<ArtifactRef> input_artifacts,
+    std::optional<ApplicationExecutionResult> execution_result)
     : job_id_(std::move(job_id)),
       application_(application),
       scene_phase_(scene_phase),
@@ -93,7 +113,8 @@ ApplicationJobSnapshot::ApplicationJobSnapshot(
       version_(version),
       created_at_(created_at),
       updated_at_(updated_at),
-      input_artifacts_(std::move(input_artifacts)) {}
+      input_artifacts_(std::move(input_artifacts)),
+      execution_result_(std::move(execution_result)) {}
 
 ApplicationJobSnapshot::ApplicationJobSnapshot(ApplicationJobSnapshot&& other)
     : ApplicationJobSnapshot(
@@ -127,6 +148,8 @@ void ApplicationJobSnapshot::swap(ApplicationJobSnapshot& other) noexcept {
     swap(created_at_, other.created_at_);
     swap(updated_at_, other.updated_at_);
     input_artifacts_.swap(other.input_artifacts_);
+    using std::swap;
+    swap(execution_result_, other.execution_result_);
 }
 
 Result<ApplicationJobSnapshot> ApplicationJobSnapshot::create(
@@ -140,7 +163,8 @@ Result<ApplicationJobSnapshot> ApplicationJobSnapshot::create(
         1U,
         request.created_at,
         request.created_at,
-        request.input_artifacts);
+        request.input_artifacts,
+        std::nullopt);
     if (!valid) {
         return Result<ApplicationJobSnapshot>::failure(valid.error());
     }
@@ -178,7 +202,8 @@ Result<ApplicationJobSnapshot> ApplicationJobSnapshot::transitioned(
         version_,
         created_at_,
         updated_at_,
-        input_artifacts_);
+        input_artifacts_,
+        execution_result_);
     if (!source_valid) {
         return Result<ApplicationJobSnapshot>::failure(source_valid.error());
     }
@@ -196,9 +221,18 @@ Result<ApplicationJobSnapshot> ApplicationJobSnapshot::transitioned(
     if (!valid) {
         return Result<ApplicationJobSnapshot>::failure(valid.error());
     }
+    if (target_state == ApplicationJobState::Succeeded ||
+        target_state == ApplicationJobState::WaitingHuman) {
+        return Result<ApplicationJobSnapshot>::failure(make_error(
+            ErrorCode::InvalidArgument,
+            "completed application job requires completed()"));
+    }
     try {
         auto updated = *this;
         updated.state_ = target_state;
+        if (target_state == ApplicationJobState::Running) {
+            updated.execution_result_.reset();
+        }
         ++updated.version_;
         updated.updated_at_ = updated_at;
         return Result<ApplicationJobSnapshot>::success(std::move(updated));
@@ -210,6 +244,57 @@ Result<ApplicationJobSnapshot> ApplicationJobSnapshot::transitioned(
         return Result<ApplicationJobSnapshot>::failure(make_error(
             ErrorCode::ResourceExhausted,
             "transitioned application job snapshot exceeds the platform size limit"));
+    }
+}
+
+Result<ApplicationJobSnapshot> ApplicationJobSnapshot::completed(
+    ApplicationExecutionResult result,
+    const ApplicationJobTimePoint updated_at) const {
+    const auto source_valid = validate_snapshot_invariants(
+        job_id_, application_, scene_phase_, submission_, state_, version_,
+        created_at_, updated_at_, input_artifacts_, execution_result_);
+    if (!source_valid) {
+        return Result<ApplicationJobSnapshot>::failure(source_valid.error());
+    }
+    if (updated_at < updated_at_) {
+        return Result<ApplicationJobSnapshot>::failure(make_error(
+            ErrorCode::InvalidArgument,
+            "application job timestamp cannot move backwards"));
+    }
+    if (version_ == std::numeric_limits<std::uint64_t>::max()) {
+        return Result<ApplicationJobSnapshot>::failure(make_error(
+            ErrorCode::ResourceExhausted,
+            "application job version space is exhausted"));
+    }
+    const auto valid_result = validate_execution_result(result, application_);
+    if (!valid_result) {
+        return Result<ApplicationJobSnapshot>::failure(valid_result.error());
+    }
+    const auto* guidance = std::get_if<WeldingGuidanceResult>(&result);
+    const auto target_state =
+        guidance != nullptr &&
+                guidance->disposition == GuidanceResultDisposition::WaitingHuman
+            ? ApplicationJobState::WaitingHuman
+            : ApplicationJobState::Succeeded;
+    const auto valid_target = validate_transition(state_, target_state, application_);
+    if (!valid_target) {
+        return Result<ApplicationJobSnapshot>::failure(valid_target.error());
+    }
+    try {
+        auto updated = *this;
+        updated.state_ = target_state;
+        ++updated.version_;
+        updated.updated_at_ = updated_at;
+        updated.execution_result_ = std::move(result);
+        return Result<ApplicationJobSnapshot>::success(std::move(updated));
+    } catch (const std::bad_alloc&) {
+        return Result<ApplicationJobSnapshot>::failure(make_error(
+            ErrorCode::ResourceExhausted,
+            "unable to allocate completed application job snapshot"));
+    } catch (const std::length_error&) {
+        return Result<ApplicationJobSnapshot>::failure(make_error(
+            ErrorCode::ResourceExhausted,
+            "completed application job snapshot exceeds the platform size limit"));
     }
 }
 
@@ -248,6 +333,11 @@ ApplicationJobSnapshot::submission() const noexcept {
 
 const std::vector<ArtifactRef>& ApplicationJobSnapshot::input_artifacts() const noexcept {
     return input_artifacts_;
+}
+
+const ApplicationExecutionResult* ApplicationJobSnapshot::execution_result()
+    const noexcept {
+    return execution_result_.has_value() ? &*execution_result_ : nullptr;
 }
 
 }  // namespace iaisf::application

@@ -3,6 +3,7 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <vector>
 
 #include "iaisf/application/application_identity.hpp"
@@ -10,6 +11,7 @@
 #include "iaisf/application/application_job_state.hpp"
 #include "iaisf/application/application_submission.hpp"
 #include "iaisf/application/artifact_ref.hpp"
+#include "iaisf/application/application_execution_result.hpp"
 #include "iaisf/core/result.hpp"
 
 namespace iaisf::application {
@@ -45,6 +47,10 @@ public:
         ApplicationJobState target_state,
         ApplicationJobTimePoint updated_at) const;
 
+    [[nodiscard]] Result<ApplicationJobSnapshot> completed(
+        ApplicationExecutionResult result,
+        ApplicationJobTimePoint updated_at) const;
+
     ApplicationJobSnapshot(const ApplicationJobSnapshot&) = default;
     ApplicationJobSnapshot& operator=(const ApplicationJobSnapshot& other);
 
@@ -61,6 +67,7 @@ public:
     [[nodiscard]] ApplicationJobTimePoint updated_at() const noexcept;
     [[nodiscard]] const ApplicationSubmissionSpec& submission() const noexcept;
     [[nodiscard]] const std::vector<ArtifactRef>& input_artifacts() const noexcept;
+    [[nodiscard]] const ApplicationExecutionResult* execution_result() const noexcept;
 
 private:
     friend class ApplicationJobRepositoryTestAccess;
@@ -75,7 +82,8 @@ private:
         std::uint64_t version,
         ApplicationJobTimePoint created_at,
         ApplicationJobTimePoint updated_at,
-        std::vector<ArtifactRef> input_artifacts);
+        std::vector<ArtifactRef> input_artifacts,
+        std::optional<ApplicationExecutionResult> execution_result = std::nullopt);
 
     void swap(ApplicationJobSnapshot& other) noexcept;
 
@@ -88,6 +96,7 @@ private:
     ApplicationJobTimePoint created_at_;
     ApplicationJobTimePoint updated_at_;
     std::vector<ArtifactRef> input_artifacts_;
+    std::optional<ApplicationExecutionResult> execution_result_;
 };
 
 }  // namespace iaisf::application

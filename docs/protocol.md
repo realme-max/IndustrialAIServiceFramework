@@ -626,3 +626,10 @@ interface returns a validated `system_clock::time_point`; pre-epoch and
 unrepresentable Unix-millisecond values are failures. The two independent
 business applications remain isolated and no PTV2/WeldAgent workflow is
 introduced.
+## Fast Track MVP-1 boundary
+
+No network protocol is introduced by the local artifact/result domain. The
+Python importer and C++ resolver communicate through the versioned
+`ArtifactRef` manifest and fixed `xyz-f32le` bytes only. A future Worker or HTTP
+contract must be versioned independently and must not expose filesystem paths,
+controller commands, joint values or quality claims.

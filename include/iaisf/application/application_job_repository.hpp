@@ -133,6 +133,15 @@ public:
         ApplicationJobTimePoint updated_at) = 0;
 
     [[nodiscard]] virtual ApplicationRepositoryResult<ApplicationJobSnapshot>
+    complete(
+        const ApplicationJobId& job_id,
+        IndustrialApplication application,
+        std::uint64_t expected_version,
+        ApplicationJobState target_state,
+        ApplicationExecutionResult result,
+        ApplicationJobTimePoint updated_at) = 0;
+
+    [[nodiscard]] virtual ApplicationRepositoryResult<ApplicationJobSnapshot>
     erase_terminal(
         const ApplicationJobId& job_id,
         IndustrialApplication application,

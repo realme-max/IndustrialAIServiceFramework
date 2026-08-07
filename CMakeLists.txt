@@ -70,6 +70,7 @@ add_library(
   iaisf_application_core
   STATIC
   src/application/application_identity.cpp
+  src/application/application_execution_result.cpp
   src/application/application_job.cpp
   src/application/application_job_id.cpp
   src/application/application_job_state.cpp
@@ -86,6 +87,44 @@ target_include_directories(
 )
 target_link_libraries(iaisf_application_core PUBLIC iaisf::core)
 iaisf_enable_project_warnings(iaisf_application_core)
+
+add_library(
+  iaisf_application_artifacts
+  STATIC
+  src/application/application_artifacts.cpp
+)
+add_library(iaisf::application_artifacts ALIAS iaisf_application_artifacts)
+target_compile_features(iaisf_application_artifacts PUBLIC cxx_std_17)
+target_include_directories(
+  iaisf_application_artifacts
+  PUBLIC
+    "$<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>"
+    "$<BUILD_INTERFACE:${IAISF_GENERATED_INCLUDE_DIR}>"
+)
+target_link_libraries(
+  iaisf_application_artifacts
+  PUBLIC iaisf::application_core nlohmann_json::nlohmann_json
+)
+iaisf_enable_project_warnings(iaisf_application_artifacts)
+
+add_library(
+  iaisf_application_results
+  STATIC
+  src/application/application_result_json.cpp
+)
+add_library(iaisf::application_results ALIAS iaisf_application_results)
+target_compile_features(iaisf_application_results PUBLIC cxx_std_17)
+target_include_directories(
+  iaisf_application_results
+  PUBLIC
+    "$<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>"
+    "$<BUILD_INTERFACE:${IAISF_GENERATED_INCLUDE_DIR}>"
+)
+target_link_libraries(
+  iaisf_application_results
+  PUBLIC iaisf::application_core nlohmann_json::nlohmann_json
+)
+iaisf_enable_project_warnings(iaisf_application_results)
 
 add_library(
   iaisf_application_api_primitives

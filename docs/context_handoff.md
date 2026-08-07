@@ -1602,3 +1602,18 @@ Active stop 不保证触发请求返回 503；连接可能在响应生成前关�
   Phase 9B-3B work. The two business applications remain independent.
 - Current worktree is uncommitted; do not commit or push until a separate
   audit authorizes it.
+## Fast Track MVP-1 handoff
+
+Current local checkpoint:
+`PHASE_9_FAST_TRACK_MVP_1_LOCAL_ARTIFACT_AND_RESULT_DOMAIN_COMPLETED`.
+
+Targets added: `iaisf_application_artifacts` (portable filesystem resolver)
+and `iaisf_application_results` (bounded JSON projection). Both depend on
+`iaisf::application_core`; neither depends on HTTP, TCP, Task, Plugin, Service
+or Worker code. The Python importer uses only the standard library.
+
+`ApplicationJobSnapshot::completed()` and repository `complete()` enforce
+result/state/application consistency atomically. Inspection output always
+reports `quality_assessment=not_implemented`; guidance output always reports
+`robot_execution_allowed=false` and contains no joint values or controller
+fields. No automatic PTV2/WeldAgent chaining is present.

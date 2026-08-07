@@ -75,6 +75,25 @@ ApplicationJobSnapshot snapshot() {
     return std::move(result).value();
 }
 
+ApplicationExecutionResult inspection_result() {
+    WeldInspectionResult result;
+    result.output_artifacts.push_back(ArtifactRef{
+        "output-001",
+        "0000000000000000000000000000000000000000000000000000000000000000",
+        1440U,
+        "point_cloud",
+        "application/vnd.iaisf.pointcloud.xyz-f32le",
+        std::string{"camera"},
+        std::string{"mm"},
+        120U});
+    result.weld_point_count = 120U;
+    result.weld_ratio = 0.5;
+    result.length_mm = 1.0;
+    result.inference_time_ms = 1.0;
+    result.total_time_ms = 2.0;
+    return result;
+}
+
 ApplicationJobSnapshot guidance_snapshot() {
     auto id = ApplicationJobId::parse("wg_example");
     EXPECT_TRUE(id);
@@ -127,8 +146,15 @@ TEST(ApplicationStatusJsonTest, ProjectsLaterStateWithoutChangingSchema) {
              ApplicationJobState::Dispatching,
              ApplicationJobState::Running,
              ApplicationJobState::Succeeded}) {
-        const auto transitioned = current.transitioned(
-            target, current.updated_at() + std::chrono::milliseconds{1});
+        const auto transitioned = target == ApplicationJobState::Succeeded
+                                      ? current.completed(
+                                            inspection_result(),
+                                            current.updated_at() +
+                                                std::chrono::milliseconds{1})
+                                      : current.transitioned(
+                                            target,
+                                            current.updated_at() +
+                                                std::chrono::milliseconds{1});
         ASSERT_TRUE(transitioned);
         const auto result = application_job_status_json(transitioned.value());
         ASSERT_TRUE(result);
@@ -140,8 +166,27 @@ TEST(ApplicationStatusJsonTest, ProjectsLaterStateWithoutChangingSchema) {
 
     const auto project_state = [](const ApplicationJobSnapshot& source,
                                   const ApplicationJobState target) {
-        const auto transitioned = source.transitioned(
-            target, source.updated_at() + std::chrono::milliseconds{1});
+        Result<ApplicationJobSnapshot> transitioned =
+            source.transitioned(
+                target, source.updated_at() + std::chrono::milliseconds{1});
+        if (target == ApplicationJobState::WaitingHuman) {
+            WeldingGuidanceResult waiting;
+            waiting.output_artifacts.push_back(ArtifactRef{
+                "output-review",
+                std::string(kSha256HexBytes, '0'),
+                1440U,
+                "point_cloud",
+                "application/vnd.iaisf.pointcloud.xyz-f32le",
+                std::string{"camera"},
+                std::string{"mm"},
+                120U});
+            waiting.coordinate_frame = "camera";
+            waiting.disposition = GuidanceResultDisposition::WaitingHuman;
+            waiting.waiting_reason = "human review required";
+            transitioned = source.completed(
+                ApplicationExecutionResult{waiting},
+                source.updated_at() + std::chrono::milliseconds{1});
+        }
         EXPECT_TRUE(transitioned);
         if (!transitioned) {
             return;

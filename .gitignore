@@ -33,6 +33,7 @@ compile_commands.json
 *.gcno
 *.profraw
 *.profdata
+__pycache__/
 /core
 /core.*
 

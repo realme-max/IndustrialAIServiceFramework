@@ -621,3 +621,9 @@ api-primitives target ran 18/18 on Windows and 19/19 on Linux, including one
 Linux-only getrandom seam test; version/config smoke exited 0; compiler
 warning count was zero. WSL is local evidence only. The
 current worktree remains uncommitted and Phase 9B-3A-3B has not started.
+## Fast Track MVP-1
+
+Completed locally: bounded local point-cloud import, artifact resolver,
+application execution-result values, snapshot result invariants, atomic
+repository completion and result JSON projection. The next phase, if approved,
+must define a Worker Protocol separately; it is not part of this checkpoint.
