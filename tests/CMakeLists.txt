@@ -57,6 +57,51 @@ set_tests_properties(
 )
 
 add_executable(
+  iaisf_api_common_tests
+  api/test_strict_json.cpp
+)
+target_compile_features(iaisf_api_common_tests PRIVATE cxx_std_17)
+target_link_libraries(
+  iaisf_api_common_tests
+  PRIVATE
+    iaisf::api_common
+    GTest::gtest
+    GTest::gtest_main
+)
+iaisf_enable_project_warnings(iaisf_api_common_tests)
+gtest_add_tests(
+  TARGET iaisf_api_common_tests
+  TEST_LIST IAISF_API_COMMON_TESTS
+)
+set_tests_properties(
+  ${IAISF_API_COMMON_TESTS}
+  PROPERTIES LABELS "unit;api_common" TIMEOUT 20
+)
+
+add_executable(
+  iaisf_application_contract_tests
+  application/test_application_contract.cpp
+  application/test_application_status_json.cpp
+)
+target_compile_features(iaisf_application_contract_tests PRIVATE cxx_std_17)
+target_link_libraries(
+  iaisf_application_contract_tests
+  PRIVATE
+    iaisf::application_contract
+    GTest::gtest
+    GTest::gtest_main
+)
+iaisf_enable_project_warnings(iaisf_application_contract_tests)
+gtest_add_tests(
+  TARGET iaisf_application_contract_tests
+  TEST_LIST IAISF_APPLICATION_CONTRACT_TESTS
+)
+set_tests_properties(
+  ${IAISF_APPLICATION_CONTRACT_TESTS}
+  PROPERTIES LABELS "unit;application;contract" TIMEOUT 20
+)
+
+add_executable(
   iaisf_application_repository_tests
   application/test_application_job_id.cpp
   application/test_application_job.cpp

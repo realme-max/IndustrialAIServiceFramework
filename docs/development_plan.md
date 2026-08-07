@@ -2,7 +2,7 @@
 
 ## 1. 执行原则
 
-当前实施点为 **Phase 9B-2（completed locally, uncommitted）**。Phase 9A 只读设计审计
+当前实施点为 **Phase 9B-3A-2（hardened locally, uncommitted）**。Phase 9A 只读设计审计
 和 Phase 9B-1 portable Application Domain Foundation 已完成；Phase 9B-2 新增强类型 Job ID、
 不可变 snapshot、Repository contract 与有界内存实现，未开始 HTTP Application API、持久化、
 Artifact I/O 或 Worker Protocol。Phase 9B-3 建议只实现 versioned HTTP/JSON Application API。
@@ -567,10 +567,30 @@ warning 修复提交 `a44b1272bf603a17724fa17c66d60ee0e18bb918` 仅修改测试�
 - [x] Domain/Application/Repository 测试及 CTest 注册
 
 本阶段不包含 JSON、HTTP、Job ID generator、clock、幂等、dispatcher、worker、Artifact
-Store 或 Service 组合。下一阶段 9B-3A-2 只应处理 Domain contract 的进一步测试/边界审计，
+Store 或 Service 组合。Phase 9B-3A-2 now provides the strict contract primitives and
+bounded projection described below; no route integration is included.
 不得提前注册 Application HTTP route。
 
 本地封板验证：Windows VS2022 Debug/Release 各 `607 registered / 602 passed / 5 explicitly
 skipped / 0 failed`；WSL Ubuntu 24.04 GCC Debug/Release 各 `835 / 834 / 1 / 0`。
 Application label 四套均 `74/74`，项目源码和测试 warning 均为 0；WSL 结果不是 GitHub
 Actions 证据。本阶段未 commit/push，未开始 9B-3A-2。
+
+## Phase 9B-3A-2 Strict JSON Contract (implemented locally)
+
+- Add `iaisf_api_common` strict JSON preflight and
+  `iaisf_application_contract` submit/status primitives.
+- Keep HTTP, Task API, Service, Repository, Worker Protocol and Artifact I/O
+  out of scope.
+- Next phase must audit the contract boundaries before any route integration.
+
+Local Phase 9B-3A-2 verification: Windows VS2022 Debug/Release each had
+`624 registered / 619 passed / 5 explicitly skipped / 0 failed`; WSL Ubuntu
+24.04 GCC Debug/Release each had `852 registered / 851 passed / 1 explicitly
+skipped / 0 failed`. The application label was 85/85, with 6 api_common and
+11 contract tests. WSL is local validation, not GitHub Actions evidence.
+The hardening pass keeps the public status `Result<std::string>` exception
+boundary around URL/JSON construction and serialization, uses a fixed 12-byte
+`xyz-f32le` point relation rather than host `sizeof(float)`, and adds exact
+limit, malformed-input, dangerous-field and status-state coverage. Phase
+9B-3A-3 remains not started.

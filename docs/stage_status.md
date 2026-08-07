@@ -3,18 +3,23 @@
 ## 当前结论
 
 ```text
-PHASE_9B_3A_1_APPLICATION_SUBMISSION_DOMAIN_FOUNDATION_COMPLETED
+PHASE_9B_3A_2_STRICT_APPLICATION_JSON_CONTRACT_HARDENED
 ```
 
-- 当前阶段：Phase 9B-3A-1 Application Submission Domain Foundation（本地未提交）
-- 基线：`6271ba1909ae27994b427233f365b567222104dd`（Phase 9B-2 已验收）
-- 实现状态：新增不可变 submission specification，并在 Job request、Snapshot 和 Repository 中完整保存；不改变既有 Job 状态矩阵、ArtifactRef 1–16 上限或 application 隔离
-- Windows 验证：Visual Studio 2022 x64 Debug/Release 各注册 607 项，602 passed、5 explicitly skipped、0 failed；Application 74/74
-- WSL 验证：Ubuntu 24.04 / GCC 13.3.0 Debug/Release 各注册 835 项，834 passed、1 explicitly skipped、0 failed；Application 74/74
+The current implementation checkpoint is
+`PHASE_9B_3A_2_STRICT_APPLICATION_JSON_CONTRACT_HARDENED` (local, uncommitted).
+
+- 当前阶段：Phase 9B-3A-2 Strict Application JSON Contract（本地未提交）
+- 当前实施点：Phase 9B-3A-2 Strict Application JSON Contract（本地未提交）
+- 本阶段仅新增 strict JSON、submit contract 和 status projection；没有 HTTP route、Task API、Service、Repository 或 Artifact I/O 改动。
+- 基线：`3f446effbfea92b3904c02c7bb01586557e7b110`（Phase 9B-3A-1 remote CI checkpoint）
+- 实现状态：新增不可变 submission specification，并在 Job request、Snapshot 和 Repository 中完整保存；本阶段另加入严格 JSON preflight、inspection/guidance submit contract 与有界 status projection；不改变既有 Job 状态矩阵、ArtifactRef 1–16 上限或 application 隔离
+- Windows 验证：Visual Studio 2022 x64 Debug/Release 各注册 624 项，619 passed、5 explicitly skipped、0 failed；Application 85/85，iaisf_api_common 6/6，contract 11/11
+- WSL 验证：Ubuntu 24.04 / GCC 13.3.0 Debug/Release 各注册 852 项，851 passed、1 explicitly skipped、0 failed；Application 85/85，iaisf_api_common 6/6，contract 11/11
 - warning：项目源码与测试为 0；WSL 本地结果不冒充 GitHub Actions
 - 日期：2026-08-06（Asia/Shanghai）
 - 未实现：versioned HTTP Application API、持久化 Repository、Artifact I/O/Store、Worker Protocol、PTV2/WeldAgent adapter
-- 下一步：Phase 9B-3A-2 Domain contract 进一步审计（尚未开始）；versioned HTTP/JSON API 仍属后续范围
+- 下一步：Phase 9B-3A-3 仅在本阶段审计完成后规划；versioned HTTP/JSON API 仍属后续范围
 
 Phase 8A/8B/8C-1 已提供 timerfd、TCP/HTTP timeout 和 signalfd；Phase 8C-2 在不改变
 这些生命周期语义的前提下增加一次性本地 JSON 配置和应用组合。Linux
@@ -974,3 +979,32 @@ Actions 证据。
 未实现：JSON、HTTP、Task API/route、ID generator、clock、幂等、dispatcher、worker、Artifact
 I/O/Store、AppConfig、RuntimeOptions、Service 组合，以及 PTV2/WeldAgent adapter。后续 HTTP
 v1 才暂时限制为恰好一个点云 Artifact。
+
+## Phase 9B-3A-2 Strict Application JSON Contract
+
+Status: hardened locally, uncommitted. `iaisf_api_common` performs bounded
+SAX preflight and rejects duplicate keys, malformed UTF-8, comments, non-finite
+numbers, trailing garbage, depth/node/text limits and payloads over 4 KiB.
+`iaisf_application_contract` provides fixed version `1.0` inspection and
+guidance submit parsers plus a bounded status projection. No HTTP route,
+Task API, Service, Repository, Worker Protocol or Artifact I/O was changed.
+
+### Phase 9B-3A-2 local verification
+
+| Configuration | registered | passed | explicitly skipped | failed |
+|---|---:|---:|---:|---:|
+| Windows VS2022 Debug | 624 | 619 | 5 | 0 |
+| Windows VS2022 Release | 624 | 619 | 5 | 0 |
+| WSL Ubuntu 24.04 GCC Debug | 852 | 851 | 1 | 0 |
+| WSL Ubuntu 24.04 GCC Release | 852 | 851 | 1 | 0 |
+
+The new contract target executed 11 tests, `iaisf_api_common` executed 6 tests,
+and status projection remained 3 tests; the focused strict/contract/status set
+was 17/17 in every configuration. The hardening matrix covers exact allowed
+and over-limit boundaries, nested duplicates, invalid UTF-8/non-finite JSON,
+dangerous guidance fields, all public status states, negative timestamps and
+the 16 KiB response ceiling. `xyz-f32le` uses a fixed 12 bytes per point, not
+host `sizeof(float)`. Status JSON allocation and serialization failures are
+contained by `Result<std::string>`. WSL results are local validation, not
+GitHub Actions evidence. The WSL Debug build also emitted environment-only GNU
+make clock-skew diagnostics; project compiler warnings remained zero.

@@ -591,3 +591,24 @@ Active HTTP 请求触发 stop 时，当前连接可能在响应生成前由 TcpS
 最终 push [Linux CI run 30781932731](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/30781932731) 对提交 `a44b1272bf603a17724fa17c66d60ee0e18bb918` 完成 Debug/Release `497/497`，version/config smoke 成功，项目源码与测试 warning 均为 0。Task HTTP API 和 Service 生命周期测试已实际执行。
 
 Active HTTP stop 语义保持：触发 stop 的请求不保证返回 503，连接可能在响应生成前关闭，已开始发送的 response 不得截断；普通 Stopping 阶段 POST 仍为 503。生命周期为 `TcpServer cleanup → HttpServer stopped → DeferredCleanup → TaskManager shutdown/join → Service Stopped`。Phase 7 状态为 `PHASE_7_SERVICE_INTEGRATION_COMPLETED`；尚未执行 `ctest --repeat until-fail:50`。
+
+## Phase 9B-3A-2 Strict Application JSON Contract
+
+This is a contract-only layer, not an HTTP protocol or route. Strict JSON is
+preflighted with bounded SAX state before DOM construction. Duplicate object
+keys, malformed UTF-8, comments, non-finite numbers, trailing bytes and
+configured depth/node/text/payload limits fail closed.
+
+The two version `1.0` roots are intentionally fixed: inspection has exactly
+one point-cloud artifact and one or both requested outputs; guidance has one
+artifact, `auto` or requested weld type and `human_checkpoint=required`.
+Unknown fields, duplicate fields, paths, URLs, controller commands, joint
+values and automatic execution fields are rejected. The parsed result contains
+validated Domain values rather than source JSON. Status projection is bounded,
+uses epoch milliseconds and emits only public identity/state/version/time and
+the canonical application status URL. Existing Task API parsing is unchanged.
+The fixed `xyz-f32le` artifact contract uses exactly 12 wire bytes per point
+(three binary32 coordinates), with overflow-safe multiplication and the
+existing 1 GiB artifact limit. Status projection catches allocation and
+standard serialization failures and returns a bounded structured `Result`
+error; it does not emit HTTP headers.

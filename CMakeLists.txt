@@ -88,6 +88,44 @@ target_link_libraries(iaisf_application_core PUBLIC iaisf::core)
 iaisf_enable_project_warnings(iaisf_application_core)
 
 add_library(
+  iaisf_api_common
+  STATIC
+  src/api/strict_json.cpp
+)
+add_library(iaisf::api_common ALIAS iaisf_api_common)
+target_compile_features(iaisf_api_common PUBLIC cxx_std_17)
+target_include_directories(
+  iaisf_api_common
+  PUBLIC
+    "$<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>"
+    "$<BUILD_INTERFACE:${IAISF_GENERATED_INCLUDE_DIR}>"
+)
+target_link_libraries(iaisf_api_common PUBLIC iaisf::core nlohmann_json::nlohmann_json)
+iaisf_enable_project_warnings(iaisf_api_common)
+
+add_library(
+  iaisf_application_contract
+  STATIC
+  src/application/application_contract.cpp
+  src/application/application_status_json.cpp
+)
+add_library(iaisf::application_contract ALIAS iaisf_application_contract)
+target_compile_features(iaisf_application_contract PUBLIC cxx_std_17)
+target_include_directories(
+  iaisf_application_contract
+  PUBLIC
+    "$<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>"
+    "$<BUILD_INTERFACE:${IAISF_GENERATED_INCLUDE_DIR}>"
+)
+target_link_libraries(
+  iaisf_application_contract
+  PUBLIC
+    iaisf::application_core
+    iaisf::api_common
+)
+iaisf_enable_project_warnings(iaisf_application_contract)
+
+add_library(
   iaisf_application_repository
   STATIC
   src/application/application_job_repository.cpp
