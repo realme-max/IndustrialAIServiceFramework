@@ -200,6 +200,8 @@ add_executable(
   iaisf_application_runtime_tests
   application/test_application_process.cpp
   application/test_application_adapters.cpp
+  application/test_application_executor.cpp
+  application/test_application_http_api.cpp
 )
 target_compile_features(iaisf_application_runtime_tests PRIVATE cxx_std_17)
 target_link_libraries(

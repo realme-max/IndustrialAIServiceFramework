@@ -122,6 +122,11 @@ Result<void> validate_execution_result(
          *guidance->confidence > 1.0)) {
         return invalid("guidance confidence is invalid");
     }
+    if ((guidance->start.has_value() && !finite_point(*guidance->start)) ||
+        (guidance->end.has_value() && !finite_point(*guidance->end)) ||
+        (guidance->corner.has_value() && !finite_point(*guidance->corner))) {
+        return invalid("guidance geometry is invalid");
+    }
     if ((guidance->x_axis.has_value() && !finite_point(*guidance->x_axis)) ||
         (guidance->y_axis.has_value() && !finite_point(*guidance->y_axis)) ||
         (guidance->z_axis.has_value() && !finite_point(*guidance->z_axis))) {
@@ -130,7 +135,7 @@ Result<void> validate_execution_result(
     if (guidance->disposition == GuidanceResultDisposition::WaitingHuman) {
         if (!guidance->waiting_reason.has_value() ||
             !bounded_text(*guidance->waiting_reason, kMaxReasonBytes) ||
-            guidance->robot_execution_allowed || guidance->corner.has_value()) {
+            guidance->robot_execution_allowed) {
             return invalid("waiting-human guidance result is invalid");
         }
         return Result<void>::success();

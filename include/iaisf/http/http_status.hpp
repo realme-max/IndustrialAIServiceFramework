@@ -8,6 +8,7 @@ enum class HttpStatus : int {
     Ok = 200,
     Accepted = 202,
     BadRequest = 400,
+    Conflict = 409,
     NotFound = 404,
     MethodNotAllowed = 405,
     RequestTimeout = 408,

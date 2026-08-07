@@ -239,6 +239,8 @@ add_library(
   src/application/application_pointcloud.cpp
   src/application/application_output_artifacts.cpp
   src/application/application_adapters.cpp
+  src/application/application_executor.cpp
+  src/application/application_http_api.cpp
 )
 add_library(iaisf::application_runtime ALIAS iaisf_application_runtime)
 target_compile_features(iaisf_application_runtime PUBLIC cxx_std_17)
@@ -253,6 +255,11 @@ target_link_libraries(
   PUBLIC
     iaisf::application_core
     iaisf::application_artifacts
+    iaisf::application_repository
+    iaisf::application_contract
+    iaisf::application_results
+    iaisf::application_api_primitives
+    iaisf::http_core
     nlohmann_json::nlohmann_json
 )
   iaisf_enable_project_warnings(iaisf_application_runtime)
@@ -550,6 +557,9 @@ if(IAISF_BUILD_LINUX_NETWORK)
       iaisf::health
       iaisf::diagnostics_http
       iaisf::diagnostics
+      iaisf::application_runtime
+      iaisf::application_repository
+      iaisf::application_api_primitives
   )
   iaisf_enable_project_warnings(iaisf_service)
 endif()

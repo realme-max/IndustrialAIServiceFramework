@@ -10,6 +10,8 @@ std::string_view reason_phrase(HttpStatus status) noexcept {
             return "Accepted";
         case HttpStatus::BadRequest:
             return "Bad Request";
+        case HttpStatus::Conflict:
+            return "Conflict";
         case HttpStatus::NotFound:
             return "Not Found";
         case HttpStatus::MethodNotAllowed:

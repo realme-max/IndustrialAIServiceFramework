@@ -211,6 +211,28 @@ Result<RuntimeOptions> make_runtime_options(const AppConfig &config) {
         }
     }
 
+    ApplicationRuntimeOptions applications;
+    applications.enabled = config.applications.enabled;
+    applications.artifact_root = std::filesystem::path{config.applications.artifact_root};
+    applications.scratch_root = std::filesystem::path{config.applications.scratch_root};
+    applications.output_root = std::filesystem::path{config.applications.output_root};
+    applications.repository_capacity = config.applications.repository_capacity;
+    applications.queue_capacity = config.applications.queue_capacity;
+    applications.ptv2.executable = std::filesystem::path{config.applications.ptv2.executable};
+    applications.ptv2.working_directory = std::filesystem::path{config.applications.ptv2.working_directory};
+    applications.ptv2.engine = std::filesystem::path{config.applications.ptv2.engine};
+    applications.ptv2.plugin = std::filesystem::path{config.applications.ptv2.plugin};
+    applications.ptv2.scratch_root = applications.scratch_root;
+    applications.ptv2.output_root = applications.output_root;
+    applications.ptv2.timeout = std::chrono::milliseconds{config.applications.ptv2.timeout_ms};
+    applications.weld_agent.python_executable = std::filesystem::path{config.applications.weld_agent.python_executable};
+    applications.weld_agent.project_root = std::filesystem::path{config.applications.weld_agent.project_root};
+    applications.weld_agent.orchestrator = std::filesystem::path{config.applications.weld_agent.orchestrator};
+    applications.weld_agent.tool_config = std::filesystem::path{config.applications.weld_agent.tool_config};
+    applications.weld_agent.scratch_root = applications.scratch_root;
+    applications.weld_agent.output_root = applications.output_root;
+    applications.weld_agent.timeout = std::chrono::milliseconds{config.applications.weld_agent.timeout_ms};
+
     auto service = ServiceOptions::create(
         std::move(tcp).value(), std::move(http).value(), pool,
         std::move(tasks).value(), std::move(plugins).value(),
@@ -219,7 +241,8 @@ Result<RuntimeOptions> make_runtime_options(const AppConfig &config) {
         as_timeout(config.http.header_timeout_ms),
         as_timeout(config.http.body_timeout_ms), config.metrics.enabled,
         config.metrics.endpoint, config.diagnostics.enabled,
-        config.diagnostics.endpoint, std::move(dynamic_plugins));
+        config.diagnostics.endpoint, std::move(dynamic_plugins),
+        std::move(applications));
     if (!service) {
         return config_failure<RuntimeOptions>(service.error());
     }

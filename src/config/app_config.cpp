@@ -1147,6 +1147,118 @@ Result<void> apply_diagnostics_config(const Json &root, AppConfig &config) {
     return Result<void>::success();
 }
 
+Result<void> apply_applications_config(const Json& root, AppConfig& config) {
+    if (!root.contains("applications")) {
+        return Result<void>::success();
+    }
+    const auto& value = root.at("applications");
+    auto object = require_object(value, "applications");
+    if (!object) return object;
+    auto fields = reject_unknown_fields(
+        value, {"enabled", "artifact_root", "scratch_root", "output_root",
+                "repository_capacity", "queue_capacity", "ptv2",
+                "weld_agent"}, "applications");
+    if (!fields) return fields;
+    if (value.contains("enabled")) {
+        if (!value.at("enabled").is_boolean())
+            return config_failure("applications.enabled must be a boolean");
+        config.applications.enabled = value.at("enabled").get<bool>();
+    }
+    auto read_path = [&](const char* name, std::string& target) -> Result<void> {
+        if (!value.contains(name)) return Result<void>::success();
+        if (!value.at(name).is_string())
+            return config_failure(std::string{"applications."} + name +
+                                  " must be a string");
+        target = value.at(name).get<std::string>();
+        return Result<void>::success();
+    };
+    for (const char* name : {"artifact_root", "scratch_root", "output_root"}) {
+        std::string* target = name == std::string{"artifact_root"}
+                                  ? &config.applications.artifact_root
+                                  : name == std::string{"scratch_root"}
+                                        ? &config.applications.scratch_root
+                                        : &config.applications.output_root;
+        auto result = read_path(name, *target);
+        if (!result) return result;
+    }
+    if (value.contains("repository_capacity")) {
+        auto parsed = read_size(value.at("repository_capacity"),
+                                "applications.repository_capacity",
+                                kMaxApplicationRepositoryCapacity);
+        if (!parsed) return Result<void>::failure(std::move(parsed).error());
+        config.applications.repository_capacity = parsed.value();
+    }
+    if (value.contains("queue_capacity")) {
+        auto parsed = read_size(value.at("queue_capacity"),
+                                "applications.queue_capacity",
+                                kMaxApplicationQueueCapacity);
+        if (!parsed) return Result<void>::failure(std::move(parsed).error());
+        config.applications.queue_capacity = parsed.value();
+    }
+    auto parse_ptv2 = [&]() -> Result<void> {
+        if (!value.contains("ptv2")) return Result<void>::success();
+        const auto& ptv2 = value.at("ptv2");
+        auto valid = require_object(ptv2, "applications.ptv2");
+        if (!valid) return valid;
+        valid = reject_unknown_fields(
+            ptv2, {"executable", "working_directory", "engine", "plugin",
+                   "timeout_ms"}, "applications.ptv2");
+        if (!valid) return valid;
+        auto read_ptv2_path = [&](const char* name, std::string& target) -> Result<void> {
+            if (!ptv2.contains(name)) return Result<void>::success();
+            if (!ptv2.at(name).is_string())
+                return config_failure(std::string{"applications.ptv2."} + name +
+                                      " must be a string");
+            target = ptv2.at(name).get<std::string>();
+            return Result<void>::success();
+        };
+        for (const auto& item : std::array<std::pair<const char*, std::string*>, 4>{
+                 {{"executable", &config.applications.ptv2.executable},
+                  {"working_directory", &config.applications.ptv2.working_directory},
+                  {"engine", &config.applications.ptv2.engine},
+                  {"plugin", &config.applications.ptv2.plugin}}}) {
+            auto result = read_ptv2_path(item.first, *item.second);
+            if (!result) return result;
+        }
+        if (ptv2.contains("timeout_ms")) {
+            auto parsed = read_integer(ptv2.at("timeout_ms"),
+                                       "applications.ptv2.timeout_ms");
+            if (!parsed) return Result<void>::failure(std::move(parsed).error());
+            config.applications.ptv2.timeout_ms = parsed.value();
+        }
+        return Result<void>::success();
+    };
+    auto ptv2_result = parse_ptv2();
+    if (!ptv2_result) return ptv2_result;
+    if (value.contains("weld_agent")) {
+        const auto& agent = value.at("weld_agent");
+        auto valid = require_object(agent, "applications.weld_agent");
+        if (!valid) return valid;
+        valid = reject_unknown_fields(
+            agent, {"python_executable", "project_root", "orchestrator",
+                    "tool_config", "timeout_ms"}, "applications.weld_agent");
+        if (!valid) return valid;
+        for (const auto& item : std::array<std::pair<const char*, std::string*>, 4>{
+                 {{"python_executable", &config.applications.weld_agent.python_executable},
+                  {"project_root", &config.applications.weld_agent.project_root},
+                  {"orchestrator", &config.applications.weld_agent.orchestrator},
+                  {"tool_config", &config.applications.weld_agent.tool_config}}}) {
+            if (!agent.contains(item.first)) continue;
+            if (!agent.at(item.first).is_string())
+                return config_failure(std::string{"applications.weld_agent."} +
+                                      item.first + " must be a string");
+            *item.second = agent.at(item.first).get<std::string>();
+        }
+        if (agent.contains("timeout_ms")) {
+            auto parsed = read_integer(agent.at("timeout_ms"),
+                                       "applications.weld_agent.timeout_ms");
+            if (!parsed) return Result<void>::failure(std::move(parsed).error());
+            config.applications.weld_agent.timeout_ms = parsed.value();
+        }
+    }
+    return Result<void>::success();
+}
+
 Result<void> apply_legacy_flat_config(const Json &root, AppConfig &config) {
     if (root.contains("service_name")) {
         if (root.contains("service")) {
@@ -1225,7 +1337,7 @@ Result<AppConfig> parse_app_config(const std::string &contents) {
                                       "http", "runtime", "tasks", "plugins",
                                       "task_api", "logging", "metrics", "diagnostics", "service_name",
                                       "worker_threads", "task_queue_capacity",
-                                      "log_level"},
+                                     "log_level", "applications"},
                                      "root");
     if (!top) {
         return Result<AppConfig>::failure(std::move(top).error());
@@ -1242,7 +1354,7 @@ Result<AppConfig> parse_app_config(const std::string &contents) {
         config.schema_version = static_cast<std::uint32_t>(version.value());
     }
 
-    const std::array<Result<void> (*)(const Json &, AppConfig &), 10U> appliers{{
+    const std::array<Result<void> (*)(const Json &, AppConfig &), 11U> appliers{{
         &apply_service_config,
         &apply_server_config,
         &apply_http_config,
@@ -1253,6 +1365,7 @@ Result<AppConfig> parse_app_config(const std::string &contents) {
         &apply_logging_config,
         &apply_metrics_config,
         &apply_diagnostics_config,
+        &apply_applications_config,
     }};
     for (const auto apply : appliers) {
         auto result = apply(root, config);
@@ -1303,6 +1416,7 @@ AppConfig default_app_config() {
                       LoggingFileConfig{false, {}, 10U * 1024U * 1024U, 3U}},
         MetricsConfig{true, "/metrics"},
         DiagnosticsConfig{false, "/debug/status"},
+        ApplicationsConfig{},
     };
 }
 
@@ -1447,6 +1561,35 @@ Result<void> validate_app_config(const AppConfig &config) {
         (config.metrics.enabled &&
          config.diagnostics.endpoint == config.metrics.endpoint)) {
         return config_failure("diagnostics endpoint conflicts with a service route");
+    }
+    if (config.applications.enabled) {
+        const auto valid_path = [](const std::string& value) {
+            return !value.empty() && value.size() <= kMaxApplicationPathBytes &&
+                   !contains_only_whitespace(value) &&
+                   !contains_control_character(value);
+        };
+        if (!valid_path(config.applications.artifact_root) ||
+            !valid_path(config.applications.scratch_root) ||
+            !valid_path(config.applications.output_root) ||
+            config.applications.repository_capacity == 0U ||
+            config.applications.repository_capacity > kMaxApplicationRepositoryCapacity ||
+            config.applications.queue_capacity == 0U ||
+            config.applications.queue_capacity > kMaxApplicationQueueCapacity ||
+            !valid_path(config.applications.ptv2.executable) ||
+            !valid_path(config.applications.ptv2.working_directory) ||
+            !valid_path(config.applications.ptv2.engine) ||
+            !valid_path(config.applications.ptv2.plugin) ||
+            !valid_path(config.applications.weld_agent.python_executable) ||
+            !valid_path(config.applications.weld_agent.project_root) ||
+            !valid_path(config.applications.weld_agent.orchestrator) ||
+            !valid_path(config.applications.weld_agent.tool_config) ||
+            config.applications.ptv2.timeout_ms <= 0 ||
+            config.applications.ptv2.timeout_ms > kMaximumTimeoutMilliseconds ||
+            config.applications.weld_agent.timeout_ms <= 0 ||
+            config.applications.weld_agent.timeout_ms > kMaximumTimeoutMilliseconds) {
+            return config_failure(
+                "applications values are outside supported ranges");
+        }
     }
     return Result<void>::success();
 }

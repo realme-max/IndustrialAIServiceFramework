@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <limits>
 #include <string>
 
 #include "iaisf/application/application_execution_result.hpp"
@@ -50,8 +51,16 @@ TEST(ApplicationExecutionResultTest, GuidanceGeometryAndWaitingHumanAreFailClose
     waiting.coordinate_frame = "workpiece";
     waiting.disposition = GuidanceResultDisposition::WaitingHuman;
     waiting.waiting_reason = "review required";
+    waiting.start = ApplicationPoint3{0.0, 0.0, 0.0};
+    waiting.corner = ApplicationPoint3{1.0, 1.0, 0.0};
+    waiting.end = ApplicationPoint3{2.0, 0.0, 0.0};
     EXPECT_TRUE(validate_execution_result(
         ApplicationExecutionResult{waiting}, IndustrialApplication::WeldingGuidance));
+    waiting.corner = ApplicationPoint3{std::numeric_limits<double>::quiet_NaN(),
+                                       1.0, 0.0};
+    EXPECT_FALSE(validate_execution_result(
+        ApplicationExecutionResult{waiting}, IndustrialApplication::WeldingGuidance));
+    waiting.corner = ApplicationPoint3{1.0, 1.0, 0.0};
     waiting.robot_execution_allowed = true;
     EXPECT_FALSE(validate_execution_result(
         ApplicationExecutionResult{waiting}, IndustrialApplication::WeldingGuidance));

@@ -23,14 +23,17 @@ Result<void> validate_cross_limits(
     const plugin::PluginLimits& plugin,
     const api::TaskApiLimits& api_options,
     const bool metrics_enabled,
-    const bool diagnostics_enabled) {
+    const bool diagnostics_enabled,
+    const bool applications_enabled) {
     auto pool_valid = task::BoundedThreadPool::validate_options(pool);
     if (!pool_valid) {
         return pool_valid;
     }
     const std::size_t required_routes = 5U +
         (metrics_enabled ? 1U : 0U) + (diagnostics_enabled ? 1U : 0U);
-    if (http.max_routes() < required_routes) {
+    const std::size_t application_routes = applications_enabled ? 6U : 0U;
+    if (http.max_routes() < required_routes ||
+        application_routes > http.max_routes() - required_routes) {
         return Result<void>::failure(make_error(
             ErrorCode::InvalidArgument,
             "HTTP route capacity cannot represent the required service routes"));
@@ -80,7 +83,8 @@ Result<ServiceOptions> ServiceOptions::create(
     std::string metrics_endpoint,
     const bool diagnostics_enabled,
     std::string diagnostics_endpoint,
-    DynamicPluginOptions dynamic_plugins) {
+    DynamicPluginOptions dynamic_plugins,
+    ApplicationRuntimeOptions applications) {
     auto valid = validate_cross_limits(
         tcp_options,
         http_limits,
@@ -88,7 +92,7 @@ Result<ServiceOptions> ServiceOptions::create(
         task_limits,
         plugin_limits,
         api_limits,
-        metrics_enabled, diagnostics_enabled);
+        metrics_enabled, diagnostics_enabled, applications.enabled);
     if (!valid) {
         return Result<ServiceOptions>::failure(std::move(valid).error());
     }
@@ -133,6 +137,25 @@ Result<ServiceOptions> ServiceOptions::create(
             ErrorCode::InvalidArgument,
             "dynamic plugin options are outside supported ranges"));
     }
+    if (applications.enabled) {
+        if (applications.repository_capacity == 0U ||
+            applications.repository_capacity > kMaxApplicationRepositoryCapacity ||
+            applications.queue_capacity == 0U ||
+            applications.queue_capacity > kMaxApplicationQueueCapacity ||
+            applications.artifact_root.empty() || applications.scratch_root.empty() ||
+            applications.output_root.empty() || applications.ptv2.executable.empty() ||
+            applications.ptv2.engine.empty() || applications.ptv2.plugin.empty() ||
+            applications.weld_agent.python_executable.empty() ||
+            applications.weld_agent.orchestrator.empty() ||
+            applications.weld_agent.tool_config.empty() ||
+            applications.weld_agent.project_root.empty() ||
+            applications.ptv2.timeout <= std::chrono::milliseconds::zero() ||
+            applications.weld_agent.timeout <= std::chrono::milliseconds::zero()) {
+            return Result<ServiceOptions>::failure(make_error(
+                ErrorCode::InvalidArgument,
+                "application runtime options are outside supported ranges"));
+        }
+    }
     const std::size_t static_plugin_count =
         (enable_echo ? 1U : 0U) + (enable_mock_vision ? 1U : 0U);
     if (static_plugin_count > plugin_limits.max_plugins() ||
@@ -158,7 +181,7 @@ Result<ServiceOptions> ServiceOptions::create(
         std::move(metrics_endpoint),
         diagnostics_enabled,
         std::move(diagnostics_endpoint),
-        std::move(dynamic_plugins)});
+        std::move(dynamic_plugins), std::move(applications)});
 }
 
 Result<ServiceOptions> ServiceOptions::defaults() {
@@ -227,7 +250,8 @@ ServiceOptions::ServiceOptions(
     std::string metrics_endpoint,
     const bool diagnostics_enabled,
     std::string diagnostics_endpoint,
-    DynamicPluginOptions dynamic_plugins) noexcept
+    DynamicPluginOptions dynamic_plugins,
+    ApplicationRuntimeOptions applications) noexcept
     : tcp_options_(std::move(tcp_options)),
       http_limits_(std::move(http_limits)),
       pool_options_(pool_options),
@@ -242,7 +266,8 @@ ServiceOptions::ServiceOptions(
       metrics_endpoint_(std::move(metrics_endpoint)),
       diagnostics_enabled_(diagnostics_enabled),
       diagnostics_endpoint_(std::move(diagnostics_endpoint)),
-      dynamic_plugins_(std::move(dynamic_plugins)) {}
+      dynamic_plugins_(std::move(dynamic_plugins)),
+      applications_(std::move(applications)) {}
 
 const net::tcp::TcpServerOptions& ServiceOptions::tcp_options() const noexcept {
     return tcp_options_;
@@ -297,6 +322,10 @@ const std::string& ServiceOptions::diagnostics_endpoint() const noexcept {
 
 const DynamicPluginOptions& ServiceOptions::dynamic_plugins() const noexcept {
     return dynamic_plugins_;
+}
+
+const ApplicationRuntimeOptions& ServiceOptions::applications() const noexcept {
+    return applications_;
 }
 
 }  // namespace iaisf::service
