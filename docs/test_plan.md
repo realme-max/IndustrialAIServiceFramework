@@ -1004,21 +1004,49 @@ environment-capability skips remain explicit and are not workflow-step skips.
 
 ## Fast Track MVP-3 local evidence
 
-The committed MVP-3 runtime was rebuilt after the ProcessRunner FD-lifecycle
-fix and adapter path-bridge change. Application runtime tests were 14/14 in
-WSL Debug, Windows VS2022 Debug and Windows VS2022 Release. WSL Ubuntu 24.04
-Release full CTest registered 894 tests: 893 passed, 1 explicitly skipped,
-0 failed. The single test-level skip was the existing
-`SafePathResolverTest.PermissionFailureIsExplicitlyHandled` capability check;
-it was not a skipped workflow step. Project source/test compiler warnings were
-0. WSL Debug was intentionally run as the new runtime-targeted set rather than
-as another full matrix in this documentation-only sealing step.
+## Phase 10A Artifact Web API hardening evidence
 
-The local real HTTP E2E evidence is separate from CI: PTV2 completed
-`202 -> Succeeded -> 200` with 2048 input points, 205 weld points, ratio
+The Phase 10A targeted matrix covers three/four-column input, CRLF/TAB and
+whitespace-only rows, malformed/non-finite/float32-overflow coordinates,
+custom request/response limits, deterministic duplicate uploads, exact
+manifest validation and repair, duplicate-key rejection, concurrent identical
+uploads, catalog metadata/path/filename conflicts, root escape, changed-file
+fail-closed downloads, output media-type filenames and result download URLs.
+The full four-configuration counts are recorded in the current handoff and
+stage-status sections; WSL results are local evidence, not GitHub Actions.
+
+The final Phase 10A worktree matrix was rebuilt after the Artifact HTTP test
+change. Windows VS2022 Debug and Release each registered 674 tests: 669
+passed, 5 explicitly skipped and 0 failed. WSL Ubuntu 24.04 GCC Debug and
+Release each registered 903 tests: 902 passed, 1 explicitly skipped and 0
+failed. The WSL skip is the existing
+`SafePathResolverTest.PermissionFailureIsExplicitlyHandled` capability check;
+Windows also has the two RollingFileSink capability skips and two symlink
+capability skips. These are test-level capability skips, not workflow-step
+skips. Project source/test compiler warnings were 0. Artifact HTTP targeted
+tests were 9/9 in all four configurations.
+
+The response-limit case is now exercised by uploading a normal artifact and
+dispatching a second API whose `max_response_body_bytes` is smaller than the
+artifact; it returns a bounded 413 without file bytes. The earlier supplied
+2047-point sample remains a negative diagnostic: PTV2 failed closed with
+`Input point count 2047 is smaller than target 2048`, and the independent
+WeldAgent attempt returned `Not enough candidate line pairs for L weld`.
+
+The final local real HTTP E2E evidence is separate from CI and uses two
+different historical inputs. PTV2 completed `201 -> 202 -> Succeeded -> 200`
+with 2048 input points, 205 weld points, ratio
 `0.10009765625`, length approximately `0.8822024465`, three registered output
 artifacts and `quality_assessment=not_implemented`. WeldAgent completed
-`202 -> WaitingHuman -> 200` with finite start/end/axes, camera/mm metadata,
+`201 -> 202 -> WaitingHuman -> 200` with 823114 input points, finite
+start/end/axes, camera/mm metadata,
 confidence, a bounded waiting reason and `robot_execution_allowed=false`.
+All three PTV2 downloads and the WeldAgent final-result download matched the
+result JSON byte counts and SHA-256 values.
 Neither workflow runner nor CI test claims to execute these external projects
 or real GPU inference.
+
+The final four-configuration matrix is Windows VS2022 Debug/Release at 674
+registered, 669 passed, 5 explicitly skipped and 0 failed each, and WSL Ubuntu
+24.04 GCC Debug/Release at 903 registered, 902 passed, 1 explicitly skipped
+and 0 failed each. Artifact HTTP targeted tests are 9/9 in every configuration.

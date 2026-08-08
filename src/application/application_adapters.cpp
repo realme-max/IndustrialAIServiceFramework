@@ -1,4 +1,5 @@
 #include "iaisf/application/application_adapters.hpp"
+#include "iaisf/application/local_artifact_catalog.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -297,7 +298,8 @@ std::optional<ApplicationPoint3> point_field(const nlohmann::json& object,
 Result<std::unique_ptr<Ptv2WeldInspectionAdapter>>
 Ptv2WeldInspectionAdapter::create(Ptv2AdapterOptions options,
                                    const LocalArtifactResolver& resolver,
-                                   IProcessRunner& runner) {
+                                   IProcessRunner& runner,
+                                   std::shared_ptr<LocalArtifactCatalog> catalog) {
     if (options.executable.empty() || options.engine.empty() || options.plugin.empty() ||
         options.scratch_root.empty() || options.output_root.empty()) {
         return failure<std::unique_ptr<Ptv2WeldInspectionAdapter>>(
@@ -306,7 +308,7 @@ Ptv2WeldInspectionAdapter::create(Ptv2AdapterOptions options,
     auto materializer = PointCloudTxtMaterializer::make(options.scratch_root);
     if (!materializer) return Result<std::unique_ptr<Ptv2WeldInspectionAdapter>>::failure(
         materializer.error());
-    auto registrar = LocalOutputArtifactRegistrar::make(options.output_root);
+    auto registrar = LocalOutputArtifactRegistrar::make(options.output_root, catalog);
     if (!registrar) return Result<std::unique_ptr<Ptv2WeldInspectionAdapter>>::failure(
         registrar.error());
     try {
@@ -427,7 +429,8 @@ Ptv2WeldInspectionAdapter::execute(const ApplicationJobSnapshot& snapshot) {
 Result<std::unique_ptr<WeldAgentWeldingGuidanceAdapter>>
 WeldAgentWeldingGuidanceAdapter::create(WeldAgentAdapterOptions options,
                                         const LocalArtifactResolver& resolver,
-                                        IProcessRunner& runner) {
+                                        IProcessRunner& runner,
+                                        std::shared_ptr<LocalArtifactCatalog> catalog) {
     if (options.python_executable.empty() || options.orchestrator.empty() ||
         options.project_root.empty() || options.tool_config.empty() ||
         options.scratch_root.empty() || options.output_root.empty()) {
@@ -437,7 +440,7 @@ WeldAgentWeldingGuidanceAdapter::create(WeldAgentAdapterOptions options,
     auto materializer = PointCloudTxtMaterializer::make(options.scratch_root);
     if (!materializer) return Result<std::unique_ptr<WeldAgentWeldingGuidanceAdapter>>::failure(
         materializer.error());
-    auto registrar = LocalOutputArtifactRegistrar::make(options.output_root);
+    auto registrar = LocalOutputArtifactRegistrar::make(options.output_root, catalog);
     if (!registrar) return Result<std::unique_ptr<WeldAgentWeldingGuidanceAdapter>>::failure(
         registrar.error());
     try {

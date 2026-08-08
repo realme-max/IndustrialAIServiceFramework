@@ -1,5 +1,33 @@
 # Application Layer
 
+## Phase 10A Artifact Web API hardening
+
+When `applications.enabled=true`, the service owns one bounded,
+thread-safe `LocalArtifactCatalog` shared by upload, output registration and
+download. Upload accepts direct `text/plain` XYZ rows, ignores blank lines and
+columns after XYZ, and commits canonical `xyz-f32le` bytes plus an exact
+eight-field manifest using a deterministic `pc_<sha256>` ID. Existing data and
+manifest content are revalidated before a duplicate can return `200`; a
+missing manifest may be repaired, while malformed or conflicting metadata is a
+storage conflict. Uploads are serialized per API instance so identical
+concurrent content commits once.
+
+Downloads are whole-body, bounded by `HttpLimits::max_response_body_bytes()`.
+The file is read once into the response body, hashed from those exact bytes,
+and checked again for size/path/type before returning. Symlinks, root escapes,
+replacement, truncation, growth and digest mismatch fail closed. No Range,
+streaming, authentication or persistent catalog is provided; the catalog is
+process-local and is empty after restart.
+
+The final local real HTTP E2E uses separate inputs for the two applications.
+PTV2 uploads a 2048-point artifact, reaches `Succeeded`, returns 205 weld
+points and three output artifacts, and each download byte count/SHA matches
+the result projection. WeldAgent uploads an independent 823114-point artifact,
+reaches `WaitingHuman` for requested straight weld with finite start/end/axes
+and confidence, and its `final_result.json` download matches its SHA. The
+applications are not chained; PTV2 quality remains
+`quality_assessment=not_implemented` and robot execution remains disabled.
+
 ## 当前阶段
 
 Phase 9A 已完成只读设计审计。Phase 9B domain/repository、Fast Track MVP-1/2

@@ -13,6 +13,8 @@
 
 namespace iaisf::application {
 
+class LocalArtifactCatalog;
+
 struct Ptv2AdapterOptions final {
     std::filesystem::path executable;
     std::filesystem::path engine;
@@ -31,7 +33,8 @@ public:
     [[nodiscard]] static Result<std::unique_ptr<Ptv2WeldInspectionAdapter>>
     create(Ptv2AdapterOptions options,
            const LocalArtifactResolver& resolver,
-           IProcessRunner& runner);
+           IProcessRunner& runner,
+           std::shared_ptr<LocalArtifactCatalog> catalog = nullptr);
 
     [[nodiscard]] Result<ApplicationExecutionResult> execute(
         const ApplicationJobSnapshot& snapshot);
@@ -69,7 +72,8 @@ public:
     [[nodiscard]] static Result<std::unique_ptr<WeldAgentWeldingGuidanceAdapter>>
     create(WeldAgentAdapterOptions options,
            const LocalArtifactResolver& resolver,
-           IProcessRunner& runner);
+           IProcessRunner& runner,
+           std::shared_ptr<LocalArtifactCatalog> catalog = nullptr);
 
     [[nodiscard]] Result<ApplicationExecutionResult> execute(
         const ApplicationJobSnapshot& snapshot);

@@ -62,6 +62,7 @@ TEST(ApplicationResultJsonTest, EmitsBoundedInspectionProjection) {
     ASSERT_TRUE(json);
     EXPECT_NE(json.value().find("quality_assessment"), std::string::npos);
     EXPECT_NE(json.value().find("not_implemented"), std::string::npos);
+    EXPECT_NE(json.value().find("download_url"), std::string::npos);
     EXPECT_EQ(json.value().find("input-1"), std::string::npos);
 }
 

@@ -1,5 +1,34 @@
 # IndustrialAIServiceFramework
 
+## Phase 10A current status
+
+The current uncommitted Phase 10A hardening adds a bounded Artifact Web API:
+`POST /api/artifacts/v1/pointclouds` accepts direct `text/plain` XYZ input and
+`GET /api/artifacts/v1/files/{artifact_id}` serves only catalog-registered,
+revalidated artifacts. Uploads are canonical little-endian float32 XYZ with a
+12-byte point record, SHA-256 content identity, atomic file/manifest commit,
+and idempotent duplicate handling. HTTP body and response limits remain in
+force (the framework hard ceiling is 64 MiB); downloads are whole-body only,
+with no Range, streaming, authentication, or persistence. The catalog and
+Repository are process-local and are not rebuilt after restart.
+
+Output artifacts registered by PTV2/WeldAgent use the same catalog and receive
+canonical download URLs in result JSON. The two applications remain
+independent. PTV2 reports `quality_assessment=not_implemented`; WeldAgent
+reports `robot_execution_allowed=false`.
+
+The local Windows/WSL HTTP and unit evidence is current for this worktree.
+The final real dual-application HTTP E2E passed with independent historical
+inputs: PTV2 used 2048 points and reached `201 -> 202 -> Succeeded -> 200`;
+WeldAgent used 823114 points and reached `201 -> 202 -> WaitingHuman -> 200`.
+The earlier `weld_65_2047.txt` attempt remains a negative diagnostic: its 2047
+points were correctly rejected by the PTV2 minimum-2048 pipeline requirement.
+
+Final local matrix: Windows VS2022 Debug/Release each registered 674 tests
+(669 passed, 5 explicitly skipped, 0 failed); WSL Ubuntu 24.04 GCC
+Debug/Release each registered 903 tests (902 passed, 1 explicitly skipped,
+0 failed). Artifact HTTP targeted tests were 9/9 in all four configurations.
+
 面向工业 AI 应用的 C++ 高性能任务服务框架。
 
 > 当前结论：Phase 9 Fast Track MVP-3 已在本地完成并提交（`b2f16cb99bc2e4c04cdf777fc6acc56575b35b16`）。本地真实 PTV2/WeldAgent HTTP E2E 已通过；GitHub Actions 仅验证框架构建与测试，不执行真实 GPU/外部项目 E2E。
@@ -32,7 +61,7 @@ Phase 9 Fast Track MVP-3 在上述 domain/repository 基础上完成了本地运
 - 跨 application 查询或更新统一返回 `NotFound`，不泄露另一应用的 Job 是否存在；`weld_inspection/post_weld` 与 `welding_guidance/pre_weld` 继续完全独立。
 - PTV2 当前定位仅为分割与几何输入；独立质量能力尚未实现，必须标记 `quality_assessment=not_implemented`。
 - WeldAgent 当前边界禁止真实 joint values、机器人控制及 controller URL 发送。
-- MVP-3 本地定向验证：Windows VS2022 Debug/Release application runtime 各 14/14，WSL Debug runtime 14/14；WSL Ubuntu 24.04 Release 全量 CTest 为 894 registered、893 passed、1 explicitly skipped、0 failed。项目源码与测试编译 warning 为 0；WSL 是本地证据，不是 GitHub Actions 证据。Phase 9B 历史矩阵保留在历史记录中。
+- MVP-3/10A 本地验证：Windows VS2022 Debug/Release 全量 CTest 各 674 registered、669 passed、5 explicitly skipped、0 failed；WSL Ubuntu 24.04 GCC Debug/Release 各 903 registered、902 passed、1 explicitly skipped、0 failed。Artifact HTTP 定向测试四套配置均为 9/9；项目源码与测试编译 warning 为 0。WSL 是本地证据，不是 GitHub Actions 证据；Phase 9B 历史矩阵保留在历史记录中。
 - 持久化 Repository、HTTP Artifact 上传/下载和通用 Artifact Store、Worker Protocol 以及两个业务的自动串联仍未实现；MVP-3 的本地 HTTP API 与 PTV2/WeldAgent adapters 已实现。
 - 设计与边界详见 [Application Layer](docs/application_layer.md)。
 

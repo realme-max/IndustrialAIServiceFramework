@@ -6,6 +6,7 @@ namespace iaisf::http {
 
 enum class HttpStatus : int {
     Ok = 200,
+    Created = 201,
     Accepted = 202,
     BadRequest = 400,
     Conflict = 409,
