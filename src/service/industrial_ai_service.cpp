@@ -235,6 +235,7 @@ Result<IndustrialAiService::Ptr> IndustrialAiService::create(
         auto task_api = std::move(api_result).value();
 
         std::unique_ptr<application::LocalArtifactResolver> application_resolver;
+        std::shared_ptr<application::LocalArtifactCatalog> application_catalog;
         std::unique_ptr<application::LocalProcessRunner> application_process_runner;
         std::unique_ptr<application::OsApplicationJobIdGenerator> application_id_generator;
         std::unique_ptr<application::IApplicationJobClock> application_clock;
@@ -243,7 +244,13 @@ Result<IndustrialAiService::Ptr> IndustrialAiService::create(
         std::unique_ptr<application::InMemoryApplicationJobRepository> application_repository;
         std::unique_ptr<application::ApplicationExecutor> application_executor;
         application::ApplicationHttpApi::Ptr application_api;
+        application::ArtifactHttpApi::Ptr artifact_api;
         if (options.applications().enabled) {
+            auto catalog = application::LocalArtifactCatalog::make(
+                options.applications().artifact_root,
+                options.applications().output_root);
+            if (!catalog) return Result<Ptr>::failure(std::move(catalog).error());
+            application_catalog = std::move(catalog).value();
             auto resolver = application::LocalArtifactResolver::make(
                 options.applications().artifact_root);
             if (!resolver) return Result<Ptr>::failure(std::move(resolver).error());
@@ -256,7 +263,7 @@ Result<IndustrialAiService::Ptr> IndustrialAiService::create(
             ptv2_options.output_root = options.applications().output_root;
             auto ptv2 = application::Ptv2WeldInspectionAdapter::create(
                 std::move(ptv2_options), *application_resolver,
-                *application_process_runner);
+                *application_process_runner, application_catalog);
             if (!ptv2) return Result<Ptr>::failure(std::move(ptv2).error());
             application_ptv2 = std::move(ptv2).value();
             auto weld_options = options.applications().weld_agent;
@@ -264,7 +271,7 @@ Result<IndustrialAiService::Ptr> IndustrialAiService::create(
             weld_options.output_root = options.applications().output_root;
             auto weld = application::WeldAgentWeldingGuidanceAdapter::create(
                 std::move(weld_options), *application_resolver,
-                *application_process_runner);
+                *application_process_runner, application_catalog);
             if (!weld) return Result<Ptr>::failure(std::move(weld).error());
             application_weld_agent = std::move(weld).value();
             auto repository = application::InMemoryApplicationJobRepository::make(
@@ -288,6 +295,13 @@ Result<IndustrialAiService::Ptr> IndustrialAiService::create(
                 return Result<Ptr>::failure(std::move(application_api_result).error());
             }
             application_api = std::move(application_api_result).value();
+            auto artifact_api_result = application::ArtifactHttpApi::create(
+                options.applications().artifact_root, application_catalog,
+                options.http_limits());
+            if (!artifact_api_result) {
+                return Result<Ptr>::failure(std::move(artifact_api_result).error());
+            }
+            artifact_api = std::move(artifact_api_result).value();
         }
 
         http::HttpRouter router{options.http_limits()};
@@ -305,6 +319,12 @@ Result<IndustrialAiService::Ptr> IndustrialAiService::create(
             auto application_routes = application_api->register_routes(router);
             if (!application_routes) {
                 return Result<Ptr>::failure(std::move(application_routes).error());
+            }
+        }
+        if (artifact_api) {
+            auto artifact_routes = artifact_api->register_routes(router);
+            if (!artifact_routes) {
+                return Result<Ptr>::failure(std::move(artifact_routes).error());
             }
         }
         if (options.metrics_enabled()) {
@@ -358,6 +378,7 @@ Result<IndustrialAiService::Ptr> IndustrialAiService::create(
             std::move(http_result).value(),
             std::move(health_checker),
             std::move(diagnostics),
+            std::move(application_catalog),
             std::move(application_resolver),
             std::move(application_process_runner),
             std::move(application_ptv2),
@@ -367,6 +388,7 @@ Result<IndustrialAiService::Ptr> IndustrialAiService::create(
             std::move(application_clock),
             std::move(application_executor),
             std::move(application_api),
+            std::move(artifact_api),
             std::move(signal_shutdown_state)}};
         service->signal_shutdown_state_->service = service.get();
         signal_rollback.dismiss();
@@ -393,6 +415,7 @@ IndustrialAiService::IndustrialAiService(
     http::HttpServer::Ptr http_server,
     std::shared_ptr<health::HealthChecker> health_checker,
     std::shared_ptr<diagnostics::RuntimeDiagnostics> diagnostics,
+    std::shared_ptr<application::LocalArtifactCatalog> application_catalog,
     std::unique_ptr<application::LocalArtifactResolver> application_resolver,
     std::unique_ptr<application::LocalProcessRunner> application_process_runner,
     std::unique_ptr<application::Ptv2WeldInspectionAdapter> application_ptv2,
@@ -402,6 +425,7 @@ IndustrialAiService::IndustrialAiService(
     std::unique_ptr<application::IApplicationJobClock> application_clock,
     std::unique_ptr<application::ApplicationExecutor> application_executor,
     application::ApplicationHttpApi::Ptr application_api,
+    application::ArtifactHttpApi::Ptr artifact_api,
     std::shared_ptr<SignalShutdownState> signal_shutdown_state) noexcept
     : loop_(loop),
       logger_(logger),
@@ -411,6 +435,7 @@ IndustrialAiService::IndustrialAiService(
       task_api_(std::move(task_api)),
       health_checker_(std::move(health_checker)),
       diagnostics_(std::move(diagnostics)),
+      application_catalog_(std::move(application_catalog)),
       application_resolver_(std::move(application_resolver)),
       application_process_runner_(std::move(application_process_runner)),
       application_id_generator_(std::move(application_id_generator)),
@@ -420,6 +445,7 @@ IndustrialAiService::IndustrialAiService(
       application_repository_(std::move(application_repository)),
       application_executor_(std::move(application_executor)),
       application_api_(std::move(application_api)),
+      artifact_api_(std::move(artifact_api)),
       http_server_(std::move(http_server)),
       signal_shutdown_state_(std::move(signal_shutdown_state)),
       stop_continuation_(this, &IndustrialAiService::run_stop_continuation) {}

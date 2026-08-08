@@ -1671,3 +1671,43 @@ PTV2/WeldAgent, CUDA, or real GPU workloads.
 Remaining boundaries are persistent storage, Artifact upload/download,
 cancel/retry/heartbeat/lease/fencing, remote Worker Protocol, quality scoring,
 joint values, robot control and automatic cross-application chaining.
+
+## Current Phase 10A handoff
+
+The current branch is `phase/10-browser-upload-mvp`; Phase 10A changes remain
+uncommitted. `LocalArtifactCatalog` is a bounded process-local shared index
+for the configured artifact and output roots. `ArtifactHttpApi` exposes the
+direct text upload and catalog-validated whole-body download endpoints only
+when applications are enabled. Uploads use deterministic SHA-256 IDs,
+atomic canonical bytes/manifest, exact eight-field manifest validation and
+serialized same-content transactions. Downloads hash the exact body read for
+the response and fail closed on path, size, type, replacement or digest
+changes. The HTTP hard byte ceiling is 64 MiB; the current configured example
+is smaller. There is no Range, streaming, authentication or persistence, and
+the catalog is not reconstructed after restart.
+
+Output registration owns a shared catalog reference rather than a borrowed
+pointer. Service member destruction remains reverse-ordered so HTTP APIs and
+adapters disappear before the catalog. PTV2 and WeldAgent remain separate
+applications; no automatic chaining is introduced. Phase 10B Web UI and
+Phase 10C 3D visualisation are not implemented.
+
+Phase 10A final local real HTTP evidence uses independent historical inputs,
+without modifying either external repository. The PTV2 input uploaded as
+`pc_8c9bd45f520f4e85e914f1628ca2d366fb6983a917a0ea7818a3865e8ae8c8ea`
+(2048 points, 24576 bytes), then completed
+`201 -> 202 -> Succeeded -> 200`; its three output downloads matched the
+result ArtifactRef sizes and SHA-256 values. The WeldAgent input uploaded as
+`pc_40ea2c408eeb082559b706929161dba1d979f3e3634b24580e90fe94bc9806e7`
+(823114 points, 9877368 bytes), then completed
+`201 -> 202 -> WaitingHuman -> 200` for requested `straight` with human
+checkpoint required. Its final result download matched the ArtifactRef and
+retained finite start/end/axes/confidence with
+`robot_execution_allowed=false`. The earlier 2047-point sample and its
+PTV2 rejection remain a negative diagnostic only; they are not final evidence.
+
+The final local matrix registered 674 tests in each Windows VS2022 Debug and
+Release run (669 passed, 5 explicitly skipped, 0 failed), and 903 tests in
+each WSL Ubuntu 24.04 GCC Debug and Release run (902 passed, 1 explicitly
+skipped, 0 failed). Artifact HTTP targeted tests were 9/9 in all four
+configurations; WSL is local evidence, not GitHub Actions evidence.

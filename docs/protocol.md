@@ -634,6 +634,45 @@ Python importer and C++ resolver communicate through the versioned
 contract must be versioned independently and must not expose filesystem paths,
 controller commands, joint values or quality claims.
 
+## Phase 10A Artifact HTTP contract
+
+Artifact upload/download is a separate, enabled-only API:
+
+```text
+POST /api/artifacts/v1/pointclouds
+GET  /api/artifacts/v1/files/{artifact_id}
+```
+
+The POST body is direct `text/plain` (optional charset) XYZ text. Non-empty
+rows require three finite coordinates; extra columns are ignored. The service
+stores little-endian float32 XYZ (`12 bytes/point`), `point_count`, SHA-256,
+and an exact eight-field `artifact.json`. First creation returns `201`; an
+identical validated duplicate returns `200`. Invalid syntax is `400`,
+non-finite or non-representable float32 is `422`, unsupported media type is
+`415`, request limit is `413`, and storage conflicts never return idempotent
+success.
+
+GET accepts only catalog-registered IDs. It rechecks canonical containment,
+non-symlink regular-file status, exact size and the SHA-256 of the exact body
+that will be returned. It emits the registered media type, a server-generated
+safe filename, `X-Content-Type-Options: nosniff` and `Cache-Control: no-store`.
+The framework hard HTTP byte ceiling is 64 MiB; this endpoint is whole-body
+only and has no Range, streaming, authentication or persistence.
+
+Every public output Artifact JSON includes the canonical
+`/api/artifacts/v1/files/{artifact_id}` URL. PTV2 and WeldAgent remain
+independent; PTV2 quality is `not_implemented` and WeldAgent never permits
+robot execution.
+
+Phase 10A local real HTTP evidence uses two independent historical inputs.
+The PTV2 upload returned `201` for 2048 points and its job completed
+`202 -> Succeeded -> 200`; all three output downloads matched their result
+ArtifactRef sizes and SHA-256 values. The WeldAgent upload returned `201` for
+823114 points and its requested `straight` job completed
+`202 -> WaitingHuman -> 200`; `final_result.json` matched its ArtifactRef.
+These are local external-process results, not GitHub Actions evidence, and
+the earlier 2047-point sample remains a documented negative diagnostic.
+
 ## Phase 9 Fast Track MVP-3 Application HTTP contract
 
 Six fixed versioned routes are available when the application runtime is

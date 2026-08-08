@@ -11,13 +11,16 @@ namespace {
 
 using Json = nlohmann::ordered_json;
 
-Json artifact_json(const ArtifactRef& artifact) {
+Json artifact_json(const ArtifactRef& artifact,
+                   const std::string_view download_prefix) {
     Json output{
         {"artifact_id", artifact.artifact_id},
         {"sha256", artifact.sha256},
         {"size_bytes", artifact.size_bytes},
         {"kind", artifact.kind},
         {"media_type", artifact.media_type}};
+    output["download_url"] =
+        std::string(download_prefix) + artifact.artifact_id;
     if (artifact.coordinate_frame.has_value()) {
         output["coordinate_frame"] = *artifact.coordinate_frame;
     }
@@ -42,7 +45,8 @@ Result<std::string> failure(const ErrorCode code, const char* message) {
 
 Result<std::string> application_execution_result_json(
     const ApplicationJobSnapshot& snapshot,
-    const std::size_t maximum_bytes) {
+    const std::size_t maximum_bytes,
+    const std::string_view artifact_download_prefix) {
     try {
         if (maximum_bytes == 0U || maximum_bytes > kMaxApplicationResultBodyBytes ||
             !snapshot.job_id().valid() || snapshot.execution_result() == nullptr ||
@@ -66,14 +70,16 @@ Result<std::string> application_execution_result_json(
         if (const auto* inspection = std::get_if<WeldInspectionResult>(
                 snapshot.execution_result())) {
             for (const auto& artifact : inspection->output_artifacts) {
-                outputs.push_back(artifact_json(artifact));
+                outputs.push_back(artifact_json(artifact, artifact_download_prefix));
             }
             body["output_artifacts"] = std::move(outputs);
             if (inspection->weld_points.has_value()) {
-                body["weld_points"] = artifact_json(*inspection->weld_points);
+                body["weld_points"] = artifact_json(
+                    *inspection->weld_points, artifact_download_prefix);
             }
             if (inspection->prediction.has_value()) {
-                body["prediction"] = artifact_json(*inspection->prediction);
+                body["prediction"] = artifact_json(
+                    *inspection->prediction, artifact_download_prefix);
             }
             body["weld_point_count"] = inspection->weld_point_count;
             body["weld_ratio"] = inspection->weld_ratio;
@@ -85,7 +91,7 @@ Result<std::string> application_execution_result_json(
             const auto& guidance = std::get<WeldingGuidanceResult>(
                 *snapshot.execution_result());
             for (const auto& artifact : guidance.output_artifacts) {
-                outputs.push_back(artifact_json(artifact));
+                outputs.push_back(artifact_json(artifact, artifact_download_prefix));
             }
             body["output_artifacts"] = std::move(outputs);
             body["weld_type"] = to_string(guidance.weld_type);

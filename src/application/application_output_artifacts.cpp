@@ -1,5 +1,7 @@
 #include "iaisf/application/application_output_artifacts.hpp"
 
+#include "iaisf/application/local_artifact_catalog.hpp"
+
 #include <array>
 #include <fstream>
 #include <limits>
@@ -166,11 +168,14 @@ Result<std::string> sha256_file(const std::filesystem::path& path) {
 }  // namespace
 
 LocalOutputArtifactRegistrar::LocalOutputArtifactRegistrar(
-    std::filesystem::path root)
-    : root_(std::move(root)) {}
+    std::filesystem::path root,
+    std::shared_ptr<LocalArtifactCatalog> catalog)
+    : root_(std::move(root)), catalog_(std::move(catalog)) {}
 
 Result<std::unique_ptr<LocalOutputArtifactRegistrar>>
-LocalOutputArtifactRegistrar::make(const std::filesystem::path& output_root) {
+LocalOutputArtifactRegistrar::make(
+    const std::filesystem::path& output_root,
+    std::shared_ptr<LocalArtifactCatalog> catalog) {
     try {
         std::error_code error;
         const auto status = std::filesystem::symlink_status(output_root, error);
@@ -185,7 +190,7 @@ LocalOutputArtifactRegistrar::make(const std::filesystem::path& output_root) {
             ErrorCode::IoError, "output artifact root cannot be resolved");
         return Result<std::unique_ptr<LocalOutputArtifactRegistrar>>::success(
             std::unique_ptr<LocalOutputArtifactRegistrar>{
-                new LocalOutputArtifactRegistrar{canonical}});
+                new LocalOutputArtifactRegistrar{canonical, std::move(catalog)}});
     } catch (const std::bad_alloc&) {
         return failure<std::unique_ptr<LocalOutputArtifactRegistrar>>(
             ErrorCode::ResourceExhausted, "output artifact registrar allocation failed");
@@ -257,6 +262,24 @@ Result<ArtifactRef> LocalOutputArtifactRegistrar::register_file(
             std::filesystem::remove(temporary, error);
             return failure<ArtifactRef>(ErrorCode::IoError,
                                         "output artifact manifest cannot be committed");
+        }
+        if (catalog_ != nullptr) {
+            std::string extension = ".bin";
+            if (artifact.media_type == "application/json") extension = ".json";
+            else if (artifact.media_type == "application/vnd.iaisf.pointcloud.ply") {
+                extension = ".ply";
+            } else if (artifact.media_type == "text/plain") {
+                extension = ".txt";
+            } else if (artifact.media_type == kXyzMediaType) {
+                extension = ".xyzf32le";
+            }
+            auto registered = catalog_->register_artifact(
+                artifact, canonical, artifact.artifact_id + extension);
+            if (!registered) {
+                std::error_code ignored;
+                std::filesystem::remove(manifest_path, ignored);
+                return Result<ArtifactRef>::failure(registered.error());
+            }
         }
         return Result<ArtifactRef>::success(std::move(artifact));
     } catch (const std::bad_alloc&) {

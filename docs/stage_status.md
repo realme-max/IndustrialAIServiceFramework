@@ -3,19 +3,20 @@
 ## 当前结论
 
 ```text
-PHASE_9_FAST_TRACK_MVP_REMOTE_CI_PENDING
+PHASE_10A_REAL_DUAL_APPLICATION_HTTP_E2E_PASSED
 ```
 
-The current implementation checkpoint is the committed Fast Track MVP-3
-runtime at `b2f16cb99bc2e4c04cdf777fc6acc56575b35b16`. Local real HTTP E2E is
-complete; this sealing commit updates documentation and Linux target
-verification only. Remote CI is pending for the new docs/workflow commit.
+The implementation checkpoint remains the committed Fast Track MVP-3 runtime
+at `b2f16cb99bc2e4c04cdf777fc6acc56575b35b16`; the current Phase 10A changes
+are uncommitted. Local real HTTP E2E is complete with independent PTV2 and
+WeldAgent inputs. Remote CI evidence is not claimed for this uncommitted
+worktree.
 
 - 当前阶段：Phase 9 Fast Track MVP-3 Application Executor、HTTP 与 Service
 - 本地实现提交：`b2f16cb99bc2e4c04cdf777fc6acc56575b35b16`
 - 本轮范围：文档同步与 Linux CI 显式 application target verification；不修改业务实现
 - 本地点云导入、SHA/manifest、Artifact resolver、受控进程、PTV2/WeldAgent adapters、Application Repository/Executor、单 worker 有界队列和六条 versioned HTTP route 均已接入
-- MVP-3 定向验证：Windows VS2022 Debug/Release application runtime 各 14/14；WSL Debug runtime 14/14；WSL Release 全量 CTest 894 registered、893 passed、1 explicitly skipped、0 failed。
+- MVP-3/10A 本地验证：Windows VS2022 Debug/Release 全量 CTest 各 674 registered、669 passed、5 explicitly skipped、0 failed；WSL Ubuntu 24.04 GCC Debug/Release 各 903 registered、902 passed、1 explicitly skipped、0 failed。Artifact HTTP 定向测试四套配置均为 9/9。
 - WSL Release 唯一测试级 skip 为既有 `SafePathResolverTest.PermissionFailureIsExplicitlyHandled` 能力检查；不属于 workflow step skip。
 - warning：项目源码与测试为 0；WSL 本地结果不冒充 GitHub Actions
 - 日期：2026-08-08（Asia/Shanghai）
@@ -1089,3 +1090,29 @@ capability skips, 0 failed. WSL Release full CTest: 886 registered, 885 passed,
 tests: 9/9. The runtime target passed 9/9 in all four focused runs. These are
 local results, not GitHub Actions evidence. Adapter-mediated PTV2 smoke exited
 0 with 2048 total points, 205 weld points and three registered outputs.
+
+## Current Phase 10A status
+
+`PHASE_10A_REAL_DUAL_APPLICATION_HTTP_E2E_PASSED` is the current uncommitted
+hardening target. The upload/download API, shared process-local catalog,
+atomic canonical storage, strict manifest checks, bounded whole-body download
+validation and result `download_url` projection are implemented in this
+worktree. The HTTP hard ceiling is 64 MiB; there is no Range, streaming,
+authentication or persistence. Phase 10B Web UI and Phase 10C 3D
+visualisation have not started. PTV2 and WeldAgent remain independent, with
+`quality_assessment=not_implemented` and `robot_execution_allowed=false`.
+The final external HTTP E2E passed with two independent historical inputs.
+PTV2 uploaded 2048 points and completed `201 -> 202 -> Succeeded -> 200`,
+returning 205 weld points, ratio `0.10009765625`, length
+`0.8822024464607239`, three downloadable artifacts and
+`quality_assessment=not_implemented`. WeldAgent uploaded 823114 points and
+completed `201 -> 202 -> WaitingHuman -> 200`, returning finite straight-weld
+geometry, camera/mm metadata, confidence, a bounded waiting reason and
+`robot_execution_allowed=false`; its result artifact download SHA matched the
+result JSON. The earlier 2047-point sample remains a negative diagnostic only.
+
+Final four-configuration local matrix: Windows VS2022 Debug/Release each
+registered 674 tests (669 passed, 5 explicitly skipped, 0 failed); WSL Ubuntu
+24.04 GCC Debug/Release each registered 903 tests (902 passed, 1 explicitly
+skipped, 0 failed). Artifact HTTP targeted tests were 9/9 in all four
+configurations. WSL is local evidence, not GitHub Actions evidence.

@@ -11,6 +11,8 @@
 
 namespace iaisf::application {
 
+class LocalArtifactCatalog;
+
 struct OutputArtifactSpec final {
     std::string artifact_id;
     std::string kind;
@@ -24,7 +26,8 @@ struct OutputArtifactSpec final {
 class LocalOutputArtifactRegistrar final {
 public:
     [[nodiscard]] static Result<std::unique_ptr<LocalOutputArtifactRegistrar>>
-    make(const std::filesystem::path& output_root);
+    make(const std::filesystem::path& output_root,
+         std::shared_ptr<LocalArtifactCatalog> catalog = nullptr);
 
     LocalOutputArtifactRegistrar(const LocalOutputArtifactRegistrar&) = delete;
     LocalOutputArtifactRegistrar& operator=(const LocalOutputArtifactRegistrar&) = delete;
@@ -34,8 +37,10 @@ public:
         const OutputArtifactSpec& spec) const;
 
 private:
-    explicit LocalOutputArtifactRegistrar(std::filesystem::path root);
+    explicit LocalOutputArtifactRegistrar(
+        std::filesystem::path root, std::shared_ptr<LocalArtifactCatalog> catalog);
     std::filesystem::path root_;
+    std::shared_ptr<LocalArtifactCatalog> catalog_;
 };
 
 }  // namespace iaisf::application

@@ -6,6 +6,8 @@ std::string_view reason_phrase(HttpStatus status) noexcept {
     switch (status) {
         case HttpStatus::Ok:
             return "OK";
+        case HttpStatus::Created:
+            return "Created";
         case HttpStatus::Accepted:
             return "Accepted";
         case HttpStatus::BadRequest:

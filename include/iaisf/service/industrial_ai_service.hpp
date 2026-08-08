@@ -9,6 +9,8 @@
 #include "iaisf/application/application_job_id_generator.hpp"
 #include "iaisf/application/application_job_clock.hpp"
 #include "iaisf/application/application_artifacts.hpp"
+#include "iaisf/application/artifact_http_api.hpp"
+#include "iaisf/application/local_artifact_catalog.hpp"
 #include "iaisf/core/result.hpp"
 #include "iaisf/diagnostics/runtime_diagnostics.hpp"
 #include "iaisf/http/http_server.hpp"
@@ -84,6 +86,7 @@ public:
         http::HttpServer::Ptr http_server,
         std::shared_ptr<health::HealthChecker> health_checker,
         std::shared_ptr<diagnostics::RuntimeDiagnostics> diagnostics,
+        std::shared_ptr<application::LocalArtifactCatalog> application_catalog,
         std::unique_ptr<application::LocalArtifactResolver> application_resolver,
         std::unique_ptr<application::LocalProcessRunner> application_process_runner,
         std::unique_ptr<application::Ptv2WeldInspectionAdapter> application_ptv2,
@@ -93,6 +96,7 @@ public:
         std::unique_ptr<application::IApplicationJobClock> application_clock,
         std::unique_ptr<application::ApplicationExecutor> application_executor,
         application::ApplicationHttpApi::Ptr application_api,
+        application::ArtifactHttpApi::Ptr artifact_api,
         std::shared_ptr<SignalShutdownState> signal_shutdown_state) noexcept;
 
     [[nodiscard]] Result<void> start();
@@ -123,6 +127,7 @@ private:
     api::TaskHttpApi::Ptr task_api_;
     std::shared_ptr<health::HealthChecker> health_checker_;
     std::shared_ptr<diagnostics::RuntimeDiagnostics> diagnostics_;
+    std::shared_ptr<application::LocalArtifactCatalog> application_catalog_;
     std::unique_ptr<application::LocalArtifactResolver> application_resolver_;
     std::unique_ptr<application::LocalProcessRunner> application_process_runner_;
     std::unique_ptr<application::OsApplicationJobIdGenerator> application_id_generator_;
@@ -132,6 +137,7 @@ private:
     std::unique_ptr<application::InMemoryApplicationJobRepository> application_repository_;
     std::unique_ptr<application::ApplicationExecutor> application_executor_;
     application::ApplicationHttpApi::Ptr application_api_;
+    application::ArtifactHttpApi::Ptr artifact_api_;
     http::HttpServer::Ptr http_server_;
     std::shared_ptr<SignalShutdownState> signal_shutdown_state_;
     net::EventLoop::DeferredCleanup stop_continuation_;

@@ -31,7 +31,7 @@ Result<void> validate_cross_limits(
     }
     const std::size_t required_routes = 5U +
         (metrics_enabled ? 1U : 0U) + (diagnostics_enabled ? 1U : 0U);
-    const std::size_t application_routes = applications_enabled ? 6U : 0U;
+    const std::size_t application_routes = applications_enabled ? 8U : 0U;
     if (http.max_routes() < required_routes ||
         application_routes > http.max_routes() - required_routes) {
         return Result<void>::failure(make_error(
@@ -123,7 +123,9 @@ Result<ServiceOptions> ServiceOptions::create(
     const auto reserved = [](const std::string& endpoint) {
         return endpoint == "/health" || endpoint == "/ready" ||
                endpoint == "/version" || endpoint == "/v1/tasks" ||
-               endpoint.rfind("/v1/tasks/", 0U) == 0U;
+               endpoint.rfind("/v1/tasks/", 0U) == 0U ||
+               endpoint == "/api/artifacts/v1/pointclouds" ||
+               endpoint.rfind("/api/artifacts/v1/files/", 0U) == 0U;
     };
     if (reserved(diagnostics_endpoint) ||
         (metrics_enabled && diagnostics_endpoint == metrics_endpoint)) {

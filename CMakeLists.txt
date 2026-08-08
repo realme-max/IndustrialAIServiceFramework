@@ -241,6 +241,8 @@ add_library(
   src/application/application_adapters.cpp
   src/application/application_executor.cpp
   src/application/application_http_api.cpp
+  src/application/local_artifact_catalog.cpp
+  src/application/artifact_http_api.cpp
 )
 add_library(iaisf::application_runtime ALIAS iaisf_application_runtime)
 target_compile_features(iaisf_application_runtime PUBLIC cxx_std_17)
