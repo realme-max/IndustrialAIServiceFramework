@@ -59,7 +59,7 @@ public:
                 ErrorCode::InternalError, "fixture output directory failed"));
         }
         std::ofstream result(output / "weld_result.json");
-        result << R"({"weld_points":1,"weld_ratio":0.5,"length_mm":12.0,"inference_ms":3.0})";
+        result << R"({"total_points":1,"weld_points":1,"weld_ratio":0.5,"length_mm":12.0,"inference_ms":3.0})";
         std::ofstream points(output / "weld_points.ply");
         points << "ply\n";
         std::ofstream prediction(output / "prediction.txt");

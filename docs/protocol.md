@@ -712,20 +712,23 @@ origin resources before router freeze:
 ```text
 GET /
 GET /ui/app.css
+GET /ui/point-cloud-viewer.js
 GET /ui/app.js
 ```
 
-The three resources are compiled into the binary and use `text/html`,
+The four resources are compiled into the binary and use `text/html`,
 `text/css` and `application/javascript` content types. They set `no-store`,
 `nosniff`, `no-referrer`, `X-Frame-Options: DENY` and a strict self-only CSP;
 there is no directory file server, CORS, CDN, external font or inline script.
-Application-related route capacity is therefore 11 (six job routes, two
-Artifact routes and three UI routes). The browser sends the existing direct
+Application-related route capacity is therefore 12 (six job routes, two
+Artifact routes and four UI routes). The browser sends the existing direct
 text upload, submits only the strict eight-field ArtifactRef, uses bounded
 AbortController polling and treats `waiting_human` as a readable terminal
 result. PTV2 and WeldAgent are never chained; quality remains
 `not_implemented` and robot execution remains false. Three-dimensional
-rendering is reserved for Phase 10C.
+rendering is provided by the compiled Phase 10C viewer resource below. Current
+evidence is limited to C++ resource/route contract tests; no real browser or
+WebGL runtime E2E is claimed.
 
 The Phase 10B client validates the upload response's exact eight-field
 ArtifactRef before submission, validates the returned business-specific Job ID
@@ -736,4 +739,17 @@ stop-wait control aborts browser fetch/polling only; the server job may continue
 Result downloads are deduplicated across `output_artifacts`, `weld_points` and
 `prediction` and require the canonical artifact URL. Native browser file
 selection is supported; host-file access restrictions in automation are a
-test-tool limitation. No Phase 10C visualization is included.
+test-tool limitation. The Phase 10C viewer is a separate compiled resource and
+does not change these HTTP or Application contracts.
+
+## Phase 10C browser 3D visualization MVP
+
+The MVP adds only the compiled-in `/ui/point-cloud-viewer.js` resource and
+does not change Artifact or Application JSON. It decodes the validated
+`xyz-f32le` input and fixed ASCII PTV2 PLY subset, keeps `prediction.txt`
+download-only, and uses canonical Artifact URLs. It renders straight/corner
+`start -> end` and L `start -> corner -> end` paths. Direction axes use
+`start` as a display anchor only after finite, near-unit and near-orthogonal
+validation; this is not an algorithmic axis origin. 3D failure falls back to
+text results and downloads. PTV2 remains `quality_assessment=not_implemented`
+and WeldAgent remains `robot_execution_allowed=false`.

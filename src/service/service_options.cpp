@@ -31,7 +31,7 @@ Result<void> validate_cross_limits(
     }
     const std::size_t required_routes = 5U +
         (metrics_enabled ? 1U : 0U) + (diagnostics_enabled ? 1U : 0U);
-    const std::size_t application_routes = applications_enabled ? 11U : 0U;
+    const std::size_t application_routes = applications_enabled ? 12U : 0U;
     if (http.max_routes() < required_routes ||
         application_routes > http.max_routes() - required_routes) {
         return Result<void>::failure(make_error(

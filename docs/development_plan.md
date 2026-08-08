@@ -1,5 +1,12 @@
 # 分阶段开发计划
 
+## Current Phase 10C status
+
+The current uncommitted worktree is Phase 10C browser 3D visualization
+hardening on top of committed Phase 10B baseline
+`8a79084373de46f31caa83ef8f0363c684b30f46`; it must not be treated as Phase
+10B or Phase 10D. No browser/WebGL runtime E2E evidence is claimed.
+
 ## 1. 执行原则
 
 当前实施点为 **Phase 10B 同域 Web UI（Phase 10A 已提交）**。Phase 9A/9B
@@ -659,21 +666,31 @@ joint values, robot control and cross-application chaining remained unimplemente
 at this historical MVP-3 checkpoint; Phase 10A subsequently added the separate
 Artifact HTTP upload/download API.
 
-## Current Phase 10B checkpoint
+## Historical Phase 10B checkpoint
 
-`PHASE_10B_SAME_ORIGIN_WEB_UI_FINAL_HARDENED` is the current state in the
-uncommitted worktree on `phase/10-browser-upload-mvp`. The committed Phase 10A
-baseline is `6e3679f14f00788fc02ca8aad300ec713484fe43`; the Phase 10B resources,
+`PHASE_10B_SAME_ORIGIN_WEB_UI_FINAL_HARDENED` is the historical committed state
+on `phase/10-browser-upload-mvp`. The committed Phase 10B baseline is
+`8a79084373de46f31caa83ef8f0363c684b30f46`; the Phase 10C viewer changes,
 client contract checks, abort controls and Linux service-route evidence are
 working-tree changes. Native browser file selection is a product capability;
 the inability of Codex/Chrome automation to read host files is a test-tool
-limitation only. Phase 10C 3D rendering remains unstarted.
+limitation only. Phase 10C is implemented in the current uncommitted worktree
+as the bounded compiled viewer described below. No real browser/WebGL runtime
+E2E is claimed; resource assertions are source/route contract tests.
 
 ## Phase 10B same-origin Web UI
 
-Phase 10B adds only the compiled-in same-origin UI resources `/`,
-`/ui/app.css` and `/ui/app.js` when applications are enabled. It keeps the
+Phase 10B added the compiled-in same-origin UI resources `/`, `/ui/app.css` and
+`/ui/app.js` when applications were enabled. It keeps the
 Artifact and Application JSON contracts unchanged, uses a bounded browser
 state machine with AbortController, and does not add a static file server,
-external frontend dependencies or 3D rendering. Phase 10C remains reserved
-for Three.js/WebGL-style point-cloud and geometry visualisation.
+external frontend dependencies or 3D rendering. Phase 10C now supplies a
+fixed-shader WebGL2 viewer without a framework or external dependency.
+
+## Phase 10C MVP scope
+
+The implementation order is metadata validation, the compiled viewer resource,
+bounded XYZ/PLY parsing, shared input normalization, deterministic display
+downsampling, overlays and local browser acceptance. Prediction remains
+download-only. Workers, streaming/Range/LOD, authentication, quality
+assessment and robot control remain future work.

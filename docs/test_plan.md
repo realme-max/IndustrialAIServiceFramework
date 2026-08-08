@@ -87,6 +87,14 @@ GoogleTest case。
 - 性能数字只在 Phase 9 实际测量后记录。
 - 测试失败必须保留原始命令和足够诊断，不以重试掩盖竞态。
 
+## Phase 10C current validation note
+
+The current uncommitted Phase 10C matrix is Windows Debug/Release: 688
+registered, 683 passed, 5 explicitly skipped, 0 failed; WSL Debug/Release:
+921 registered, 920 passed, 1 explicitly skipped, 0 failed. Web UI is 7/7
+and Linux Service Web UI routes are 4/4. These are local checks; resource
+string assertions are not browser or WebGL runtime E2E.
+
 ## 2. 测试层次
 
 ```mermaid
@@ -1052,11 +1060,11 @@ and 0 failed each. Artifact HTTP targeted tests are 9/9 in every configuration.
 
 ## Phase 10B Web UI tests
 
-The Web UI unit target `iaisf_web_ui_tests` covers the three-resource route
+The Web UI unit target `iaisf_web_ui_tests` covers the four-resource route
 registration, exact media types, CSP/no-store/nosniff/referrer/frame headers,
 absence of inline or external resources, response-limit preflight, 404/405,
 freeze-time registration failure and expired-owner fail-closed behavior.
-Service integration covers applications enabled/disabled, the 11-route
+Service integration covers applications enabled/disabled, the 12-route
 capacity calculation, metrics/diagnostics combinations and old Task,
 Application and Artifact routes. Page/resource browser smoke, the compiled
 client-contract assertions (including bounded polling, `waiting_human`, safe
@@ -1064,7 +1072,7 @@ result rendering and download-link validation), and the Phase 10A real backend
 HTTP E2E are recorded as separate evidence; none claims GitHub CI executed
 external projects or GPU work. Native file selection remains a product path,
 while host-file restrictions in Codex/Chrome automation are test-tool limits.
-Phase 10C owns all 3D rendering.
+Phase 10C owns the bounded browser 3D MVP; advanced rendering remains deferred.
 
 Phase 10B validation: `iaisf_web_ui_tests` passed 7/7 in Windows Debug,
 Windows Release, WSL Debug and WSL Release. The Linux Service route target
@@ -1080,3 +1088,14 @@ automation is a test-tool limitation, not a product blocker. Controlled
 client-contract assertions are recorded separately; no browser automation
 claim is substituted for the Phase 10A real backend E2E. These are local
 results, not GitHub Actions evidence.
+
+## Phase 10C 3D viewer resource contract tests
+
+The MVP adds the fourth Web UI resource and route-capacity values 17/18/19.
+Current C++ tests assert compiled resource strings and contracts for fixed XYZ
+decoding, bounded ASCII PLY parsing, point-count and metadata mismatch,
+truncation, non-finite values, deterministic 500,000-point downsampling,
+degenerate bounds, straight/corner/L paths, invalid axes, generation
+isolation, WebGL context loss and text-only fallback. These are source/resource
+contract checks, not browser fixtures, WebGL runtime execution or real browser
+E2E; such evidence remains deferred.

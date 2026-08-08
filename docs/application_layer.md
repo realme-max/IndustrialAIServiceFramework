@@ -22,8 +22,9 @@ process-local and is empty after restart.
 ## Phase 10B same-origin UI
 
 When the application runtime is enabled, the service embeds one independent
-WebUiHttpApi with exactly three fixed GET resources: `/`, `/ui/app.css` and
-`/ui/app.js`. HTML, CSS and JavaScript are compiled into the binary. The UI
+WebUiHttpApi with exactly four fixed GET resources: `/`, `/ui/app.css`,
+`/ui/point-cloud-viewer.js` and `/ui/app.js`. HTML, CSS and JavaScript are
+compiled into the binary. The UI
 does not read files from the working directory and does not provide a general
 static-file server. It uses the existing direct `text/plain` point-cloud
 upload, strict eight-field ArtifactRef, six versioned application routes and
@@ -32,9 +33,12 @@ canonical Artifact download URLs without changing their JSON contracts.
 The browser state machine is bounded (`Idle -> Uploading -> Uploaded ->
 Submitting -> Polling -> ResultReady/WaitingHuman/Failed`), disables duplicate
 submits, aborts stale requests, and stops polling on terminal failure or
-`waiting_human`. PTV2 and WeldAgent are independent. PTV2 explicitly reports
+`waiting_human`. PTV2 and WeldAgent are independent. The viewer validates all
+input/overlay rows and submits at most 500,000 sampled points with deterministic
+stride; source/resource checks are not browser or WebGL runtime E2E. PTV2 explicitly reports
 `quality_assessment=not_implemented`; WeldAgent explicitly reports
-`robot_execution_allowed=false`. Phase 10C owns all 3D rendering.
+`robot_execution_allowed=false`. Phase 10C provides the bounded browser viewer;
+advanced rendering remains outside this MVP.
 
 The final local real HTTP E2E uses separate inputs for the two applications.
 PTV2 uploads a 2048-point artifact, reaches `Succeeded`, returns 205 weld
@@ -232,8 +236,9 @@ requires `quality_assessment=not_implemented`; guidance requires
 
 Native file selection is a product capability. Host-file access restrictions in
 Codex/Chrome automation are test-tool limitations, not product blockers. The
-UI does not implement Phase 10C visualization, authentication, cancellation,
-or automatic PTV2/WeldAgent chaining.
+Phase 10B text-only UI did not implement authentication, cancellation, or
+automatic PTV2/WeldAgent chaining; the Phase 10C viewer adds only bounded local
+visualization and preserves those same boundaries.
 
 ## Phase 9B-3A-3A Job ID Generator and Clock
 
@@ -261,3 +266,12 @@ Unix-millisecond values fail closed using checked integer ratio arithmetic, with
 no floating-point boundary decision. Test-only deterministic entropy, clock and
 Linux getrandom syscall seams are private to the test target and are not exposed
 in installed public headers.
+## Phase 10C 3D visualization MVP
+
+The browser viewer consumes the existing Artifact download URLs only. The
+PTV2 adapter validates `total_points` against the input Artifact and registers
+`weld_points.ply` and `prediction.txt` with inherited frame/unit metadata and
+their exact point counts. The viewer parses only the fixed ASCII PLY subset;
+prediction remains download-only. WeldAgent displays start/end and the
+straight/corner or L path, with direction axes anchored at `start` for display
+only. It never exposes joint values or enables robot execution.

@@ -3,9 +3,9 @@
 ## 1. 文档状态
 
 - 项目：IndustrialAIServiceFramework
-- 阶段：Phase 10B 同域 Web UI（基于已提交的 Phase 10A Artifact Web API）
+- 阶段：Phase 10C 浏览器 3D 可视化 MVP（基于已提交的 Phase 10B 同域 Web UI）
 - 日期：2026-08-08
-- 状态：Phase 10A 已提交基线 `6e3679f14f00788fc02ca8aad300ec713484fe43`；Phase 10B 为当前未提交工作区
+- 状态：Phase 10B 已提交基线 `8a79084373de46f31caa83ef8f0363c684b30f46`；Phase 10C 为当前未提交工作区
 - 目标平台：portable C++17 application core；既有服务运行目标仍为 Linux x86_64
 
 本文同时记录已实现的既有服务栈和 Phase 9B-1/9B-2 应用领域与 Repository 核心。只有明确列入已实现边界的类才是当前能力；历史阶段验证记录保留，不代表 Phase 9 外部 worker 已实现。
@@ -1133,3 +1133,12 @@ No controller URL, joint values, process stderr, local path or model metadata
 is exposed by the HTTP result. Persistence, artifact upload/download,
 cancel/retry, leases/fencing, remote workers, quality scoring and robot control
 remain outside this checkpoint.
+
+## Phase 10C browser viewer
+
+`WebUiHttpApi` now owns four immutable compiled resources, including
+`/ui/point-cloud-viewer.js`. Each business panel has its own viewer instance.
+It fetches only canonical Artifact URLs and releases WebGL buffers, listeners
+and animation frames on clear/dispose. Route capacity reserves 12
+application-related routes; text results and downloads remain authoritative
+when WebGL is unavailable.

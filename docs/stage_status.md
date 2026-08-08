@@ -3,26 +3,26 @@
 ## 当前结论
 
 ```text
-PHASE_10B_SAME_ORIGIN_WEB_UI_FINAL_HARDENED
+PHASE_10C_BROWSER_3D_VISUALIZATION_FINAL_HARDENED
 ```
 
-The committed Phase 10A baseline is
-`6e3679f14f00788fc02ca8aad300ec713484fe43`; Phase 10B Web UI changes are
-uncommitted. Local real HTTP E2E is complete with independent PTV2 and
-WeldAgent inputs, and Chrome browser smoke verified the same-origin UI. Host
-file access rejection in Codex/Chrome automation is a test-tool limitation,
-not a product blocker. Remote CI evidence is not claimed for this uncommitted
-worktree.
+The committed Phase 10B baseline is
+`8a79084373de46f31caa83ef8f0363c684b30f46`; Phase 10C
+viewer changes are uncommitted. Local real HTTP E2E is complete with independent PTV2 and
+WeldAgent inputs. No real browser/WebGL runtime E2E evidence is claimed; the
+resource checks are source/route contract tests only. Host-file access limits in
+Codex/Chrome automation are test-tool limitations, not product blockers.
 
 - 历史阶段：Phase 9 Fast Track MVP-3 Application Executor、HTTP 与 Service
 - 历史本地实现提交：`b2f16cb99bc2e4c04cdf777fc6acc56575b35b16`
-- 本轮范围：Phase 10B Web UI 轮询/状态边界、文档同步与 Linux CI 显式 application target verification；不进入 Phase 10C
+- 本轮范围：Phase 10C 浏览器 3D 可视化 MVP；Phase 10B 页面、资源和路由作为已完成基线保留
 - 本地点云导入、SHA/manifest、Artifact resolver、受控进程、PTV2/WeldAgent adapters、Application Repository/Executor、单 worker 有界队列和六条 versioned HTTP route 均已接入
 - Phase 10B 本地验证：Windows VS2022 Debug/Release 全量 CTest 各 681 registered、676 passed、5 explicitly skipped、0 failed；WSL Ubuntu 24.04 GCC Debug/Release 各 914 registered、913 passed、1 explicitly skipped、0 failed。Web UI 7/7、Linux Service Web UI routes 4/4、Artifact HTTP 9/9。
 - WSL Release 唯一测试级 skip 为既有 `SafePathResolverTest.PermissionFailureIsExplicitlyHandled` 能力检查；不属于 workflow step skip。
 - warning：项目源码与测试为 0；WSL 本地结果不冒充 GitHub Actions
 - 日期：2026-08-08（Asia/Shanghai）
 - 未实现：持久化 Catalog/Repository、Range、流式上传/下载、认证、cancel/retry/heartbeat/lease/fencing、远程 Worker Protocol、PTV2 真实质量评价、WeldAgent joint values/机器人控制、两个应用自动串联，以及 GitHub runner 上的真实 GPU/外部项目 E2E；Phase 10A Artifact HTTP 上传/下载已实现
+- Phase 10C 本地全量验证：Windows VS2022 Debug/Release 各 688 registered、683 passed、5 explicitly skipped、0 failed；WSL Ubuntu 24.04 Debug/Release 各 921 registered、920 passed、1 explicitly skipped、0 failed。Web UI 7/7、Linux Service Web UI routes 4/4；均为本地证据。
 - 下一步：提交本轮文档/workflow 封板并等待 exact-commit Linux CI；不进入后续功能阶段
 
 ## Phase 9 Fast Track MVP-3 封板范围（历史记录）
@@ -1101,8 +1101,9 @@ atomic canonical storage, strict manifest checks, bounded whole-body download
 validation and result `download_url` projection are implemented in this
 worktree. The HTTP hard ceiling is 64 MiB; there is no Range, streaming,
 authentication or persistence. Phase 10B Web UI is implemented as a compiled-
-in same-origin resource checkpoint; Phase 10C 3D visualisation has not
-started. PTV2 and WeldAgent remain independent, with
+in same-origin resource checkpoint; Phase 10C adds the compiled WebGL2 viewer
+resource with bounded input/overlay/geometry rendering. PTV2 and WeldAgent
+remain independent, with
 `quality_assessment=not_implemented` and `robot_execution_allowed=false`.
 The final external HTTP E2E passed with two independent historical inputs.
 PTV2 uploaded 2048 points and completed `201 -> 202 -> Succeeded -> 200`,
@@ -1120,16 +1121,17 @@ registered 674 tests (669 passed, 5 explicitly skipped, 0 failed); WSL Ubuntu
 skipped, 0 failed). Artifact HTTP targeted tests were 9/9 in all four
 configurations. WSL is local evidence, not GitHub Actions evidence.
 
-## Phase 10B same-origin Web UI
+## Historical Phase 10B same-origin Web UI
 
-`PHASE_10B_SAME_ORIGIN_WEB_UI_FINAL_HARDENED` is the current uncommitted
-implementation checkpoint. `iaisf_web_ui` embeds HTML, CSS and JavaScript and registers `/`,
-`/ui/app.css` and `/ui/app.js` only when applications are enabled. The
-application-related route capacity is 11. The resources are same-origin,
+`PHASE_10B_SAME_ORIGIN_WEB_UI_FINAL_HARDENED` is the historical Phase 10B
+checkpoint. `iaisf_web_ui` embeds HTML, CSS, JavaScript and the viewer and
+registers `/`, `/ui/app.css`, `/ui/point-cloud-viewer.js` and `/ui/app.js` only
+when applications are enabled. The application-related route capacity is 12.
+The resources are same-origin,
 no-store, CSP-protected and do not expose paths or process output. The
 browser uses the existing Artifact/Application contracts, bounded polling and
-safe DOM APIs. PTV2 and WeldAgent remain independent; Phase 10C 3D rendering
-has not started. Chrome browser smoke passed for the page, same-origin
+safe DOM APIs. PTV2 and WeldAgent remain independent. Chrome browser smoke
+passed for the page, same-origin
 resources and independent guidance view. Native browser file selection is a
 product capability; host-file access rejection in Codex/Chrome automation is a
 test-tool limitation, not a product blocker. Controlled client-contract
@@ -1140,6 +1142,14 @@ Phase 10B local validation recorded Windows Debug/Release at 681 registered,
 676 passed, 5 explicit capability skips and 0 failed. WSL Ubuntu Debug/Release
 each registered 914 tests, with 913 passed, 1 explicit capability skip and 0
 failed. The current Web UI target is 7/7 and the Linux Service route target is
-4/4. Host HTTP checks verified the three resources and their security headers.
+4/4. Host HTTP checks verified the four resources and their security headers.
 These are local evidence, not GitHub Actions evidence; no browser automation
 claim substitutes for the Phase 10A real backend E2E.
+
+## Current Phase 10C browser 3D visualization MVP
+
+The compiled viewer resource renders the input cloud, the validated PTV2 PLY
+overlay and WeldAgent path geometry. PTV2 output metadata is inherited from
+the input Artifact; prediction remains download-only. Direction axes use
+`start` as a display anchor without changing the Application JSON schema.
+Phase 10D retains full real browser E2E, streaming/LOD and advanced rendering.

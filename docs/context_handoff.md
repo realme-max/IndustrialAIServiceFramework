@@ -4,9 +4,9 @@
 
 - 项目：IndustrialAIServiceFramework
 - 当前分支：`phase/10-browser-upload-mvp`
-- 当前状态：`PHASE_10B_SAME_ORIGIN_WEB_UI_FINAL_HARDENED`（未提交工作区）
-- 已提交基线：Phase 10A `6e3679f14f00788fc02ca8aad300ec713484fe43`
-- 当前工作：完成同域 Web UI 最终加固与本地验证；不进入 Phase 10C
+- 当前状态：`PHASE_10C_BROWSER_3D_VISUALIZATION_FINAL_HARDENED`（未提交工作区）
+- 已提交基线：Phase 10B `8a79084373de46f31caa83ef8f0363c684b30f46`
+- 当前工作：完成 Phase 10C bounded WebGL2 viewer 的本地验证；不进入 Phase 10D
 - 当前实现：本地点云导入、SHA/manifest、Artifact resolver、Artifact HTTP 上传/下载、受控跨平台 ProcessRunner、独立 PTV2/WeldAgent adapters、Application Repository/Executor、单 worker 有界队列、六条 versioned HTTP route 和 Service 生命周期接入
 - Phase 9A：只读 Application Integration Design Audit 已完成
 - Phase 9B-1：新增 `iaisf_application_core` / `iaisf::application_core`，仅依赖 `iaisf::core`
@@ -1689,9 +1689,10 @@ the catalog is not reconstructed after restart.
 Output registration owns a shared catalog reference rather than a borrowed
 pointer. Service member destruction remains reverse-ordered so HTTP APIs and
 adapters disappear before the catalog. PTV2 and WeldAgent remain separate
-applications; no automatic chaining is introduced. Phase 10B Web UI is now
-implemented as the compiled-in same-origin resource checkpoint; Phase 10C 3D
-visualisation is not implemented.
+applications; no automatic chaining is introduced. Phase 10B Web UI is
+implemented as the compiled-in same-origin resource checkpoint; Phase 10C adds
+the compiled viewer resource with bounded XYZ/PLY and guidance geometry
+rendering.
 
 Phase 10A final local real HTTP evidence uses independent historical inputs,
 without modifying either external repository. The PTV2 input uploaded as
@@ -1713,37 +1714,52 @@ each WSL Ubuntu 24.04 GCC Debug and Release run (902 passed, 1 explicitly
 skipped, 0 failed). Artifact HTTP targeted tests were 9/9 in all four
 configurations; WSL is local evidence, not GitHub Actions evidence.
 
-## Current Phase 10B status
+## Historical Phase 10B status
 
 - Branch: `phase/10-browser-upload-mvp`
-- Status: `PHASE_10B_SAME_ORIGIN_WEB_UI_FINAL_HARDENED` (uncommitted worktree)
-- Baseline HEAD/upstream: `6e3679f14f00788fc02ca8aad300ec713484fe43`
+- Status: `PHASE_10B_SAME_ORIGIN_WEB_UI_FINAL_HARDENED` (committed baseline)
+- Baseline HEAD/upstream: `8a79084373de46f31caa83ef8f0363c684b30f46`
 - Chrome browser smoke passed locally for the page/resources and independent
   guidance view. Native browser file selection is a product capability; the
   extension/host-file limitation is specific to Codex/Chrome automation and
   is not a product blocker. Controlled client-contract assertions and Linux
   Service route tests are separate local evidence, not GitHub Actions evidence.
-- Phase 10C 3D rendering has not started.
+- Phase 10B did not include the Phase 10C viewer; the current Phase 10C checkpoint is
+  recorded below.
 
-## Phase 10B same-origin Web UI
+## Historical Phase 10B same-origin Web UI
 
 The new `iaisf_web_ui` target is a portable static-resource library linked by
 the Linux Service. `WebUiHttpApi` has no application-state ownership, no
-thread and no file I/O; Service owns it and registers three routes before
+thread and no file I/O; Service owns it and registers four routes before
 router freeze when applications are enabled. The resource bodies are compiled
 in, use strict same-origin CSP/security headers and keep the existing JSON
 contracts unchanged. The vanilla browser state machine uploads text, submits
 only the strict eight-field ArtifactRef, polls with AbortController and stops
 on `succeeded`, `waiting_human` or failure. No automatic PTV2/WeldAgent
-chaining or Phase 10C 3D rendering is present.
+chaining is present.
 
 Phase 10B validation: Windows Debug/Release full CTest each registered 681,
 with 676 passed, 5 explicit capability skips and 0 failed. WSL Ubuntu
 Debug/Release each registered 914, with 913 passed, 1 explicit capability skip
 and 0 failed. The current Web UI target is 7/7 and the Linux Service route
-target is 4/4. Host HTTP checks verified the three compiled-in resources and
+target is 4/4. Host HTTP checks verified the four compiled-in resources and
 security headers. Chrome browser smoke reached the WSL listener and verified
 the page, same-origin resources and independent guidance view; the in-app
 browser attempt was blocked by the WSL network boundary. Phase 10A's real
 dual-application HTTP E2E remains separate local backend evidence. This is
 local evidence, not GitHub Actions evidence.
+
+## Current Phase 10C checkpoint
+
+`iaisf_web_ui` now owns `/ui/point-cloud-viewer.js`. It uses bounded XYZ and
+fixed ASCII PLY parsing, shared input-cloud normalization, deterministic
+display downsampling and safe fallback. Prediction parsing, workers,
+Range/streaming/LOD, quality scoring, robot control and automatic
+PTV2/WeldAgent chaining remain out of scope.
+
+Phase 10C local full CTest registered 688 tests in Windows VS2022 Debug and
+Release (683 passed, 5 explicit capability skips, 0 failed), and 921 tests in
+WSL Ubuntu Debug and Release (920 passed, 1 explicit capability skip, 0 failed).
+Web UI 7/7 and Linux Service Web UI routes 4/4 passed in both WSL builds. WSL
+is local evidence, not GitHub Actions evidence.

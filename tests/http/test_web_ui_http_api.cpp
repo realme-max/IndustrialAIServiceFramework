@@ -34,13 +34,13 @@ std::string header_value(
     return {};
 }
 
-TEST(WebUiHttpApiTest, RegistersThreeResourcesWithSecureHeaders) {
+TEST(WebUiHttpApiTest, RegistersFourResourcesWithSecureHeaders) {
     auto api = WebUiHttpApi::create(http::HttpLimits::defaults());
     ASSERT_TRUE(api);
 
     http::HttpRouter router;
     ASSERT_TRUE(api.value()->register_routes(router));
-    EXPECT_EQ(router.route_count(), 3U);
+    EXPECT_EQ(router.route_count(), 4U);
     ASSERT_TRUE(router.freeze());
 
     const auto response = router.dispatch(make_request("GET", "/"));
@@ -62,10 +62,16 @@ TEST(WebUiHttpApiTest, RegistersThreeResourcesWithSecureHeaders) {
     EXPECT_NE(csp.find("frame-ancestors 'none'"), std::string::npos);
     EXPECT_NE(response.value().body().find("/ui/app.css"), std::string::npos);
     EXPECT_NE(response.value().body().find("/ui/app.js"), std::string::npos);
+    EXPECT_NE(response.value().body().find("/ui/point-cloud-viewer.js"), std::string::npos);
+    EXPECT_LT(response.value().body().find("/ui/point-cloud-viewer.js"),
+              response.value().body().find("/ui/app.js"));
     EXPECT_EQ(response.value().body().find("<script>"), std::string::npos);
     EXPECT_EQ(response.value().body().find("style="), std::string::npos);
     EXPECT_EQ(response.value().body().find("http://"), std::string::npos);
     EXPECT_EQ(response.value().body().find("https://"), std::string::npos);
+    EXPECT_EQ(response.value().body().find("visualization-placeholder"), std::string::npos);
+    EXPECT_EQ(response.value().body().find("Phase 10C"), std::string::npos);
+    EXPECT_NE(response.value().body().find("viewer-description"), std::string::npos);
 }
 
 TEST(WebUiHttpApiTest, ResourcesHaveExpectedMediaTypesAndAccessibleContent) {
@@ -78,11 +84,16 @@ TEST(WebUiHttpApiTest, ResourcesHaveExpectedMediaTypesAndAccessibleContent) {
     const auto css = router.dispatch(make_request("GET", "/ui/app.css"));
     const auto javascript = router.dispatch(
         make_request("GET", "/ui/app.js"));
+    const auto viewer = router.dispatch(
+        make_request("GET", "/ui/point-cloud-viewer.js"));
     ASSERT_TRUE(css);
     ASSERT_TRUE(javascript);
+    ASSERT_TRUE(viewer);
     EXPECT_EQ(header_value(css.value(), "Content-Type"),
               "text/css; charset=utf-8");
     EXPECT_EQ(header_value(javascript.value(), "Content-Type"),
+              "application/javascript; charset=utf-8");
+    EXPECT_EQ(header_value(viewer.value(), "Content-Type"),
               "application/javascript; charset=utf-8");
     EXPECT_NE(css.value().body().find(".panel"), std::string::npos);
     EXPECT_NE(javascript.value().body().find("AbortController"),
@@ -90,6 +101,26 @@ TEST(WebUiHttpApiTest, ResourcesHaveExpectedMediaTypesAndAccessibleContent) {
     EXPECT_NE(javascript.value().body().find("textContent"),
               std::string::npos);
     EXPECT_EQ(javascript.value().body().find("innerHTML"), std::string::npos);
+    EXPECT_NE(viewer.value().body().find("IaisfPointCloudViewer"), std::string::npos);
+    EXPECT_NE(viewer.value().body().find("webgl2"), std::string::npos);
+    EXPECT_EQ(viewer.value().body().find("eval("), std::string::npos);
+    EXPECT_EQ(viewer.value().body().find("innerHTML"), std::string::npos);
+    EXPECT_NE(viewer.value().body().find("canonicalDownload"), std::string::npos);
+    EXPECT_NE(viewer.value().body().find("500000"), std::string::npos);
+    EXPECT_NE(viewer.value().body().find("xyz-f32le"), std::string::npos);
+    EXPECT_NE(viewer.value().body().find("[1,0,0,1]"), std::string::npos);
+    EXPECT_NE(viewer.value().body().find("[0,1,0,1]"), std::string::npos);
+    EXPECT_NE(viewer.value().body().find("[0,0,1,1]"), std::string::npos);
+    EXPECT_NE(viewer.value().body().find("pointercancel"), std::string::npos);
+    EXPECT_NE(viewer.value().body().find("lostpointercapture"), std::string::npos);
+    EXPECT_NE(viewer.value().body().find("context lost"), std::string::npos);
+    EXPECT_NE(viewer.value().body().find("canonicalDownload"), std::string::npos);
+    EXPECT_NE(viewer.value().body().find("DECIMAL_INTEGER"), std::string::npos);
+    EXPECT_NE(viewer.value().body().find("DECIMAL_FLOAT"), std::string::npos);
+    EXPECT_NE(viewer.value().body().find("parseUnsignedInteger"), std::string::npos);
+    EXPECT_NE(viewer.value().body().find("parseFiniteDecimal"), std::string::npos);
+    EXPECT_NE(viewer.value().body().find("Number.isSafeInteger(value)"), std::string::npos);
+    EXPECT_NE(viewer.value().body().find("values[3] !== \"0\""), std::string::npos);
 }
 
 TEST(WebUiHttpApiTest, ClientContractValidationAndAbortControlsAreEmbedded) {

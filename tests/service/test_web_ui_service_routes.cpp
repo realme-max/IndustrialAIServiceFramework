@@ -172,20 +172,20 @@ Result<ServiceOptions> options_with_routes(
         routes, metrics, diagnostics, enabled_applications());
 }
 
-TEST(ServiceWebUiRouteTest, ApplicationCapacityIncludesThreeWebResources) {
-    const auto valid = options_with_routes(16, false, false);
+TEST(ServiceWebUiRouteTest, ApplicationCapacityIncludesFourWebResources) {
+    const auto valid = options_with_routes(17, false, false);
     ASSERT_TRUE(valid);
 
-    const auto too_small = options_with_routes(15, false, false);
+    const auto too_small = options_with_routes(16, false, false);
     ASSERT_FALSE(too_small);
     EXPECT_EQ(too_small.error().code, ErrorCode::InvalidArgument);
 }
 
 TEST(ServiceWebUiRouteTest, MetricsAndDiagnosticsAreIncludedInCapacity) {
-    EXPECT_TRUE(options_with_routes(17, true, false));
-    EXPECT_TRUE(options_with_routes(17, false, true));
-    EXPECT_TRUE(options_with_routes(18, true, true));
-    EXPECT_FALSE(options_with_routes(17, true, true));
+    EXPECT_TRUE(options_with_routes(18, true, false));
+    EXPECT_TRUE(options_with_routes(18, false, true));
+    EXPECT_TRUE(options_with_routes(19, true, true));
+    EXPECT_FALSE(options_with_routes(18, true, true));
 }
 
 Result<WireResponse> run_get(
@@ -230,7 +230,7 @@ TEST(ServiceWebUiRouteTest, ApplicationsEnabledServesWebUiAndExistingRoutes) {
     std::error_code cleanup_error;
     std::filesystem::remove_all(root, cleanup_error);
     auto options = options_with_applications(
-        16, false, false, temporary_applications(root));
+        17, false, false, temporary_applications(root));
     ASSERT_TRUE(options);
     auto html = run_get(std::move(options).value(), "/");
     ASSERT_TRUE(html);
@@ -238,7 +238,7 @@ TEST(ServiceWebUiRouteTest, ApplicationsEnabledServesWebUiAndExistingRoutes) {
     EXPECT_NE(html.value().body.find("<!doctype html>"), std::string::npos);
 
     auto css_options = options_with_applications(
-        16, false, false, temporary_applications(root));
+        17, false, false, temporary_applications(root));
     ASSERT_TRUE(css_options);
     auto css = run_get(std::move(css_options).value(), "/ui/app.css");
     ASSERT_TRUE(css);
@@ -246,33 +246,41 @@ TEST(ServiceWebUiRouteTest, ApplicationsEnabledServesWebUiAndExistingRoutes) {
     EXPECT_NE(css.value().body.find(".secondary"), std::string::npos);
 
     auto js_options = options_with_applications(
-        16, false, false, temporary_applications(root));
+        17, false, false, temporary_applications(root));
     ASSERT_TRUE(js_options);
     auto javascript = run_get(std::move(js_options).value(), "/ui/app.js");
     ASSERT_TRUE(javascript);
     EXPECT_EQ(javascript.value().status, 200);
     EXPECT_NE(javascript.value().body.find("AbortController"), std::string::npos);
 
+    auto viewer_options = options_with_applications(
+        17, false, false, temporary_applications(root));
+    ASSERT_TRUE(viewer_options);
+    auto viewer = run_get(std::move(viewer_options).value(), "/ui/point-cloud-viewer.js");
+    ASSERT_TRUE(viewer);
+    EXPECT_EQ(viewer.value().status, 200);
+    EXPECT_NE(viewer.value().body.find("IaisfPointCloudViewer"), std::string::npos);
+
     auto health = run_get(
-        options_with_applications(16, false, false, temporary_applications(root)).value(),
+        options_with_applications(17, false, false, temporary_applications(root)).value(),
         "/health");
     ASSERT_TRUE(health);
     EXPECT_EQ(health.value().status, 200);
 
     auto task = run_get(
-        options_with_applications(16, false, false, temporary_applications(root)).value(),
+        options_with_applications(17, false, false, temporary_applications(root)).value(),
         "/v1/tasks/unknown");
     ASSERT_TRUE(task);
     EXPECT_EQ(task.value().status, 400);
 
     auto application = run_get(
-        options_with_applications(16, false, false, temporary_applications(root)).value(),
+        options_with_applications(17, false, false, temporary_applications(root)).value(),
         "/api/weld-inspection/v1/jobs/wi_bad");
     ASSERT_TRUE(application);
     EXPECT_EQ(application.value().status, 404);
 
     auto artifact = run_get(
-        options_with_applications(16, false, false, temporary_applications(root)).value(),
+        options_with_applications(17, false, false, temporary_applications(root)).value(),
         "/api/artifacts/v1/files/pc_bad");
     ASSERT_TRUE(artifact);
     EXPECT_EQ(artifact.value().status, 404);

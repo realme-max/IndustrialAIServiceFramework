@@ -44,7 +44,7 @@ struct Fixture final {
             {"sha256", "15ec7bf0b50732b49f8228e07d24365338f9e3ab994b00af08e5a3bffe55fd8b"},
             {"size_bytes", 12U}, {"kind", "input"},
             {"media_type", "application/vnd.iaisf.pointcloud.xyz-f32le"},
-            {"coordinate_frame", ""}, {"unit", ""}, {"point_count", 1U}};
+            {"coordinate_frame", "camera"}, {"unit", "mm"}, {"point_count", 1U}};
         std::ofstream manifest_file(artifacts / "inputs" / "input-1" / "artifact.json");
         manifest_file << manifest.dump();
     }
@@ -58,7 +58,7 @@ struct Fixture final {
         return {"input-1",
                 "15ec7bf0b50732b49f8228e07d24365338f9e3ab994b00af08e5a3bffe55fd8b",
                 12U, "input", "application/vnd.iaisf.pointcloud.xyz-f32le",
-                std::nullopt, std::nullopt, 1U};
+                std::string{"camera"}, std::string{"mm"}, 1U};
     }
 
     Result<ApplicationJobSnapshot> snapshot(const IndustrialApplication app,
@@ -75,7 +75,10 @@ struct Fixture final {
 
 class FakeRunner final : public IProcessRunner {
 public:
-    enum class Kind { Ptv2, Agent, Fail, Timeout, OutputLimit, Throw };
+    enum class Kind { Ptv2, Ptv2InvalidCounts, Ptv2WrongTotal, Ptv2WeldExceedsTotal,
+                      Ptv2ZeroWeld, Ptv2ZeroWeldMissingRatio,
+                      Ptv2ZeroWeldNonzeroRatio, Ptv2ZeroWeldInvalidRatio,
+                      Agent, Fail, Timeout, OutputLimit, Throw };
     explicit FakeRunner(Kind kind, std::filesystem::path project = {})
         : kind_(kind), project_(std::move(project)) {}
 
@@ -94,7 +97,10 @@ public:
         if (kind_ == Kind::Throw) {
             throw std::runtime_error("fixture runner failure");
         }
-        if (kind_ == Kind::Ptv2) {
+        if (kind_ == Kind::Ptv2 || kind_ == Kind::Ptv2InvalidCounts ||
+            kind_ == Kind::Ptv2WrongTotal || kind_ == Kind::Ptv2WeldExceedsTotal ||
+            kind_ == Kind::Ptv2ZeroWeld || kind_ == Kind::Ptv2ZeroWeldMissingRatio ||
+            kind_ == Kind::Ptv2ZeroWeldNonzeroRatio || kind_ == Kind::Ptv2ZeroWeldInvalidRatio) {
             const auto cloud = argument_after(spec.arguments, "--cloud");
             std::ifstream cloud_input(cloud);
             std::string line;
@@ -120,7 +126,23 @@ public:
             const auto output = argument_after(spec.arguments, "--output");
             std::filesystem::create_directories(output);
             std::ofstream result(output / "weld_result.json");
-            result << R"({"weld_points":1,"weld_ratio":0.5,"length_mm":12.0,"inference_ms":3.0})";
+            if (kind_ == Kind::Ptv2InvalidCounts) {
+                result << R"({"total_points":2,"weld_points":3,"weld_ratio":1.5,"length_mm":12.0,"inference_ms":3.0})";
+            } else if (kind_ == Kind::Ptv2WrongTotal) {
+                result << R"({"total_points":2,"weld_points":1,"weld_ratio":0.5,"length_mm":12.0,"inference_ms":3.0})";
+            } else if (kind_ == Kind::Ptv2WeldExceedsTotal) {
+                result << R"({"total_points":1,"weld_points":2,"weld_ratio":1.0,"length_mm":12.0,"inference_ms":3.0})";
+            } else if (kind_ == Kind::Ptv2ZeroWeld) {
+                result << R"({"total_points":1,"weld_points":0,"weld_ratio":0.0,"length_mm":0.0,"inference_ms":3.0})";
+            } else if (kind_ == Kind::Ptv2ZeroWeldMissingRatio) {
+                result << R"({"total_points":1,"weld_points":0,"length_mm":0.0,"inference_ms":3.0})";
+            } else if (kind_ == Kind::Ptv2ZeroWeldNonzeroRatio) {
+                result << R"({"total_points":1,"weld_points":0,"weld_ratio":0.1,"length_mm":0.0,"inference_ms":3.0})";
+            } else if (kind_ == Kind::Ptv2ZeroWeldInvalidRatio) {
+                result << R"({"total_points":1,"weld_points":0,"weld_ratio":"invalid","length_mm":0.0,"inference_ms":3.0})";
+            } else {
+                result << R"({"total_points":1,"weld_points":1,"weld_ratio":0.5,"length_mm":12.0,"inference_ms":3.0})";
+            }
             std::ofstream ply(output / "weld_points.ply"); ply << "ply\n";
             std::ofstream prediction(output / "prediction.txt"); prediction << "0\n";
         } else {
@@ -207,6 +229,12 @@ TEST(ApplicationAdapterTest, Ptv2ParsesFixtureAndRegistersArtifacts) {
     EXPECT_EQ(inspection.weld_point_count, 1U);
     EXPECT_EQ(inspection.quality_assessment, "not_implemented");
     EXPECT_EQ(inspection.output_artifacts.size(), 3U);
+    ASSERT_TRUE(inspection.weld_points.has_value());
+    EXPECT_EQ(inspection.weld_points->coordinate_frame, std::optional<std::string>{"camera"});
+    EXPECT_EQ(inspection.weld_points->unit, std::optional<std::string>{"mm"});
+    EXPECT_EQ(inspection.weld_points->point_count, std::optional<std::uint64_t>{1U});
+    ASSERT_TRUE(inspection.prediction.has_value());
+    EXPECT_EQ(inspection.prediction->point_count, std::optional<std::uint64_t>{1U});
     EXPECT_TRUE(runner.ptv2_cloud_is_four_column);
     EXPECT_EQ(runner.ptv2_cloud_rows, 1U);
     EXPECT_FALSE(std::filesystem::exists(fixture.scratch / "jobs" / "job-ptv2" / "input"));
@@ -214,6 +242,130 @@ TEST(ApplicationAdapterTest, Ptv2ParsesFixtureAndRegistersArtifacts) {
     EXPECT_EQ(runner.last_.arguments[2], "--plugin");
     EXPECT_EQ(runner.last_.arguments[4], "--cloud");
     EXPECT_NE(runner.last_.arguments[5].find("pointcloud.ptv2.txt"), std::string::npos);
+}
+
+TEST(ApplicationAdapterTest, Ptv2RejectsInconsistentResultPointCounts) {
+    Fixture fixture;
+    auto resolver = LocalArtifactResolver::make(fixture.artifacts);
+    ASSERT_TRUE(resolver);
+    FakeRunner runner(FakeRunner::Kind::Ptv2InvalidCounts);
+    auto adapter = Ptv2WeldInspectionAdapter::create(
+        {"ptv2", "engine.plan", "plugin.so", {}, fixture.scratch, fixture.outputs,
+         std::chrono::seconds{5}, 1024U, 1024U, 4096U}, *resolver.value(), runner);
+    ASSERT_TRUE(adapter);
+    auto snapshot = fixture.snapshot(IndustrialApplication::WeldInspection,
+                                     ScenePhase::PostWeld, inspection_submission().value(), "job-invalid-counts");
+    ASSERT_TRUE(snapshot);
+    const auto result = adapter.value()->execute(snapshot.value());
+    EXPECT_FALSE(result);
+    EXPECT_EQ(result.error().code, ErrorCode::InvalidArgument);
+}
+
+TEST(ApplicationAdapterTest, Ptv2RejectsWrongTotalPointCount) {
+    Fixture fixture;
+    auto resolver = LocalArtifactResolver::make(fixture.artifacts);
+    ASSERT_TRUE(resolver);
+    FakeRunner runner(FakeRunner::Kind::Ptv2WrongTotal);
+    auto adapter = Ptv2WeldInspectionAdapter::create(
+        {"ptv2", "engine.plan", "plugin.so", {}, fixture.scratch, fixture.outputs,
+         std::chrono::seconds{5}, 1024U, 1024U, 4096U}, *resolver.value(), runner);
+    ASSERT_TRUE(adapter);
+    auto snapshot = fixture.snapshot(IndustrialApplication::WeldInspection,
+                                     ScenePhase::PostWeld, inspection_submission().value(), "job-wrong-total");
+    ASSERT_TRUE(snapshot);
+    const auto result = adapter.value()->execute(snapshot.value());
+    EXPECT_FALSE(result);
+    EXPECT_EQ(result.error().code, ErrorCode::InvalidArgument);
+}
+
+TEST(ApplicationAdapterTest, Ptv2RejectsWeldCountAboveTotal) {
+    Fixture fixture;
+    auto resolver = LocalArtifactResolver::make(fixture.artifacts);
+    ASSERT_TRUE(resolver);
+    FakeRunner runner(FakeRunner::Kind::Ptv2WeldExceedsTotal);
+    auto adapter = Ptv2WeldInspectionAdapter::create(
+        {"ptv2", "engine.plan", "plugin.so", {}, fixture.scratch, fixture.outputs,
+         std::chrono::seconds{5}, 1024U, 1024U, 4096U}, *resolver.value(), runner);
+    ASSERT_TRUE(adapter);
+    auto snapshot = fixture.snapshot(IndustrialApplication::WeldInspection,
+                                     ScenePhase::PostWeld, inspection_submission().value(), "job-weld-too-many");
+    ASSERT_TRUE(snapshot);
+    const auto result = adapter.value()->execute(snapshot.value());
+    EXPECT_FALSE(result);
+    EXPECT_EQ(result.error().code, ErrorCode::InvalidArgument);
+}
+
+TEST(ApplicationAdapterTest, Ptv2AllowsZeroWeldPoints) {
+    Fixture fixture;
+    auto resolver = LocalArtifactResolver::make(fixture.artifacts);
+    ASSERT_TRUE(resolver);
+    FakeRunner runner(FakeRunner::Kind::Ptv2ZeroWeld);
+    auto adapter = Ptv2WeldInspectionAdapter::create(
+        {"ptv2", "engine.plan", "plugin.so", {}, fixture.scratch, fixture.outputs,
+         std::chrono::seconds{5}, 1024U, 1024U, 4096U}, *resolver.value(), runner);
+    ASSERT_TRUE(adapter);
+    auto snapshot = fixture.snapshot(IndustrialApplication::WeldInspection,
+                                     ScenePhase::PostWeld, inspection_submission().value(), "job-zero-weld");
+    ASSERT_TRUE(snapshot);
+    const auto result = adapter.value()->execute(snapshot.value());
+    ASSERT_TRUE(result) << result.error().message;
+    const auto& inspection = std::get<WeldInspectionResult>(result.value());
+    EXPECT_EQ(inspection.weld_point_count, 0U);
+    EXPECT_DOUBLE_EQ(inspection.weld_ratio, 0.0);
+    EXPECT_FALSE(inspection.weld_points.has_value());
+    ASSERT_TRUE(inspection.prediction.has_value());
+    EXPECT_EQ(inspection.output_artifacts.size(), 2U);
+}
+
+TEST(ApplicationAdapterTest, Ptv2RejectsZeroWeldWithoutRatio) {
+    Fixture fixture;
+    auto resolver = LocalArtifactResolver::make(fixture.artifacts);
+    ASSERT_TRUE(resolver);
+    FakeRunner runner(FakeRunner::Kind::Ptv2ZeroWeldMissingRatio);
+    auto adapter = Ptv2WeldInspectionAdapter::create(
+        {"ptv2", "engine.plan", "plugin.so", {}, fixture.scratch, fixture.outputs,
+         std::chrono::seconds{5}, 1024U, 1024U, 4096U}, *resolver.value(), runner);
+    ASSERT_TRUE(adapter);
+    auto snapshot = fixture.snapshot(IndustrialApplication::WeldInspection,
+                                     ScenePhase::PostWeld, inspection_submission().value(), "job-zero-missing-ratio");
+    ASSERT_TRUE(snapshot);
+    const auto result = adapter.value()->execute(snapshot.value());
+    ASSERT_FALSE(result);
+    EXPECT_EQ(result.error().code, ErrorCode::InvalidArgument);
+}
+
+TEST(ApplicationAdapterTest, Ptv2RejectsZeroWeldWithNonzeroRatio) {
+    Fixture fixture;
+    auto resolver = LocalArtifactResolver::make(fixture.artifacts);
+    ASSERT_TRUE(resolver);
+    FakeRunner runner(FakeRunner::Kind::Ptv2ZeroWeldNonzeroRatio);
+    auto adapter = Ptv2WeldInspectionAdapter::create(
+        {"ptv2", "engine.plan", "plugin.so", {}, fixture.scratch, fixture.outputs,
+         std::chrono::seconds{5}, 1024U, 1024U, 4096U}, *resolver.value(), runner);
+    ASSERT_TRUE(adapter);
+    auto snapshot = fixture.snapshot(IndustrialApplication::WeldInspection,
+                                     ScenePhase::PostWeld, inspection_submission().value(), "job-zero-nonzero-ratio");
+    ASSERT_TRUE(snapshot);
+    const auto result = adapter.value()->execute(snapshot.value());
+    ASSERT_FALSE(result);
+    EXPECT_EQ(result.error().code, ErrorCode::InvalidArgument);
+}
+
+TEST(ApplicationAdapterTest, Ptv2RejectsZeroWeldWithInvalidRatio) {
+    Fixture fixture;
+    auto resolver = LocalArtifactResolver::make(fixture.artifacts);
+    ASSERT_TRUE(resolver);
+    FakeRunner runner(FakeRunner::Kind::Ptv2ZeroWeldInvalidRatio);
+    auto adapter = Ptv2WeldInspectionAdapter::create(
+        {"ptv2", "engine.plan", "plugin.so", {}, fixture.scratch, fixture.outputs,
+         std::chrono::seconds{5}, 1024U, 1024U, 4096U}, *resolver.value(), runner);
+    ASSERT_TRUE(adapter);
+    auto snapshot = fixture.snapshot(IndustrialApplication::WeldInspection,
+                                     ScenePhase::PostWeld, inspection_submission().value(), "job-zero-invalid-ratio");
+    ASSERT_TRUE(snapshot);
+    const auto result = adapter.value()->execute(snapshot.value());
+    ASSERT_FALSE(result);
+    EXPECT_EQ(result.error().code, ErrorCode::InvalidArgument);
 }
 
 #if !defined(_WIN32)
