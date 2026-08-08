@@ -2,14 +2,13 @@
 
 ## 1. 状态与原则
 
-> 当前 Phase 9B-3A-3A 加固后的本地最终矩阵：Windows VS2022 Debug 和 Release 各注册 642 项，其中
-> 637 passed、5 explicitly skipped、0 failed；WSL Ubuntu 24.04 GCC 13.3.0 Debug 和 Release
-> 各注册 871 项，其中 870 passed、1 explicitly skipped、0 failed。Application label Windows 为
-> 103/103、WSL 为 104/104；`iaisf_application_api_primitives_tests` Windows 为 18/18、Linux
-> 为 19/19（含 1 个 Linux-only getrandom seam 测试）。WSL 是本地验证，不是 GitHub
-> Actions 证据；项目源码和测试 warning 为 0。
+> 当前 Phase 10B 本地矩阵：Windows VS2022 Debug 和 Release 各注册 681 项，其中 676 passed、
+> 5 explicitly skipped、0 failed；WSL Ubuntu 24.04 GCC 13.3.0 Debug 和 Release 各注册 914
+> 项，其中 913 passed、1 explicitly skipped、0 failed。Web UI 为 7/7，Linux Service Web UI
+> routes 为 4/4，Artifact HTTP 为 9/9。WSL 是本地验证，不是 GitHub Actions 证据；项目源码
+> 和测试 warning 为 0。
 
-> Phase 9B-3A-1 本地最终矩阵：Windows VS2022 Debug 和 Release 各注册 607 项，其中
+> 历史 Phase 9B-3A-1 本地最终矩阵：Windows VS2022 Debug 和 Release 各注册 607 项，其中
 > 602 passed、5 explicitly skipped、0 failed；WSL Ubuntu 24.04 GCC 13.3.0 Debug 和
 > Release 各注册 835 项，其中 834 passed、1 explicitly skipped、0 failed。Application
 > 分组在四个配置中均为 74 项（Application Submission 8、Application Domain 33、
@@ -1050,3 +1049,34 @@ The final four-configuration matrix is Windows VS2022 Debug/Release at 674
 registered, 669 passed, 5 explicitly skipped and 0 failed each, and WSL Ubuntu
 24.04 GCC Debug/Release at 903 registered, 902 passed, 1 explicitly skipped
 and 0 failed each. Artifact HTTP targeted tests are 9/9 in every configuration.
+
+## Phase 10B Web UI tests
+
+The Web UI unit target `iaisf_web_ui_tests` covers the three-resource route
+registration, exact media types, CSP/no-store/nosniff/referrer/frame headers,
+absence of inline or external resources, response-limit preflight, 404/405,
+freeze-time registration failure and expired-owner fail-closed behavior.
+Service integration covers applications enabled/disabled, the 11-route
+capacity calculation, metrics/diagnostics combinations and old Task,
+Application and Artifact routes. Page/resource browser smoke, the compiled
+client-contract assertions (including bounded polling, `waiting_human`, safe
+result rendering and download-link validation), and the Phase 10A real backend
+HTTP E2E are recorded as separate evidence; none claims GitHub CI executed
+external projects or GPU work. Native file selection remains a product path,
+while host-file restrictions in Codex/Chrome automation are test-tool limits.
+Phase 10C owns all 3D rendering.
+
+Phase 10B validation: `iaisf_web_ui_tests` passed 7/7 in Windows Debug,
+Windows Release, WSL Debug and WSL Release. The Linux Service route target
+passed 4/4 in WSL Debug and Release, including enabled/disabled root, CSS/JS,
+health, Task, Application and Artifact route checks. Windows full CTest passed
+676/681 with five explicit capability skips in both Debug and Release; WSL
+Debug and Release each passed 913/914 with one explicit capability skip.
+No test failed. Host HTTP checks verified 200 responses, media types and
+security headers for `/`, `/ui/app.css` and `/ui/app.js`. Chrome browser smoke
+reached the WSL listener and verified the page, same-origin resources and
+independent guidance view; host-file access rejection in Codex/Chrome
+automation is a test-tool limitation, not a product blocker. Controlled
+client-contract assertions are recorded separately; no browser automation
+claim is substituted for the Phase 10A real backend E2E. These are local
+results, not GitHub Actions evidence.

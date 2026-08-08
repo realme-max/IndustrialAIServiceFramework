@@ -19,6 +19,23 @@ replacement, truncation, growth and digest mismatch fail closed. No Range,
 streaming, authentication or persistent catalog is provided; the catalog is
 process-local and is empty after restart.
 
+## Phase 10B same-origin UI
+
+When the application runtime is enabled, the service embeds one independent
+WebUiHttpApi with exactly three fixed GET resources: `/`, `/ui/app.css` and
+`/ui/app.js`. HTML, CSS and JavaScript are compiled into the binary. The UI
+does not read files from the working directory and does not provide a general
+static-file server. It uses the existing direct `text/plain` point-cloud
+upload, strict eight-field ArtifactRef, six versioned application routes and
+canonical Artifact download URLs without changing their JSON contracts.
+
+The browser state machine is bounded (`Idle -> Uploading -> Uploaded ->
+Submitting -> Polling -> ResultReady/WaitingHuman/Failed`), disables duplicate
+submits, aborts stale requests, and stops polling on terminal failure or
+`waiting_human`. PTV2 and WeldAgent are independent. PTV2 explicitly reports
+`quality_assessment=not_implemented`; WeldAgent explicitly reports
+`robot_execution_allowed=false`. Phase 10C owns all 3D rendering.
+
 The final local real HTTP E2E uses separate inputs for the two applications.
 PTV2 uploads a 2048-point artifact, reaches `Succeeded`, returns 205 weld
 points and three output artifacts, and each download byte count/SHA matches
@@ -199,6 +216,24 @@ data, quality assessment or internal errors. This phase has no HTTP route and
 does not migrate the existing Task API parser. Status URL construction, JSON
 construction and serialization are contained by the public `Result` exception
 boundary; allocation-bearing public functions do not claim `noexcept`.
+
+## Phase 10B same-origin Web UI hardening
+
+The application-enabled Service registers the compiled-in `/`, `/ui/app.css`
+and `/ui/app.js` resources before router freeze. The browser uploads direct
+text/plain XYZ/TXT/PTS content through the existing Artifact API, validates the
+strict eight-field ArtifactRef and canonical job/status URLs, and carries the
+upload point count into inspection rendering without changing the result
+contract. Bounded polling uses an AbortController and an explicit stop-wait
+control; stopping page waiting does not cancel the server job. Result output
+links are canonical, deduplicated and rendered with safe DOM APIs. Inspection
+requires `quality_assessment=not_implemented`; guidance requires
+`robot_execution_allowed=false`.
+
+Native file selection is a product capability. Host-file access restrictions in
+Codex/Chrome automation are test-tool limitations, not product blockers. The
+UI does not implement Phase 10C visualization, authentication, cancellation,
+or automatic PTV2/WeldAgent chaining.
 
 ## Phase 9B-3A-3A Job ID Generator and Clock
 

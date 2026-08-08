@@ -460,6 +460,22 @@ target_include_directories(
 target_link_libraries(iaisf_diagnostics_http PUBLIC iaisf::http_core iaisf::diagnostics)
 iaisf_enable_project_warnings(iaisf_diagnostics_http)
 
+add_library(
+  iaisf_web_ui
+  STATIC
+  src/http/web_ui_http_api.cpp
+)
+add_library(iaisf::web_ui ALIAS iaisf_web_ui)
+target_compile_features(iaisf_web_ui PUBLIC cxx_std_17)
+target_include_directories(
+  iaisf_web_ui
+  PUBLIC
+    "$<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>"
+    "$<BUILD_INTERFACE:${IAISF_GENERATED_INCLUDE_DIR}>"
+)
+target_link_libraries(iaisf_web_ui PUBLIC iaisf::http_core)
+iaisf_enable_project_warnings(iaisf_web_ui)
+
 if(IAISF_BUILD_LINUX_NETWORK)
   add_library(
     iaisf_net
@@ -559,6 +575,7 @@ if(IAISF_BUILD_LINUX_NETWORK)
       iaisf::health
       iaisf::diagnostics_http
       iaisf::diagnostics
+      iaisf::web_ui
       iaisf::application_runtime
       iaisf::application_repository
       iaisf::application_api_primitives

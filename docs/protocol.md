@@ -700,4 +700,40 @@ start/end/corner/axes and waiting metadata, but always returns
 `robot_execution_allowed=false`. Neither route exposes joint values,
 controller URLs, local paths, commands, stderr or tool configuration. The two
 applications are independent and are never automatically chained. Persistence,
-Artifact upload/download, cancel/retry and remote workers remain out of scope.
+cancel/retry and remote workers remain out of scope for this historical MVP-3
+contract; Phase 10A subsequently added the separate enabled-only Artifact
+upload/download API documented above.
+
+## Phase 10B same-origin Web UI
+
+When applications are enabled, the service registers only these fixed same-
+origin resources before router freeze:
+
+```text
+GET /
+GET /ui/app.css
+GET /ui/app.js
+```
+
+The three resources are compiled into the binary and use `text/html`,
+`text/css` and `application/javascript` content types. They set `no-store`,
+`nosniff`, `no-referrer`, `X-Frame-Options: DENY` and a strict self-only CSP;
+there is no directory file server, CORS, CDN, external font or inline script.
+Application-related route capacity is therefore 11 (six job routes, two
+Artifact routes and three UI routes). The browser sends the existing direct
+text upload, submits only the strict eight-field ArtifactRef, uses bounded
+AbortController polling and treats `waiting_human` as a readable terminal
+result. PTV2 and WeldAgent are never chained; quality remains
+`not_implemented` and robot execution remains false. Three-dimensional
+rendering is reserved for Phase 10C.
+
+The Phase 10B client validates the upload response's exact eight-field
+ArtifactRef before submission, validates the returned business-specific Job ID
+and canonical status URL, and retains `artifact.point_count` for inspection
+rendering. It bounds error text, maps malformed HTTP errors to status-specific
+generic messages, and never inserts server data with `innerHTML`. A visible
+stop-wait control aborts browser fetch/polling only; the server job may continue.
+Result downloads are deduplicated across `output_artifacts`, `weld_points` and
+`prediction` and require the canonical artifact URL. Native browser file
+selection is supported; host-file access restrictions in automation are a
+test-tool limitation. No Phase 10C visualization is included.

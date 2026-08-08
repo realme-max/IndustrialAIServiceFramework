@@ -3,9 +3,9 @@
 ## 1. 文档状态
 
 - 项目：IndustrialAIServiceFramework
-- 阶段：Phase 9 Fast Track MVP-3 Application Executor、HTTP 与 Service
+- 阶段：Phase 10B 同域 Web UI（基于已提交的 Phase 10A Artifact Web API）
 - 日期：2026-08-08
-- 状态：本地实现已提交 `b2f16cb99bc2e4c04cdf777fc6acc56575b35b16`；文档/远端 CI 封板进行中
+- 状态：Phase 10A 已提交基线 `6e3679f14f00788fc02ca8aad300ec713484fe43`；Phase 10B 为当前未提交工作区
 - 目标平台：portable C++17 application core；既有服务运行目标仍为 Linux x86_64
 
 本文同时记录已实现的既有服务栈和 Phase 9B-1/9B-2 应用领域与 Repository 核心。只有明确列入已实现边界的类才是当前能力；历史阶段验证记录保留，不代表 Phase 9 外部 worker 已实现。

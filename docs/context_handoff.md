@@ -3,11 +3,11 @@
 ## 1. 当前状态
 
 - 项目：IndustrialAIServiceFramework
-- 当前分支：`phase/9-industrial-ai-application-layer`
-- 当前状态：Fast Track MVP-3 本地实现已提交，文档/CI 封板待远端验证
-- 当前实现提交：`b2f16cb99bc2e4c04cdf777fc6acc56575b35b16`
-- 当前工作：同步 Fast Track MVP-3 文档并验证 Linux CI 显式 application targets；不再扩展业务实现
-- 当前实现：本地点云导入、SHA/manifest、Artifact resolver、受控跨平台 ProcessRunner、独立 PTV2/WeldAgent adapters、Application Repository/Executor、单 worker 有界队列、六条 versioned HTTP route 和 Service 生命周期接入
+- 当前分支：`phase/10-browser-upload-mvp`
+- 当前状态：`PHASE_10B_SAME_ORIGIN_WEB_UI_FINAL_HARDENED`（未提交工作区）
+- 已提交基线：Phase 10A `6e3679f14f00788fc02ca8aad300ec713484fe43`
+- 当前工作：完成同域 Web UI 最终加固与本地验证；不进入 Phase 10C
+- 当前实现：本地点云导入、SHA/manifest、Artifact resolver、Artifact HTTP 上传/下载、受控跨平台 ProcessRunner、独立 PTV2/WeldAgent adapters、Application Repository/Executor、单 worker 有界队列、六条 versioned HTTP route 和 Service 生命周期接入
 - Phase 9A：只读 Application Integration Design Audit 已完成
 - Phase 9B-1：新增 `iaisf_application_core` / `iaisf::application_core`，仅依赖 `iaisf::core`
 - Phase 9B-1A：返回分配型 `Result` 的解析/验证 API 不声明 `noexcept`；纯查询和 bool 检查保留 `noexcept`
@@ -19,7 +19,7 @@
 - 验证：Windows Debug/Release 各注册 642 项（637 passed、5 explicitly skipped、0 failed）；WSL Ubuntu 24.04 GCC 13.3.0 Debug/Release 各注册 871 项（870 passed、1 explicitly skipped、0 failed）；Application Windows 103/103、WSL 104/104，api_primitives Windows 18/18、Linux 19/19（含 Linux-only getrandom seam）；warning 0。WSL 结果不是 GitHub Actions 证据
 - 应用边界：`weld_inspection/post_weld` 与 `welding_guidance/pre_weld` 完全独立，不自动串联
 - 真实性边界：PTV2 质量评价为 `quality_assessment=not_implemented`；WeldAgent 不得生成真实 joint values、控制机器人或发送 URL
-- 未实现：持久化 Repository、HTTP Artifact 上传/下载和通用 Artifact Store、cancel/retry/heartbeat/lease/fencing、远程 Worker Protocol、PTV2 真实质量评价、WeldAgent joint values/机器人控制、两个应用自动串联，以及 GitHub runner 上的真实 GPU/外部项目 E2E
+- 未实现：持久化 Catalog/Repository、Range、流式上传/下载、认证、cancel/retry/heartbeat/lease/fencing、远程 Worker Protocol、PTV2 真实质量评价、WeldAgent joint values/机器人控制、两个应用自动串联，以及 GitHub runner 上的真实 GPU/外部项目 E2E；Phase 10A Artifact HTTP 上传/下载已实现
 - Phase 0 提交：`5fbcec0 docs: complete phase 0 architecture design`
 - Phase 1 最终实现提交：`63b30cffcbe3e621af33664721b3675a647bd1a1`
 - Phase 2 起始 HEAD / main / origin/main：`6065d91b277c07ed04e64b3f08034788965e6ac1`
@@ -1668,14 +1668,14 @@ with finite geometry/axes, a bounded waiting reason and
 `robot_execution_allowed=false`. Neither workflow runner nor CI test invokes
 PTV2/WeldAgent, CUDA, or real GPU workloads.
 
-Remaining boundaries are persistent storage, Artifact upload/download,
+At the historical MVP-3 checkpoint, remaining boundaries were persistent storage, Artifact upload/download,
 cancel/retry/heartbeat/lease/fencing, remote Worker Protocol, quality scoring,
 joint values, robot control and automatic cross-application chaining.
 
 ## Current Phase 10A handoff
 
-The current branch is `phase/10-browser-upload-mvp`; Phase 10A changes remain
-uncommitted. `LocalArtifactCatalog` is a bounded process-local shared index
+The current branch is `phase/10-browser-upload-mvp`; Phase 10A is committed at
+the current baseline. `LocalArtifactCatalog` is a bounded process-local shared index
 for the configured artifact and output roots. `ArtifactHttpApi` exposes the
 direct text upload and catalog-validated whole-body download endpoints only
 when applications are enabled. Uploads use deterministic SHA-256 IDs,
@@ -1689,8 +1689,9 @@ the catalog is not reconstructed after restart.
 Output registration owns a shared catalog reference rather than a borrowed
 pointer. Service member destruction remains reverse-ordered so HTTP APIs and
 adapters disappear before the catalog. PTV2 and WeldAgent remain separate
-applications; no automatic chaining is introduced. Phase 10B Web UI and
-Phase 10C 3D visualisation are not implemented.
+applications; no automatic chaining is introduced. Phase 10B Web UI is now
+implemented as the compiled-in same-origin resource checkpoint; Phase 10C 3D
+visualisation is not implemented.
 
 Phase 10A final local real HTTP evidence uses independent historical inputs,
 without modifying either external repository. The PTV2 input uploaded as
@@ -1711,3 +1712,38 @@ Release run (669 passed, 5 explicitly skipped, 0 failed), and 903 tests in
 each WSL Ubuntu 24.04 GCC Debug and Release run (902 passed, 1 explicitly
 skipped, 0 failed). Artifact HTTP targeted tests were 9/9 in all four
 configurations; WSL is local evidence, not GitHub Actions evidence.
+
+## Current Phase 10B status
+
+- Branch: `phase/10-browser-upload-mvp`
+- Status: `PHASE_10B_SAME_ORIGIN_WEB_UI_FINAL_HARDENED` (uncommitted worktree)
+- Baseline HEAD/upstream: `6e3679f14f00788fc02ca8aad300ec713484fe43`
+- Chrome browser smoke passed locally for the page/resources and independent
+  guidance view. Native browser file selection is a product capability; the
+  extension/host-file limitation is specific to Codex/Chrome automation and
+  is not a product blocker. Controlled client-contract assertions and Linux
+  Service route tests are separate local evidence, not GitHub Actions evidence.
+- Phase 10C 3D rendering has not started.
+
+## Phase 10B same-origin Web UI
+
+The new `iaisf_web_ui` target is a portable static-resource library linked by
+the Linux Service. `WebUiHttpApi` has no application-state ownership, no
+thread and no file I/O; Service owns it and registers three routes before
+router freeze when applications are enabled. The resource bodies are compiled
+in, use strict same-origin CSP/security headers and keep the existing JSON
+contracts unchanged. The vanilla browser state machine uploads text, submits
+only the strict eight-field ArtifactRef, polls with AbortController and stops
+on `succeeded`, `waiting_human` or failure. No automatic PTV2/WeldAgent
+chaining or Phase 10C 3D rendering is present.
+
+Phase 10B validation: Windows Debug/Release full CTest each registered 681,
+with 676 passed, 5 explicit capability skips and 0 failed. WSL Ubuntu
+Debug/Release each registered 914, with 913 passed, 1 explicit capability skip
+and 0 failed. The current Web UI target is 7/7 and the Linux Service route
+target is 4/4. Host HTTP checks verified the three compiled-in resources and
+security headers. Chrome browser smoke reached the WSL listener and verified
+the page, same-origin resources and independent guidance view; the in-app
+browser attempt was blocked by the WSL network boundary. Phase 10A's real
+dual-application HTTP E2E remains separate local backend evidence. This is
+local evidence, not GitHub Actions evidence.

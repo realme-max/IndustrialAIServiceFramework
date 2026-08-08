@@ -221,6 +221,25 @@ set_tests_properties(
   ${IAISF_APPLICATION_RUNTIME_TESTS}
   PROPERTIES LABELS "unit;application;runtime" TIMEOUT 30
 )
+
+add_executable(
+  iaisf_web_ui_tests
+  http/test_web_ui_http_api.cpp
+)
+target_compile_features(iaisf_web_ui_tests PRIVATE cxx_std_17)
+target_link_libraries(
+  iaisf_web_ui_tests
+  PRIVATE
+    iaisf::web_ui
+    GTest::gtest
+    GTest::gtest_main
+)
+iaisf_enable_project_warnings(iaisf_web_ui_tests)
+gtest_add_tests(TARGET iaisf_web_ui_tests TEST_LIST IAISF_WEB_UI_TESTS)
+set_tests_properties(
+  ${IAISF_WEB_UI_TESTS}
+  PROPERTIES LABELS "unit;http;web_ui" TIMEOUT 20
+)
 target_compile_features(iaisf_logging_tests PRIVATE cxx_std_17)
 target_link_libraries(
   iaisf_logging_tests
@@ -677,6 +696,7 @@ if(TARGET iaisf_service)
     service/test_industrial_ai_service.cpp
     service/test_health_lifecycle.cpp
     service/test_runtime_options.cpp
+    service/test_web_ui_service_routes.cpp
   )
   target_compile_features(iaisf_service_tests PRIVATE cxx_std_17)
   target_link_libraries(
