@@ -2,11 +2,11 @@
 
 ## 1. 执行原则
 
-当前实施点为 **Phase 9 Fast Track MVP-3（本地实现已提交，远端 CI 待封板）**。Phase 9A
-与 9B domain/repository、MVP-1/2 已完成；MVP-3 已接入本地 Artifact、受控进程、独立
-PTV2/WeldAgent adapters、Application Executor、六条 versioned HTTP route 和 Service
-生命周期。持久化、通用 Artifact Store、取消/重试、远程 Worker Protocol、质量评价和机器人
-控制仍属后续范围。
+当前实施点为 **Phase 10B 同域 Web UI（Phase 10A 已提交）**。Phase 9A/9B
+domain/repository、Fast Track MVP-1/2/3 和 Phase 10A Artifact Web API 已完成；Phase 10B
+在既有六条 Application route 和两条 Artifact route 之上增加编译进二进制的同域页面资源。
+持久化 Catalog、Range、流式上传/下载、认证、取消/重试、远程 Worker Protocol、质量评价和
+机器人控制仍属后续范围。
 
 项目当前按 Phase 0—10 推进。Phase 2 后将 Reactor Core 与 TCP Transport 分开验收，
 因此后续原计划顺延一阶段。每个阶段只在其验收门槛通过后进入下一阶段，并同步更新：
@@ -654,6 +654,26 @@ Both real local HTTP E2E flows passed. PTV2 reports
 `quality_assessment=not_implemented`; WeldAgent may return `WaitingHuman` but
 always reports `robot_execution_allowed=false`. GitHub Actions will verify
 framework targets and tests only, not external/GPU E2E. Persistent storage,
-artifact upload/download, cancel/retry/heartbeat/lease/fencing, remote Worker
-Protocol, quality scoring, joint values, robot control and cross-application
-chaining remain unimplemented.
+cancel/retry/heartbeat/lease/fencing, remote Worker Protocol, quality scoring,
+joint values, robot control and cross-application chaining remained unimplemented
+at this historical MVP-3 checkpoint; Phase 10A subsequently added the separate
+Artifact HTTP upload/download API.
+
+## Current Phase 10B checkpoint
+
+`PHASE_10B_SAME_ORIGIN_WEB_UI_FINAL_HARDENED` is the current state in the
+uncommitted worktree on `phase/10-browser-upload-mvp`. The committed Phase 10A
+baseline is `6e3679f14f00788fc02ca8aad300ec713484fe43`; the Phase 10B resources,
+client contract checks, abort controls and Linux service-route evidence are
+working-tree changes. Native browser file selection is a product capability;
+the inability of Codex/Chrome automation to read host files is a test-tool
+limitation only. Phase 10C 3D rendering remains unstarted.
+
+## Phase 10B same-origin Web UI
+
+Phase 10B adds only the compiled-in same-origin UI resources `/`,
+`/ui/app.css` and `/ui/app.js` when applications are enabled. It keeps the
+Artifact and Application JSON contracts unchanged, uses a bounded browser
+state machine with AbortController, and does not add a static file server,
+external frontend dependencies or 3D rendering. Phase 10C remains reserved
+for Three.js/WebGL-style point-cloud and geometry visualisation.

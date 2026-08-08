@@ -43,7 +43,7 @@ jobs:
       - name: Verify application and service targets Debug
         run: |
           cmake --build build/linux-debug \
-            --target iaisf_application_core iaisf_application_core_tests iaisf_application_artifacts iaisf_application_artifact_result_tests iaisf_application_repository iaisf_application_repository_tests iaisf_application_contract iaisf_application_contract_tests iaisf_application_api_primitives iaisf_application_api_primitives_tests iaisf_application_runtime iaisf_application_runtime_tests iaisf_http_core iaisf_http_core_tests iaisf_http iaisf_http_tests iaisf_task iaisf_task_tests iaisf_plugin iaisf_plugin_tests iaisf_task_api iaisf_task_api_tests iaisf_service iaisf_service_tests \
+            --target iaisf_application_core iaisf_application_core_tests iaisf_application_artifacts iaisf_application_artifact_result_tests iaisf_application_repository iaisf_application_repository_tests iaisf_application_contract iaisf_application_contract_tests iaisf_application_api_primitives iaisf_application_api_primitives_tests iaisf_application_runtime iaisf_application_runtime_tests iaisf_web_ui iaisf_web_ui_tests iaisf_http_core iaisf_http_core_tests iaisf_http iaisf_http_tests iaisf_task iaisf_task_tests iaisf_plugin iaisf_plugin_tests iaisf_task_api iaisf_task_api_tests iaisf_service iaisf_service_tests \
             --parallel
 
       - name: Test Debug
@@ -66,7 +66,7 @@ jobs:
       - name: Verify application and service targets Release
         run: |
           cmake --build build/linux-release \
-            --target iaisf_application_core iaisf_application_core_tests iaisf_application_artifacts iaisf_application_artifact_result_tests iaisf_application_repository iaisf_application_repository_tests iaisf_application_contract iaisf_application_contract_tests iaisf_application_api_primitives iaisf_application_api_primitives_tests iaisf_application_runtime iaisf_application_runtime_tests iaisf_http_core iaisf_http_core_tests iaisf_http iaisf_http_tests iaisf_task iaisf_task_tests iaisf_plugin iaisf_plugin_tests iaisf_task_api iaisf_task_api_tests iaisf_service iaisf_service_tests \
+            --target iaisf_application_core iaisf_application_core_tests iaisf_application_artifacts iaisf_application_artifact_result_tests iaisf_application_repository iaisf_application_repository_tests iaisf_application_contract iaisf_application_contract_tests iaisf_application_api_primitives iaisf_application_api_primitives_tests iaisf_application_runtime iaisf_application_runtime_tests iaisf_web_ui iaisf_web_ui_tests iaisf_http_core iaisf_http_core_tests iaisf_http iaisf_http_tests iaisf_task iaisf_task_tests iaisf_plugin iaisf_plugin_tests iaisf_task_api iaisf_task_api_tests iaisf_service iaisf_service_tests \
             --parallel
 
       - name: Test Release

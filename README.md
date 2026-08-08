@@ -1,8 +1,14 @@
 # IndustrialAIServiceFramework
 
-## Phase 10A current status
+## Phase 10A/10B current status
 
-The current uncommitted Phase 10A hardening adds a bounded Artifact Web API:
+The committed Phase 10A baseline is
+`6e3679f14f00788fc02ca8aad300ec713484fe43`. Phase 10B is the current
+uncommitted same-origin Web UI hardening worktree; the native browser file
+chooser is supported by the product, while host-file access limits in
+Codex/Chrome automation are test-tool constraints only.
+
+Phase 10A adds a bounded Artifact Web API:
 `POST /api/artifacts/v1/pointclouds` accepts direct `text/plain` XYZ input and
 `GET /api/artifacts/v1/files/{artifact_id}` serves only catalog-registered,
 revalidated artifacts. Uploads are canonical little-endian float32 XYZ with a
@@ -24,14 +30,16 @@ WeldAgent used 823114 points and reached `201 -> 202 -> WaitingHuman -> 200`.
 The earlier `weld_65_2047.txt` attempt remains a negative diagnostic: its 2047
 points were correctly rejected by the PTV2 minimum-2048 pipeline requirement.
 
-Final local matrix: Windows VS2022 Debug/Release each registered 674 tests
-(669 passed, 5 explicitly skipped, 0 failed); WSL Ubuntu 24.04 GCC
-Debug/Release each registered 903 tests (902 passed, 1 explicitly skipped,
+Final Phase 10B local matrix: Windows VS2022 Debug/Release each registered 681
+tests (676 passed, 5 explicitly skipped, 0 failed); WSL Ubuntu 24.04 GCC
+Debug/Release each registered 914 tests (913 passed, 1 explicitly skipped,
 0 failed). Artifact HTTP targeted tests were 9/9 in all four configurations.
+The current Web UI target is 7/7 and the Linux Service route target is 4/4;
+these focused checks are local evidence.
 
 面向工业 AI 应用的 C++ 高性能任务服务框架。
 
-> 当前结论：Phase 9 Fast Track MVP-3 已在本地完成并提交（`b2f16cb99bc2e4c04cdf777fc6acc56575b35b16`）。本地真实 PTV2/WeldAgent HTTP E2E 已通过；GitHub Actions 仅验证框架构建与测试，不执行真实 GPU/外部项目 E2E。
+> 历史记录：Phase 9 Fast Track MVP-3 曾在本地完成并提交（`b2f16cb99bc2e4c04cdf777fc6acc56575b35b16`）。本地真实 PTV2/WeldAgent HTTP E2E 已通过；GitHub Actions 仅验证框架构建与测试，不执行真实 GPU/外部项目 E2E。
 
 ## 项目定位
 
@@ -50,7 +58,7 @@ Phase 9 Fast Track MVP-3 在上述 domain/repository 基础上完成了本地运
 
 本地真实 HTTP E2E 已通过：PTV2 返回 202→Succeeded→200，WeldAgent 返回 202→WaitingHuman→200。PTV2 明确返回 `quality_assessment=not_implemented`；WeldAgent 明确返回 `robot_execution_allowed=false`。这些是本地证据，不是 GitHub Actions 证据。
 
-当前仍未实现：持久化 Repository；HTTP Artifact 上传、下载和通用 Artifact Store；cancel、retry、heartbeat、lease、fencing、远程 Worker Protocol；PTV2 真实焊缝质量评价；WeldAgent joint values、轨迹下发或机器人控制；两个应用自动串联；GitHub runner 上的真实 GPU/外部项目 E2E。完整边界见 [Fast Track MVP-3](docs/fast_track_mvp3.md)。
+Phase 9/MVP-3 历史边界中尚未实现持久化 Repository、通用 Artifact Store、cancel、retry、heartbeat、lease、fencing、远程 Worker Protocol、PTV2 真实焊缝质量评价、WeldAgent joint values/轨迹下发/机器人控制和两个应用自动串联；Phase 10A 已补充本地 Artifact HTTP 上传/下载。GitHub runner 仍不执行真实 GPU/外部项目 E2E。完整边界见 [Fast Track MVP-3](docs/fast_track_mvp3.md)。
 
 - `weld_inspection/post_weld` 与 `welding_guidance/pre_weld` 是两个完全独立的应用，不自动串联。
 - `iaisf_application_core` 提供 `ApplicationIdentity`、集中式 `ApplicationJobState` 转换矩阵、公共 `ArtifactRef`、强类型 `ApplicationJobId` 和不可产生非法公开状态的 `ApplicationJobSnapshot`。
@@ -61,8 +69,8 @@ Phase 9 Fast Track MVP-3 在上述 domain/repository 基础上完成了本地运
 - 跨 application 查询或更新统一返回 `NotFound`，不泄露另一应用的 Job 是否存在；`weld_inspection/post_weld` 与 `welding_guidance/pre_weld` 继续完全独立。
 - PTV2 当前定位仅为分割与几何输入；独立质量能力尚未实现，必须标记 `quality_assessment=not_implemented`。
 - WeldAgent 当前边界禁止真实 joint values、机器人控制及 controller URL 发送。
-- MVP-3/10A 本地验证：Windows VS2022 Debug/Release 全量 CTest 各 674 registered、669 passed、5 explicitly skipped、0 failed；WSL Ubuntu 24.04 GCC Debug/Release 各 903 registered、902 passed、1 explicitly skipped、0 failed。Artifact HTTP 定向测试四套配置均为 9/9；项目源码与测试编译 warning 为 0。WSL 是本地证据，不是 GitHub Actions 证据；Phase 9B 历史矩阵保留在历史记录中。
-- 持久化 Repository、HTTP Artifact 上传/下载和通用 Artifact Store、Worker Protocol 以及两个业务的自动串联仍未实现；MVP-3 的本地 HTTP API 与 PTV2/WeldAgent adapters 已实现。
+- MVP-3/Phase 10A 之前的历史本地验证记录：Windows VS2022 Debug/Release 全量 CTest 各 674 registered、669 passed、5 explicitly skipped、0 failed；WSL Ubuntu 24.04 GCC Debug/Release 各 903 registered、902 passed、1 explicitly skipped、0 failed。该历史记录中的 Artifact HTTP 定向测试为四套配置 9/9；WSL 是本地证据，不是 GitHub Actions 证据；Phase 9B 历史矩阵保留在历史记录中。
+- Phase 9/MVP-3 历史边界不包含持久化 Repository、通用 Artifact Store、Worker Protocol 或两个业务自动串联；Phase 10A 已实现 Artifact HTTP 上传/下载。PTV2/WeldAgent adapters 与本地 HTTP API 已实现。
 - 设计与边界详见 [Application Layer](docs/application_layer.md)。
 
 ## Phase 8C-2 配置系统
@@ -721,3 +729,30 @@ smoke exited 0 and produced `final_result.json`; its adapter preserves human
 review and `robot_execution_allowed=false`. No automatic chaining, Worker
 Protocol, robot control, or quality assessment is implemented; HTTP integration
 and Application Executor are provided by MVP-3 below.
+
+## Phase 10B same-origin Web UI
+
+Phase 10B adds a compiled-in, same-origin browser UI only when
+`applications.enabled=true`. It serves exactly `GET /`, `GET /ui/app.css` and
+`GET /ui/app.js`; there is no directory static-file server, external asset,
+CDN, npm dependency, CORS or authentication. The UI uploads direct
+`text/plain` XYZ/TXT/PTS bodies to the existing Artifact API, submits the
+strict eight-field ArtifactRef to one of the two independent Application
+APIs, polls with a bounded AbortController state machine, and renders result
+fields and canonical Artifact download links using safe DOM APIs.
+
+PTV2 remains `quality_assessment=not_implemented`; WeldAgent remains
+`robot_execution_allowed=false`. No 3D rendering is included; point-cloud
+visualisation, segmentation overlays and geometry drawing remain Phase 10C.
+
+Phase 10B local validation: Windows VS2022 Debug and Release each registered
+681 tests (676 passed, 5 explicit capability skips, 0 failed) after the final
+narrow additions. WSL Ubuntu 24.04 Debug and Release each registered 914 tests
+(913 passed, 1 explicit capability skip, 0 failed); the current Web UI target
+is 7/7 and the Linux Service route target is 4/4. Host HTTP checks verified
+all three resources and their security headers. Chrome browser smoke reached
+the WSL listener and verified the page, same-origin resources and independent
+guidance view; host-file access restrictions in Codex/Chrome automation are a
+test-tool limitation, not a product blocker. These are local checks, not
+GitHub Actions evidence, and no browser automation claim replaces the Phase
+10A real backend E2E.

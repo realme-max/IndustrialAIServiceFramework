@@ -14,6 +14,7 @@
 #include "iaisf/core/result.hpp"
 #include "iaisf/diagnostics/runtime_diagnostics.hpp"
 #include "iaisf/http/http_server.hpp"
+#include "iaisf/http/web_ui_http_api.hpp"
 #include "iaisf/health/health_checker.hpp"
 #include "iaisf/logging/logger.hpp"
 #include "iaisf/logging/log_diagnostics.hpp"
@@ -97,6 +98,7 @@ public:
         std::unique_ptr<application::ApplicationExecutor> application_executor,
         application::ApplicationHttpApi::Ptr application_api,
         application::ArtifactHttpApi::Ptr artifact_api,
+        std::shared_ptr<web_ui::WebUiHttpApi> web_ui_api,
         std::shared_ptr<SignalShutdownState> signal_shutdown_state) noexcept;
 
     [[nodiscard]] Result<void> start();
@@ -138,6 +140,7 @@ private:
     std::unique_ptr<application::ApplicationExecutor> application_executor_;
     application::ApplicationHttpApi::Ptr application_api_;
     application::ArtifactHttpApi::Ptr artifact_api_;
+    std::shared_ptr<web_ui::WebUiHttpApi> web_ui_api_;
     http::HttpServer::Ptr http_server_;
     std::shared_ptr<SignalShutdownState> signal_shutdown_state_;
     net::EventLoop::DeferredCleanup stop_continuation_;

@@ -245,6 +245,7 @@ Result<IndustrialAiService::Ptr> IndustrialAiService::create(
         std::unique_ptr<application::ApplicationExecutor> application_executor;
         application::ApplicationHttpApi::Ptr application_api;
         application::ArtifactHttpApi::Ptr artifact_api;
+        std::shared_ptr<web_ui::WebUiHttpApi> web_ui_api;
         if (options.applications().enabled) {
             auto catalog = application::LocalArtifactCatalog::make(
                 options.applications().artifact_root,
@@ -302,6 +303,12 @@ Result<IndustrialAiService::Ptr> IndustrialAiService::create(
                 return Result<Ptr>::failure(std::move(artifact_api_result).error());
             }
             artifact_api = std::move(artifact_api_result).value();
+            auto web_ui_result = web_ui::WebUiHttpApi::create(
+                options.http_limits());
+            if (!web_ui_result) {
+                return Result<Ptr>::failure(std::move(web_ui_result).error());
+            }
+            web_ui_api = std::move(web_ui_result).value();
         }
 
         http::HttpRouter router{options.http_limits()};
@@ -325,6 +332,12 @@ Result<IndustrialAiService::Ptr> IndustrialAiService::create(
             auto artifact_routes = artifact_api->register_routes(router);
             if (!artifact_routes) {
                 return Result<Ptr>::failure(std::move(artifact_routes).error());
+            }
+        }
+        if (web_ui_api) {
+            auto web_ui_routes = web_ui_api->register_routes(router);
+            if (!web_ui_routes) {
+                return Result<Ptr>::failure(std::move(web_ui_routes).error());
             }
         }
         if (options.metrics_enabled()) {
@@ -389,6 +402,7 @@ Result<IndustrialAiService::Ptr> IndustrialAiService::create(
             std::move(application_executor),
             std::move(application_api),
             std::move(artifact_api),
+            std::move(web_ui_api),
             std::move(signal_shutdown_state)}};
         service->signal_shutdown_state_->service = service.get();
         signal_rollback.dismiss();
@@ -426,6 +440,7 @@ IndustrialAiService::IndustrialAiService(
     std::unique_ptr<application::ApplicationExecutor> application_executor,
     application::ApplicationHttpApi::Ptr application_api,
     application::ArtifactHttpApi::Ptr artifact_api,
+    std::shared_ptr<web_ui::WebUiHttpApi> web_ui_api,
     std::shared_ptr<SignalShutdownState> signal_shutdown_state) noexcept
     : loop_(loop),
       logger_(logger),
@@ -446,6 +461,7 @@ IndustrialAiService::IndustrialAiService(
       application_executor_(std::move(application_executor)),
       application_api_(std::move(application_api)),
       artifact_api_(std::move(artifact_api)),
+      web_ui_api_(std::move(web_ui_api)),
       http_server_(std::move(http_server)),
       signal_shutdown_state_(std::move(signal_shutdown_state)),
       stop_continuation_(this, &IndustrialAiService::run_stop_continuation) {}
