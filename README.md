@@ -2,7 +2,7 @@
 
 面向工业 AI 应用的 C++ 高性能任务服务框架。
 
-> 当前结论：`PHASE_9B_3A_3A_APPLICATION_JOB_ID_GENERATOR_AND_CLOCK_COMPLETED`（本地四配置验证，未提交）。本阶段只增加 OS CSPRNG Job ID generator、system clock 和独立 API primitives target；没有 HTTP、Service、Worker 或 Artifact I/O。
+> 当前结论：Phase 9 Fast Track MVP-3 已在本地完成并提交（`b2f16cb99bc2e4c04cdf777fc6acc56575b35b16`）。本地真实 PTV2/WeldAgent HTTP E2E 已通过；GitHub Actions 仅验证框架构建与测试，不执行真实 GPU/外部项目 E2E。
 
 ## 项目定位
 
@@ -17,6 +17,12 @@ HTTP/TCP Service 和 signalfd 停止链路并进入事件循环。Windows 保留
 
 ## Phase 9 Application Domain 与 Repository Core
 
+Phase 9 Fast Track MVP-3 在上述 domain/repository 基础上完成了本地运行时接入：本地点云导入、SHA-256/manifest 校验和受控 Artifact resolver；受控跨平台进程执行；独立的 PTV2 焊后分割 adapter 与 WeldAgent 焊前建系/起终点/拐点 adapter；Application Repository、Executor 和单 worker 有界队列；六条 versioned HTTP route；以及 AppConfig、RuntimeOptions、IndustrialAiService 生命周期接入。PTV2 与 WeldAgent 完全独立，不自动串联。
+
+本地真实 HTTP E2E 已通过：PTV2 返回 202→Succeeded→200，WeldAgent 返回 202→WaitingHuman→200。PTV2 明确返回 `quality_assessment=not_implemented`；WeldAgent 明确返回 `robot_execution_allowed=false`。这些是本地证据，不是 GitHub Actions 证据。
+
+当前仍未实现：持久化 Repository；HTTP Artifact 上传、下载和通用 Artifact Store；cancel、retry、heartbeat、lease、fencing、远程 Worker Protocol；PTV2 真实焊缝质量评价；WeldAgent joint values、轨迹下发或机器人控制；两个应用自动串联；GitHub runner 上的真实 GPU/外部项目 E2E。完整边界见 [Fast Track MVP-3](docs/fast_track_mvp3.md)。
+
 - `weld_inspection/post_weld` 与 `welding_guidance/pre_weld` 是两个完全独立的应用，不自动串联。
 - `iaisf_application_core` 提供 `ApplicationIdentity`、集中式 `ApplicationJobState` 转换矩阵、公共 `ArtifactRef`、强类型 `ApplicationJobId` 和不可产生非法公开状态的 `ApplicationJobSnapshot`。
 - `iaisf_application_repository` 提供结构化失败、乐观版本控制和线程安全的 `InMemoryApplicationJobRepository`。成功转换在单一临界区内校验并提交，version 精确增加 1；相同 `expected_version` 的并发转换只有一次成功。
@@ -26,8 +32,8 @@ HTTP/TCP Service 和 signalfd 停止链路并进入事件循环。Windows 保留
 - 跨 application 查询或更新统一返回 `NotFound`，不泄露另一应用的 Job 是否存在；`weld_inspection/post_weld` 与 `welding_guidance/pre_weld` 继续完全独立。
 - PTV2 当前定位仅为分割与几何输入；独立质量能力尚未实现，必须标记 `quality_assessment=not_implemented`。
 - WeldAgent 当前边界禁止真实 joint values、机器人控制及 controller URL 发送。
-- Windows VS2022 Debug/Release 本地各注册 642 项：637 passed、5 explicitly skipped、0 failed；WSL Ubuntu 24.04 GCC Debug/Release 本地各注册 871 项：870 passed、1 explicitly skipped、0 failed。Application label Windows 为 103/103、WSL 为 104/104；`api_primitives` 定向测试 Windows 为 18/18、Linux 为 19/19；项目源码与测试编译 warning 为 0。WSL 是本地证据，不是 GitHub Actions 证据。Phase 9B-3A-2 的旧矩阵保留在历史记录中。
-- versioned HTTP Application API、持久化 Repository、Artifact I/O/Store、Worker Protocol 和两个外部项目 adapter 均未实现。
+- MVP-3 本地定向验证：Windows VS2022 Debug/Release application runtime 各 14/14，WSL Debug runtime 14/14；WSL Ubuntu 24.04 Release 全量 CTest 为 894 registered、893 passed、1 explicitly skipped、0 failed。项目源码与测试编译 warning 为 0；WSL 是本地证据，不是 GitHub Actions 证据。Phase 9B 历史矩阵保留在历史记录中。
+- 持久化 Repository、HTTP Artifact 上传/下载和通用 Artifact Store、Worker Protocol 以及两个业务的自动串联仍未实现；MVP-3 的本地 HTTP API 与 PTV2/WeldAgent adapters 已实现。
 - 设计与边界详见 [Application Layer](docs/application_layer.md)。
 
 ## Phase 8C-2 配置系统
@@ -659,7 +665,7 @@ completion, and bounded JSON projections. HTTP, Worker Protocol, Service
 composition, persistence and uploads/downloads are outside MVP-1; the
 independent PTV2/WeldAgent adapters are introduced only by MVP-2 below.
 
-## Phase 9 Fast Track MVP-2
+## Phase 9 Fast Track MVP-2（已由 MVP-3 接续）
 
 The local MVP-2 checkpoint adds a bounded non-shell process runner, job-private
 XYZ-f32le-to-TXT materialization, controlled output Artifact registration, and
@@ -676,13 +682,13 @@ passed 652, with five explicit capability skips and zero failures in both Debug
 and Release; WSL local full CTest registered 886, passed 885, with one explicit
 permission-capability skip and zero failures. The new runtime target passed 9/9
 in Windows Debug/Release and WSL Debug/Release. These are local results, not
-GitHub Actions evidence for this uncommitted work.
+GitHub Actions evidence for this historical local checkpoint.
 
 The narrow `iaisf_ptv2_adapter_smoke` entrypoint ran the archived PTV2
 executable through `Ptv2WeldInspectionAdapter + LocalProcessRunner` and exited
 0: 2048 total points, 205 weld points, weld ratio 0.10009765625, length
 0.8822024465, and three registered output Artifacts. A real WeldAgent pointcloud
 smoke exited 0 and produced `final_result.json`; its adapter preserves human
-review and `robot_execution_allowed=false`. No automatic chaining, HTTP
-integration, Application Executor, Worker Protocol, robot control, or quality
-assessment is implemented.
+review and `robot_execution_allowed=false`. No automatic chaining, Worker
+Protocol, robot control, or quality assessment is implemented; HTTP integration
+and Application Executor are provided by MVP-3 below.

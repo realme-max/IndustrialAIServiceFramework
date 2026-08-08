@@ -2,9 +2,15 @@
 
 ## 当前阶段
 
-Phase 9A 已完成只读设计审计。Phase 9B-1 建立跨平台、无 I/O 的应用领域基础；
-Phase 9B-2 在其上增加 `ApplicationJobId`、`ApplicationJobSnapshot`、Repository contract
-和有界内存实现。当前仍没有 HTTP Application API、持久化、Artifact I/O 或 Worker Protocol。
+Phase 9A 已完成只读设计审计。Phase 9B domain/repository、Fast Track MVP-1/2
+以及 MVP-3 本地运行时接入均已完成。MVP-3 增加本地点云导入、SHA/manifest 与
+Artifact resolver、受控跨平台进程、独立 PTV2/WeldAgent adapters、Application
+Executor、单 worker 有界队列和六条 versioned HTTP route。
+
+PTV2 与 WeldAgent 是完全独立的 `weld_inspection/post_weld` 和
+`welding_guidance/pre_weld` 应用，不自动串联。本地真实 HTTP E2E 已通过；远端 CI
+不执行真实 GPU/外部项目 E2E。持久化 Repository、通用 Artifact Store、取消/重试、
+远程 Worker Protocol、质量评价、机器人控制和跨应用自动串联仍未实现。
 
 ## 独立应用边界
 

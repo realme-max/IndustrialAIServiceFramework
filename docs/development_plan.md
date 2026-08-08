@@ -2,11 +2,11 @@
 
 ## 1. 执行原则
 
-当前实施点为 **Phase 9B-3A-3A（completed locally, uncommitted）**。Phase 9A 只读设计审计
-和 Phase 9B-1 portable Application Domain Foundation 已完成；Phase 9B-2 新增强类型 Job ID、
-不可变 snapshot、Repository contract 与有界内存实现，未开始 HTTP Application API、持久化、
-Artifact I/O 或 Worker Protocol。Phase 9B-3A-3A 仅实现 Job ID generator/clock primitives；HTTP/JSON API
-仍属后续范围。
+当前实施点为 **Phase 9 Fast Track MVP-3（本地实现已提交，远端 CI 待封板）**。Phase 9A
+与 9B domain/repository、MVP-1/2 已完成；MVP-3 已接入本地 Artifact、受控进程、独立
+PTV2/WeldAgent adapters、Application Executor、六条 versioned HTTP route 和 Service
+生命周期。持久化、通用 Artifact Store、取消/重试、远程 Worker Protocol、质量评价和机器人
+控制仍属后续范围。
 
 项目当前按 Phase 0—10 推进。Phase 2 后将 Reactor Core 与 TCP Transport 分开验收，
 因此后续原计划顺延一阶段。每个阶段只在其验收门槛通过后进入下一阶段，并同步更新：
@@ -628,7 +628,7 @@ application execution-result values, snapshot result invariants, atomic
 repository completion and result JSON projection. The next phase, if approved,
 must define a Worker Protocol separately; it is not part of this checkpoint.
 
-## Fast Track MVP-2 (local, uncommitted)
+## Fast Track MVP-2（已提交，后由 MVP-3 接续）
 
 Implemented locally: bounded controlled process execution, XYZ-f32le TXT
 materialization, controlled output Artifact registration, and separate PTV2
@@ -637,4 +637,23 @@ adds a private `x y z 0` bridge for its existing four-column loader while the
 generic materializer remains three-column. The bridge label is not ground
 truth, not a model feature and not a quality score. Not implemented: HTTP or
 Service composition, Repository mutation, Worker Protocol, automatic
-application chaining, robot control, or quality assessment.
+application chaining, robot control, or quality assessment. Its implementation
+was committed as `34ab4beb483992f3d62f1cb623f625f27db2ca6c`; the current HTTP
+and Service composition is documented in MVP-3 below.
+
+## Fast Track MVP-3：Application Executor、HTTP 与 Service（本地完成）
+
+Commit `b2f16cb99bc2e4c04cdf777fc6acc56575b35b16` completes the local runtime
+composition: Application Repository/Executor integration, a bounded single
+worker queue, six fixed versioned HTTP routes, AppConfig/RuntimeOptions wiring,
+and IndustrialAIService startup/stop ordering. Inspection dispatches only to
+PTV2; guidance dispatches only to WeldAgent. The two applications are never
+automatically chained.
+
+Both real local HTTP E2E flows passed. PTV2 reports
+`quality_assessment=not_implemented`; WeldAgent may return `WaitingHuman` but
+always reports `robot_execution_allowed=false`. GitHub Actions will verify
+framework targets and tests only, not external/GPU E2E. Persistent storage,
+artifact upload/download, cancel/retry/heartbeat/lease/fencing, remote Worker
+Protocol, quality scoring, joint values, robot control and cross-application
+chaining remain unimplemented.

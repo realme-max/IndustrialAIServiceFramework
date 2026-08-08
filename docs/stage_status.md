@@ -3,23 +3,41 @@
 ## 当前结论
 
 ```text
-PHASE_9B_3A_3A_APPLICATION_JOB_ID_GENERATOR_AND_CLOCK_COMPLETED
+PHASE_9_FAST_TRACK_MVP_REMOTE_CI_PENDING
 ```
 
-The current implementation checkpoint is
-`PHASE_9B_3A_3A_APPLICATION_JOB_ID_GENERATOR_AND_CLOCK_COMPLETED` (local, uncommitted).
+The current implementation checkpoint is the committed Fast Track MVP-3
+runtime at `b2f16cb99bc2e4c04cdf777fc6acc56575b35b16`. Local real HTTP E2E is
+complete; this sealing commit updates documentation and Linux target
+verification only. Remote CI is pending for the new docs/workflow commit.
 
-- 当前阶段：Phase 9B-3A-3A Application Job ID Generator and Clock（本地未提交）
-- 当前实施点：OS CSPRNG Job ID generator、system clock 与独立 `iaisf_application_api_primitives` target
-- 本阶段没有 HTTP route、Task API、Service、Repository、Worker Protocol 或 Artifact I/O 改动。
-- 基线：`4d3284febd95907ecdf20f0b96aa2ab1f5044855`（Phase 9B-3A-2 stable checkpoint；Linux CI run `31140290934`）
-- 实现状态：WeldInspection/WeldingGuidance 生成固定 35-byte canonical ID；Windows 使用 BCryptGenRandom，Linux 使用 getrandom；generator 与 generation result 均不可移动，result 保留拷贝不变量；clock 使用整数 ratio 检查 epoch 和 Unix milliseconds 可表示性并 fail-closed。
-- Windows 验证：Visual Studio 2022 x64 Debug/Release 各注册 642 项，637 passed、5 explicitly skipped、0 failed；Application 103/103，api_primitives 18/18
-- WSL 验证：Ubuntu 24.04 / GCC 13.3.0 Debug/Release 各注册 871 项，870 passed、1 explicitly skipped、0 failed；Application 104/104，api_primitives 19/19（含 1 个 Linux-only getrandom seam 测试）
+- 当前阶段：Phase 9 Fast Track MVP-3 Application Executor、HTTP 与 Service
+- 本地实现提交：`b2f16cb99bc2e4c04cdf777fc6acc56575b35b16`
+- 本轮范围：文档同步与 Linux CI 显式 application target verification；不修改业务实现
+- 本地点云导入、SHA/manifest、Artifact resolver、受控进程、PTV2/WeldAgent adapters、Application Repository/Executor、单 worker 有界队列和六条 versioned HTTP route 均已接入
+- MVP-3 定向验证：Windows VS2022 Debug/Release application runtime 各 14/14；WSL Debug runtime 14/14；WSL Release 全量 CTest 894 registered、893 passed、1 explicitly skipped、0 failed。
+- WSL Release 唯一测试级 skip 为既有 `SafePathResolverTest.PermissionFailureIsExplicitlyHandled` 能力检查；不属于 workflow step skip。
 - warning：项目源码与测试为 0；WSL 本地结果不冒充 GitHub Actions
-- 日期：2026-08-07（Asia/Shanghai）
-- 未实现：Job ID collision retry/coordinator、versioned HTTP Application API、Service 组合、持久化 Repository、Artifact I/O/Store、Worker Protocol、PTV2/WeldAgent adapter
-- 下一步：Phase 9B-3A-3B 仅在本阶段审计完成后规划；本阶段不进入后续实现
+- 日期：2026-08-08（Asia/Shanghai）
+- 未实现：持久化 Repository、HTTP Artifact 上传/下载和通用 Artifact Store、cancel/retry/heartbeat/lease/fencing、远程 Worker Protocol、PTV2 真实质量评价、WeldAgent joint values/机器人控制、两个应用自动串联，以及 GitHub runner 上的真实 GPU/外部项目 E2E
+- 下一步：提交本轮文档/workflow 封板并等待 exact-commit Linux CI；不进入后续功能阶段
+
+## Phase 9 Fast Track MVP-3 封板范围
+
+本地真实双业务 HTTP E2E 已通过，但这不是 GitHub Actions 证据：
+
+- PTV2 `weld_inspection/post_weld`：`202 -> Succeeded -> 200`；2048 input points、205 weld points、ratio `0.10009765625`、length 约 `0.8822024465`、3 个 Artifact，`quality_assessment=not_implemented`。
+- WeldAgent `welding_guidance/pre_weld`：`202 -> WaitingHuman -> 200`；返回有限 start/end/axes、camera/mm、confidence 和 bounded waiting reason，`robot_execution_allowed=false`。
+
+当前仍未实现：持久化 Repository；HTTP Artifact 上传、下载和通用 Artifact Store；cancel、retry、heartbeat、lease、fencing、远程 Worker Protocol；PTV2 真实质量评价；WeldAgent joint values、轨迹下发或机器人控制；两个应用自动串联；GitHub runner 上的真实 GPU/外部项目 E2E。
+
+CI workflow 已核对并补充真实 targets：`iaisf_application_core`、
+`iaisf_application_core_tests`、`iaisf_application_artifacts`、
+`iaisf_application_artifact_result_tests`、`iaisf_application_repository`、
+`iaisf_application_repository_tests`、`iaisf_application_contract`、
+`iaisf_application_contract_tests`、`iaisf_application_api_primitives`、
+`iaisf_application_api_primitives_tests`、`iaisf_application_runtime` 和
+`iaisf_application_runtime_tests`，并保留 HTTP/Task/Plugin/Service targets。
 
 Phase 8A/8B/8C-1 已提供 timerfd、TCP/HTTP timeout 和 signalfd；Phase 8C-2 在不改变
 这些生命周期语义的前提下增加一次性本地 JSON 配置和应用组合。Linux

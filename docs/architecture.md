@@ -3,9 +3,9 @@
 ## 1. 文档状态
 
 - 项目：IndustrialAIServiceFramework
-- 阶段：Phase 9B-2 Application Job Repository Core
-- 日期：2026-08-06
-- 状态：`PHASE_9B_2_APPLICATION_JOB_VALUE_INVARIANT_HARDENED`（本地双平台验证，未提交）
+- 阶段：Phase 9 Fast Track MVP-3 Application Executor、HTTP 与 Service
+- 日期：2026-08-08
+- 状态：本地实现已提交 `b2f16cb99bc2e4c04cdf777fc6acc56575b35b16`；文档/远端 CI 封板进行中
 - 目标平台：portable C++17 application core；既有服务运行目标仍为 Linux x86_64
 
 本文同时记录已实现的既有服务栈和 Phase 9B-1/9B-2 应用领域与 Repository 核心。只有明确列入已实现边界的类才是当前能力；历史阶段验证记录保留，不代表 Phase 9 外部 worker 已实现。
@@ -25,9 +25,10 @@ Phase 9B-2 新增 `ApplicationJobId`、不可变公开 `ApplicationJobSnapshot`�
 合法，assignment 采用 copy-then-swap 强失败不变性。Snapshot 产生新值前重新校验完整
 Domain 不变量；Repository 四个 ID 入口也独立 fail-closed，非法语法返回 `InvalidArgument`。
 
-PTV2/WeldAgent adapter、HTTP Application API、持久化 Repository、Artifact I/O 和 Worker Protocol
-均未实现。PTV2 的质量评价必须写为 `quality_assessment=not_implemented`；WeldAgent
-边界禁止真实 joint values、机器人控制和 URL 发送。详细契约见 `docs/application_layer.md`。
+PTV2/WeldAgent adapter、HTTP Application API 和 Service 组合已在 MVP-3 本地实现；持久化
+Repository、通用 Artifact Store、Worker Protocol、质量评价、真实 joint values、机器人控制
+和两个应用自动串联仍未实现。PTV2 必须写为 `quality_assessment=not_implemented`；WeldAgent
+必须写为 `robot_execution_allowed=false`。详细契约见 `docs/fast_track_mvp3.md`。
 
 ### 1.1 Phase 1 已实现边界
 
@@ -1099,3 +1100,36 @@ seams live under `src/application/detail` for tests and are not installed.
 The generator and generation result are intentionally non-movable; ordinary
 copy operations preserve their source and destination invariants. Allocation-
 bearing operations return structured failures and do not claim `noexcept`.
+
+## Phase 9 Fast Track MVP-3
+
+```text
+versioned JSON contract
+        |
+        v
+ApplicationHttpApi
+        |
+        v
+ApplicationJobRepository <- ApplicationExecutor <- bounded single worker
+        |                         |
+        |                         +--> Ptv2WeldInspectionAdapter
+        |                         +--> WeldAgentWeldingGuidanceAdapter
+        |                                      |
+        +--> status/result projections          +--> controlled ProcessRunner
+```
+
+The two adapters are selected by the validated application/scene pair and are
+never chained. The HTTP/EventLoop thread only validates the bounded contract,
+creates metadata and enqueues work; artifact byte validation, materialization,
+external process execution and output registration happen in the worker-side
+adapter. Application state uses `Accepted -> Queued -> Dispatching -> Running`
+and then `Succeeded`, `WaitingHuman` or `Failed`, with Repository version
+checks on each transition.
+
+The PTV2 adapter reports segmentation/geometry facts only and always exposes
+`quality_assessment=not_implemented`. The WeldAgent adapter may return a
+`WaitingHuman` draft geometry but always sets `robot_execution_allowed=false`.
+No controller URL, joint values, process stderr, local path or model metadata
+is exposed by the HTTP result. Persistence, artifact upload/download,
+cancel/retry, leases/fencing, remote workers, quality scoring and robot control
+remain outside this checkpoint.

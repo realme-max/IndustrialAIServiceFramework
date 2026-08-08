@@ -1001,3 +1001,24 @@ passed in both platforms. WSL is local validation, not GitHub Actions evidence.
 
 The WSL rows are local validation, not GitHub Actions evidence. Existing
 environment-capability skips remain explicit and are not workflow-step skips.
+
+## Fast Track MVP-3 local evidence
+
+The committed MVP-3 runtime was rebuilt after the ProcessRunner FD-lifecycle
+fix and adapter path-bridge change. Application runtime tests were 14/14 in
+WSL Debug, Windows VS2022 Debug and Windows VS2022 Release. WSL Ubuntu 24.04
+Release full CTest registered 894 tests: 893 passed, 1 explicitly skipped,
+0 failed. The single test-level skip was the existing
+`SafePathResolverTest.PermissionFailureIsExplicitlyHandled` capability check;
+it was not a skipped workflow step. Project source/test compiler warnings were
+0. WSL Debug was intentionally run as the new runtime-targeted set rather than
+as another full matrix in this documentation-only sealing step.
+
+The local real HTTP E2E evidence is separate from CI: PTV2 completed
+`202 -> Succeeded -> 200` with 2048 input points, 205 weld points, ratio
+`0.10009765625`, length approximately `0.8822024465`, three registered output
+artifacts and `quality_assessment=not_implemented`. WeldAgent completed
+`202 -> WaitingHuman -> 200` with finite start/end/axes, camera/mm metadata,
+confidence, a bounded waiting reason and `robot_execution_allowed=false`.
+Neither workflow runner nor CI test claims to execute these external projects
+or real GPU inference.

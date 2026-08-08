@@ -4,9 +4,10 @@
 
 - 项目：IndustrialAIServiceFramework
 - 当前分支：`phase/9-industrial-ai-application-layer`
-- 当前状态：`PHASE_9B_3A_3A_APPLICATION_JOB_ID_GENERATOR_AND_CLOCK_COMPLETED`（本地四配置验证；未提交）
-- 当前工作：Phase 9B-3A-3A 已完成 OS CSPRNG Job ID generator、system clock 与 API primitives target；不包含 HTTP route、Task API、Service 或 Worker 集成。
-- 当前基线 HEAD：`4d3284febd95907ecdf20f0b96aa2ab1f5044855`
+- 当前状态：Fast Track MVP-3 本地实现已提交，文档/CI 封板待远端验证
+- 当前实现提交：`b2f16cb99bc2e4c04cdf777fc6acc56575b35b16`
+- 当前工作：同步 Fast Track MVP-3 文档并验证 Linux CI 显式 application targets；不再扩展业务实现
+- 当前实现：本地点云导入、SHA/manifest、Artifact resolver、受控跨平台 ProcessRunner、独立 PTV2/WeldAgent adapters、Application Repository/Executor、单 worker 有界队列、六条 versioned HTTP route 和 Service 生命周期接入
 - Phase 9A：只读 Application Integration Design Audit 已完成
 - Phase 9B-1：新增 `iaisf_application_core` / `iaisf::application_core`，仅依赖 `iaisf::core`
 - Phase 9B-1A：返回分配型 `Result` 的解析/验证 API 不声明 `noexcept`；纯查询和 bool 检查保留 `noexcept`
@@ -18,7 +19,7 @@
 - 验证：Windows Debug/Release 各注册 642 项（637 passed、5 explicitly skipped、0 failed）；WSL Ubuntu 24.04 GCC 13.3.0 Debug/Release 各注册 871 项（870 passed、1 explicitly skipped、0 failed）；Application Windows 103/103、WSL 104/104，api_primitives Windows 18/18、Linux 19/19（含 Linux-only getrandom seam）；warning 0。WSL 结果不是 GitHub Actions 证据
 - 应用边界：`weld_inspection/post_weld` 与 `welding_guidance/pre_weld` 完全独立，不自动串联
 - 真实性边界：PTV2 质量评价为 `quality_assessment=not_implemented`；WeldAgent 不得生成真实 joint values、控制机器人或发送 URL
-- 未实现：Job ID collision retry/coordinator、versioned HTTP Application API、Service 组合、持久化 Repository、Artifact I/O/Store、Worker Protocol、PTV2/WeldAgent adapter、worker cancel/kill
+- 未实现：持久化 Repository、HTTP Artifact 上传/下载和通用 Artifact Store、cancel/retry/heartbeat/lease/fencing、远程 Worker Protocol、PTV2 真实质量评价、WeldAgent joint values/机器人控制、两个应用自动串联，以及 GitHub runner 上的真实 GPU/外部项目 E2E
 - Phase 0 提交：`5fbcec0 docs: complete phase 0 architecture design`
 - Phase 1 最终实现提交：`63b30cffcbe3e621af33664721b3675a647bd1a1`
 - Phase 2 起始 HEAD / main / origin/main：`6065d91b277c07ed04e64b3f08034788965e6ac1`
@@ -1621,8 +1622,8 @@ fields. No automatic PTV2/WeldAgent chaining is present.
 ## Fast Track MVP-2 handoff
 
 MVP-1 local commit: `2d460e6b04dc79b3c49cd77c48613ece5d37ca8a`
-(`feat: add local artifact and application result domain`). MVP-2 is
-uncommitted. New targets are `iaisf_application_runtime` and
+(`feat: add local artifact and application result domain`). MVP-2 was committed
+as `34ab4beb483992f3d62f1cb623f625f27db2ca6c`. New targets are `iaisf_application_runtime` and
 `iaisf_application_runtime_tests`.
 
 The runtime owns no Repository state. `LocalProcessRunner` is non-shell and
@@ -1649,3 +1650,24 @@ not a quality score. Scratch cleanup and `quality_assessment=not_implemented`
 were verified. The direct WeldAgent pointcloud smoke exited 0 and produced
 `final_result.json`; its adapter keeps human review and
 `robot_execution_allowed=false`. MVP-2 is locally complete but unpushed.
+
+## Fast Track MVP-3 handoff
+
+MVP-3 commit: `b2f16cb99bc2e4c04cdf777fc6acc56575b35b16`.
+`IndustrialAIService` now owns the application resolver, ProcessRunner,
+adapters, Repository, Executor and bounded single-worker queue. Admission is
+closed before HTTP/TCP cleanup; the application worker drains before the
+existing plugin TaskManager. Six fixed versioned routes expose submit, status
+and result for the two independent applications.
+
+Local HTTP E2E evidence is complete: PTV2 `202 -> Succeeded -> 200` with 2048
+input points, 205 weld points, ratio `0.10009765625`, length approximately
+`0.8822024465`, three output artifacts and
+`quality_assessment=not_implemented`; WeldAgent `202 -> WaitingHuman -> 200`
+with finite geometry/axes, a bounded waiting reason and
+`robot_execution_allowed=false`. Neither workflow runner nor CI test invokes
+PTV2/WeldAgent, CUDA, or real GPU workloads.
+
+Remaining boundaries are persistent storage, Artifact upload/download,
+cancel/retry/heartbeat/lease/fencing, remote Worker Protocol, quality scoring,
+joint values, robot control and automatic cross-application chaining.
