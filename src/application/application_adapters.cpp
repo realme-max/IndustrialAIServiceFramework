@@ -121,10 +121,13 @@ Result<ArtifactRef> register_required(LocalOutputArtifactRegistrar& registrar,
                                       const std::filesystem::path& path,
                                       std::string id,
                                       std::string kind,
-                                      std::string media) {
+                                      std::string media,
+                                      std::optional<std::string> coordinate_frame = std::nullopt,
+                                      std::optional<std::string> unit = std::nullopt,
+                                      std::optional<std::uint64_t> point_count = std::nullopt) {
     return registrar.register_file(path, OutputArtifactSpec{
-        std::move(id), std::move(kind), std::move(media), std::nullopt,
-        std::nullopt, std::nullopt});
+        std::move(id), std::move(kind), std::move(media),
+        std::move(coordinate_frame), std::move(unit), point_count});
 }
 
 Result<void> copy_regular(const std::filesystem::path& source,
@@ -378,14 +381,30 @@ Ptv2WeldInspectionAdapter::execute(const ApplicationJobSnapshot& snapshot) {
                                            options_.max_result_json_bytes);
         if (!parsed) return Result<ApplicationExecutionResult>::failure(parsed.error());
         const auto& json = parsed.value();
-        if (!json.is_object() || !json.contains("weld_points") ||
+        if (!json.is_object() || !json.contains("total_points") ||
+            !json.at("total_points").is_number_unsigned() ||
+            !json.contains("weld_points") ||
             !json.at("weld_points").is_number_unsigned()) {
             return failure<ApplicationExecutionResult>(ErrorCode::InvalidArgument,
                                                        "PTV2 result schema is invalid");
         }
+        const auto input_points = snapshot.input_artifacts().front().point_count;
+        const auto total_points = json.at("total_points").get<std::uint64_t>();
+        const auto weld_points = json.at("weld_points").get<std::uint64_t>();
+        if (!input_points.has_value() || total_points != *input_points ||
+            weld_points > total_points) {
+            return failure<ApplicationExecutionResult>(
+                ErrorCode::InvalidArgument, "PTV2 result point counts are invalid");
+        }
+        const auto weld_ratio = finite_number(json, "weld_ratio");
+        if (!weld_ratio.has_value() || *weld_ratio < 0.0 || *weld_ratio > 1.0 ||
+            (weld_points == 0U && *weld_ratio != 0.0)) {
+            return failure<ApplicationExecutionResult>(
+                ErrorCode::InvalidArgument, "PTV2 weld ratio is invalid");
+        }
         WeldInspectionResult result;
-        result.weld_point_count = json.at("weld_points").get<std::uint64_t>();
-        result.weld_ratio = finite_number(json, "weld_ratio").value_or(-1.0);
+        result.weld_point_count = weld_points;
+        result.weld_ratio = *weld_ratio;
         result.length_mm = finite_number(json, "length_mm").value_or(-1.0);
         result.inference_time_ms = finite_number(json, "inference_ms").value_or(0.0);
         result.total_time_ms = finite_number(json, "total_ms").value_or(process.value().elapsed_ms);
@@ -395,16 +414,22 @@ Ptv2WeldInspectionAdapter::execute(const ApplicationJobSnapshot& snapshot) {
         if (!weld) return Result<ApplicationExecutionResult>::failure(weld.error());
         result.output_artifacts.push_back(weld.value());
         const auto ply = output_dir / "weld_points.ply";
-        if (std::filesystem::exists(ply)) {
+        if (weld_points > 0U && std::filesystem::exists(ply)) {
             auto ref = register_required(*registrar_, ply, job + "-weld-points", "weld_points",
-                                         "application/vnd.iaisf.pointcloud.ply");
+                                         "application/vnd.iaisf.pointcloud.ply",
+                                         snapshot.input_artifacts().front().coordinate_frame,
+                                         snapshot.input_artifacts().front().unit,
+                                         weld_points);
             if (!ref) return Result<ApplicationExecutionResult>::failure(ref.error());
             result.weld_points = ref.value(); result.output_artifacts.push_back(ref.value());
         }
         const auto prediction = output_dir / "prediction.txt";
         if (std::filesystem::exists(prediction)) {
             auto ref = register_required(*registrar_, prediction, job + "-prediction", "prediction",
-                                         "text/plain");
+                                         "text/plain",
+                                         snapshot.input_artifacts().front().coordinate_frame,
+                                         snapshot.input_artifacts().front().unit,
+                                         total_points);
             if (!ref) return Result<ApplicationExecutionResult>::failure(ref.error());
             result.prediction = ref.value(); result.output_artifacts.push_back(ref.value());
         }

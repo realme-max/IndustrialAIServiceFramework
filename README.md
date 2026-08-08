@@ -1,10 +1,10 @@
 # IndustrialAIServiceFramework
 
-## Phase 10A/10B current status
+## Phase 10C current status
 
-The committed Phase 10A baseline is
-`6e3679f14f00788fc02ca8aad300ec713484fe43`. Phase 10B is the current
-uncommitted same-origin Web UI hardening worktree; the native browser file
+The committed Phase 10B baseline is
+`8a79084373de46f31caa83ef8f0363c684b30f46`. Phase 10C is the current
+uncommitted bounded browser 3D visualization hardening worktree; the native browser file
 chooser is supported by the product, while host-file access limits in
 Codex/Chrome automation are test-tool constraints only.
 
@@ -30,9 +30,9 @@ WeldAgent used 823114 points and reached `201 -> 202 -> WaitingHuman -> 200`.
 The earlier `weld_65_2047.txt` attempt remains a negative diagnostic: its 2047
 points were correctly rejected by the PTV2 minimum-2048 pipeline requirement.
 
-Final Phase 10B local matrix: Windows VS2022 Debug/Release each registered 681
-tests (676 passed, 5 explicitly skipped, 0 failed); WSL Ubuntu 24.04 GCC
-Debug/Release each registered 914 tests (913 passed, 1 explicitly skipped,
+Final Phase 10C local matrix: Windows VS2022 Debug/Release each registered 688
+tests (683 passed, 5 explicitly skipped, 0 failed); WSL Ubuntu 24.04 GCC
+Debug/Release each registered 921 tests (920 passed, 1 explicitly skipped,
 0 failed). Artifact HTTP targeted tests were 9/9 in all four configurations.
 The current Web UI target is 7/7 and the Linux Service route target is 4/4;
 these focused checks are local evidence.
@@ -733,8 +733,8 @@ and Application Executor are provided by MVP-3 below.
 ## Phase 10B same-origin Web UI
 
 Phase 10B adds a compiled-in, same-origin browser UI only when
-`applications.enabled=true`. It serves exactly `GET /`, `GET /ui/app.css` and
-`GET /ui/app.js`; there is no directory static-file server, external asset,
+`applications.enabled=true`. It serves exactly `GET /`, `GET /ui/app.css`,
+`GET /ui/point-cloud-viewer.js` and `GET /ui/app.js`; there is no directory static-file server, external asset,
 CDN, npm dependency, CORS or authentication. The UI uploads direct
 `text/plain` XYZ/TXT/PTS bodies to the existing Artifact API, submits the
 strict eight-field ArtifactRef to one of the two independent Application
@@ -742,17 +742,38 @@ APIs, polls with a bounded AbortController state machine, and renders result
 fields and canonical Artifact download links using safe DOM APIs.
 
 PTV2 remains `quality_assessment=not_implemented`; WeldAgent remains
-`robot_execution_allowed=false`. No 3D rendering is included; point-cloud
-visualisation, segmentation overlays and geometry drawing remain Phase 10C.
+`robot_execution_allowed=false`. The Phase 10B text-only baseline is extended
+by the Phase 10C compiled viewer below; prediction remains download-only.
 
 Phase 10B local validation: Windows VS2022 Debug and Release each registered
 681 tests (676 passed, 5 explicit capability skips, 0 failed) after the final
 narrow additions. WSL Ubuntu 24.04 Debug and Release each registered 914 tests
 (913 passed, 1 explicit capability skip, 0 failed); the current Web UI target
 is 7/7 and the Linux Service route target is 4/4. Host HTTP checks verified
-all three resources and their security headers. Chrome browser smoke reached
+all four resources and their security headers. Chrome browser smoke reached
 the WSL listener and verified the page, same-origin resources and independent
 guidance view; host-file access restrictions in Codex/Chrome automation are a
 test-tool limitation, not a product blocker. These are local checks, not
 GitHub Actions evidence, and no browser automation claim replaces the Phase
 10A real backend E2E.
+
+## Phase 10C browser 3D visualization MVP
+
+The Phase 10C MVP adds a compiled-in `/ui/point-cloud-viewer.js` resource and
+one independent viewer per business panel. It decodes the validated
+`xyz-f32le` input, overlays the validated PTV2 ASCII PLY weld points, and
+renders WeldAgent start/end/path geometry with bounded WebGL2 interaction.
+`prediction.txt` remains download-only. Rendering is fail-closed and never
+blocks the text result or Artifact downloads. Direction axes use `start` only
+as a display anchor and are not claimed to be an algorithmic coordinate
+origin. PTV2 quality remains `quality_assessment=not_implemented` and
+WeldAgent remains `robot_execution_allowed=false`; the applications remain
+independent. Current evidence is C++ resource/route contract testing only,
+not browser or WebGL runtime E2E. Phase 10D retains full browser E2E,
+streaming/LOD and advanced visualization work.
+
+Phase 10C local full CTest validation registered 688 tests in Windows VS2022
+Debug and Release (683 passed, 5 explicit capability skips, 0 failed), and
+921 tests in WSL Ubuntu Debug and Release (920 passed, 1 explicit capability
+skip, 0 failed). The Web UI target is 7/7 and the Linux Service route target is
+4/4 in each WSL run. These are local results, not GitHub Actions evidence.

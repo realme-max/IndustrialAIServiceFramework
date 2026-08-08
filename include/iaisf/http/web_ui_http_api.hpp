@@ -27,13 +27,14 @@ public:
     [[nodiscard]] Result<void> register_routes(http::HttpRouter& router);
 
     [[nodiscard]] static constexpr std::size_t route_count() noexcept {
-        return 3U;
+        return 4U;
     }
 
 private:
     struct Resources {
         std::shared_ptr<const http::HttpResponse> html;
         std::shared_ptr<const http::HttpResponse> css;
+        std::shared_ptr<const http::HttpResponse> viewer;
         std::shared_ptr<const http::HttpResponse> javascript;
     };
 
