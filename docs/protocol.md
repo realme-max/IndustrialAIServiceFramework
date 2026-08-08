@@ -633,3 +633,32 @@ Python importer and C++ resolver communicate through the versioned
 `ArtifactRef` manifest and fixed `xyz-f32le` bytes only. A future Worker or HTTP
 contract must be versioned independently and must not expose filesystem paths,
 controller commands, joint values or quality claims.
+
+## Phase 9 Fast Track MVP-3 Application HTTP contract
+
+Six fixed versioned routes are available when the application runtime is
+enabled:
+
+```text
+POST /api/weld-inspection/v1/jobs
+GET  /api/weld-inspection/v1/jobs/{job_id}
+GET  /api/weld-inspection/v1/results/{job_id}
+POST /api/welding-guidance/v1/jobs
+GET  /api/welding-guidance/v1/jobs/{job_id}
+GET  /api/welding-guidance/v1/results/{job_id}
+```
+
+POST uses the strict application JSON contract and returns `202` with only
+`job_id` and canonical `status_url`. Status progresses through `Accepted`,
+`Queued`, `Dispatching`, `Running` and then `Succeeded`, `WaitingHuman` or
+`Failed`. Result GET returns `200` only for `Succeeded` or `WaitingHuman`;
+incomplete jobs return `409 result_not_ready`, failed jobs return
+`409 job_not_succeeded`, invalid IDs return `400`, and unknown or
+cross-application IDs return `404`.
+
+PTV2 returns `quality_assessment=not_implemented`. WeldAgent may return draft
+start/end/corner/axes and waiting metadata, but always returns
+`robot_execution_allowed=false`. Neither route exposes joint values,
+controller URLs, local paths, commands, stderr or tool configuration. The two
+applications are independent and are never automatically chained. Persistence,
+Artifact upload/download, cancel/retry and remote workers remain out of scope.
