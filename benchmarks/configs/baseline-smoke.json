@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "service": {
+    "name": "IndustrialAIServiceFramework"
+  },
+  "server": {
+    "host": "127.0.0.1",
+    "port": 18181
+  },
+  "applications": {
+    "enabled": false
+  },
+  "logging": {
+    "level": "info"
+  },
+  "metrics": {
+    "enabled": true,
+    "endpoint": "/metrics"
+  },
+  "diagnostics": {
+    "enabled": false,
+    "endpoint": "/debug/status"
+  }
+}

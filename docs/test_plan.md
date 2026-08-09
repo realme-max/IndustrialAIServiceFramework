@@ -1158,3 +1158,17 @@ degenerate bounds, straight/corner/L paths, invalid axes, generation
 isolation, WebGL context loss and text-only fallback. These are source/resource
 contract checks, not browser fixtures, WebGL runtime execution or real browser
 E2E; such evidence remains deferred.
+
+# Reproducible baseline foundation
+
+`benchmarks/scripts/run_baseline_smoke.py` is the first controlled smoke
+entry point. It binds a generated configuration to loopback, disables
+applications and diagnostics, probes `/health`, `/version`, and `/metrics`,
+then sends SIGTERM and reaps the exact process group it created. Results use
+the versioned manifest/summary/CSV/event-log schema in
+`benchmarks/README.md`; all output is ignored and bounded.
+
+This stage records no performance claim. It does not run load tests, 30 MiB
+uploads, concurrent jobs, repeated CTest, sanitizers, real PTV2/WeldAgent,
+CUDA, or soak tests. WSL/Linux results are local evidence and are kept distinct
+from GitHub Actions evidence. Later benchmark stages may consume this schema.
