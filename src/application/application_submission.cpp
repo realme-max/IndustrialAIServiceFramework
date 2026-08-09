@@ -28,7 +28,8 @@ namespace {
 
 [[nodiscard]] bool valid_policy(
     const HumanCheckpointPolicy policy) noexcept {
-    return policy == HumanCheckpointPolicy::Required;
+    return policy == HumanCheckpointPolicy::Required ||
+           policy == HumanCheckpointPolicy::NotRequired;
 }
 
 }  // namespace
@@ -71,6 +72,8 @@ std::string_view to_string(
     switch (policy) {
         case HumanCheckpointPolicy::Required:
             return "required";
+        case HumanCheckpointPolicy::NotRequired:
+            return "not_required";
     }
     return "unknown";
 }

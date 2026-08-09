@@ -1,5 +1,32 @@
 # Application Layer
 
+## Current browser guidance policy
+
+Browser guidance uses `human_checkpoint=not_required`. The Domain and strict
+v1.0 JSON contract accept both `required` and `not_required`; snapshots and the
+Repository preserve the selected policy. Successful external analysis with no
+real safety wait produces `GuidanceResultDisposition::Completed` and an
+Application Job state of `Succeeded`. Explicit `required`, external
+`waiting_human`, or an external manual-confirmation signal still produces
+`WaitingHuman`.
+
+Public weld type values remain `auto`, `straight`, `corner`, and lowercase
+`l`. The WeldAgent adapter alone maps requested `l` to the external CLI value
+`L`; a successful L result maps back to public `l` and requires
+`start -> corner -> end`. The browser does not display confidence, waiting
+reason, or robot-execution rows, but it still rejects any result whose
+`robot_execution_allowed` is not exactly `false`. Analysis and any future
+robot-control workflow remain decoupled.
+
+WeldAgent's real `continue_with_warning` state may carry a manual-confirmation
+flag specifically for a later robot-use workflow. With `NotRequired`, that
+explicit continue decision does not hold the analysis Job in `WaitingHuman`;
+the public result can complete while robot execution remains false. A true
+external `waiting_human` status, a `stop` decision, an unqualified safety
+requirement, or a client `Required` policy still waits fail-closed. Local
+browser runs verified completed straight and L results; L retained
+start/corner/end and the external/public `L`/`l` mapping.
+
 ## Phase 10D real-browser evidence and public-result boundary
 
 Phase 10C is committed at

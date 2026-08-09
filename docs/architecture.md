@@ -3,12 +3,26 @@
 ## 1. 文档状态
 
 - 项目：IndustrialAIServiceFramework
-- 阶段：Phase 10D 真实浏览器双业务闭环与公共结果安全封板
+- 阶段：Web UI 与 Welding Guidance 结果语义修正
 - 日期：2026-08-09
-- 状态：Phase 10C 已提交为 `32f6a269301e971d2588b034fcb7242d92b3a4e2`，Linux CI run `31263414316` 已通过；Phase 10D 为当前本地工作区
+- 状态：当前 `fix/web-ui-result-display` 工作区基于 main `5d24c1648d8597e683eb9190cc647a2119a283c0`
 - 目标平台：portable C++17 application core；既有服务运行目标仍为 Linux x86_64
 
 本文同时记录已实现的既有服务栈和 Phase 9B-1/9B-2 应用领域与 Repository 核心。只有明确列入已实现边界的类才是当前能力；历史阶段验证记录保留，不代表 Phase 9 外部 worker 已实现。
+
+当前 Guidance 架构支持 `Required` 与 `NotRequired` 两种 checkpoint policy。
+浏览器默认提交 `not_required`；只有外部真实等待/安全信号或显式 `required`
+请求进入 `WaitingHuman`，否则成功分析进入 `Succeeded/completed`。公共 L 类型继续
+使用小写 `l`，仅 Adapter 的 WeldAgent CLI 参数边界转换为大写 `L`。Viewer 对路径、
+关键点和 RGB 轴采用固定上限的采样点增强显示，不改变 Domain 坐标或算法结果。
+`robot_execution_allowed=false` 仍是强制安全契约，分析与机器人控制解耦。
+
+真实浏览器回归验证了 requested straight 与 requested L 均可在
+`not_required` 下完成为 `Succeeded/completed`。WeldAgent 的
+`continue_with_warning` 可携带“后续机器人使用前确认”的标记；该明确 continue
+决策不阻塞纯分析，但 `stop`、`waiting_human`、无法证明可继续的安全要求或客户端
+显式 Required 仍进入 `WaitingHuman`。L 的外部参数为 `L`，公共结果为 `l`，并保持
+start/corner/end 两段路径。该证据为本地浏览器证据，不是 GitHub Actions。
 
 ### Phase 10D 公共结果边界
 

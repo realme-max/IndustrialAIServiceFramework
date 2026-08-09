@@ -1,12 +1,22 @@
 # 分阶段开发计划
 
-## Current Phase 10D status
+## Current Web UI guidance refinement
 
-Phase 10C is committed at
-`32f6a269301e971d2588b034fcb7242d92b3a4e2` and passed Linux CI run
-`31263414316`. The current Phase 10D worktree seals two independent local
-real-browser flows and the WeldAgent public-result allowlist; it does not start
-Phase 11.
+The current `fix/web-ui-result-display` worktree is based on main
+`5d24c1648d8597e683eb9190cc647a2119a283c0`. It adds the backward-compatible
+`not_required` checkpoint policy, maps successful non-waiting browser guidance
+to `Succeeded/completed`, maps public lowercase `l` to uppercase `L` only at
+the WeldAgent CLI boundary, and strengthens bounded path/key-point/RGB-axis
+rendering. Explicit Required and real external waiting/safety signals retain
+`WaitingHuman`; robot execution remains disabled. No new robot-control,
+quality-assessment, persistence, or application-chaining capability is added.
+
+Local real-browser regression is a required commit gate: requested straight
+and L must upload through actual file controls and finish as
+`Succeeded/completed`; L must prove external `L`, public `l`, corner geometry,
+two path segments and RGB axes. Safe result downloads must match ArtifactRef
+size/SHA and contain no robot-control data. This local evidence remains
+separate from GitHub CI.
 
 ## 1. 执行原则
 

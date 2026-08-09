@@ -52,7 +52,7 @@ constexpr char kHtml[] = R"HTML(<!doctype html>
     </section>
     <section id="guidance" class="panel is-hidden" data-panel>
       <h2>&#x710A;&#x524D;&#x5EFA;&#x7CFB;&#x4E0E;&#x710A;&#x63A5;&#x7279;&#x5F81;</h2>
-      <p>&#x5206;&#x6790;&#x5F85;&#x710A;&#x5DE5;&#x4EF6;&#x5E76;&#x751F;&#x6210;&#x710A;&#x63A5;&#x5F15;&#x5BFC;&#x5019;&#x9009;&#xFF0C;&#x63D0;&#x4EA4;&#x540E;&#x9700;&#x8981;&#x4EBA;&#x5DE5;&#x590D;&#x6838;&#x3002;</p>
+      <p>&#x5206;&#x6790;&#x5F85;&#x710A;&#x5DE5;&#x4EF6;&#xFF0C;&#x8F93;&#x51FA;&#x5750;&#x6807;&#x8F74;&#x3001;&#x8D77;&#x70B9;&#x3001;&#x7EC8;&#x70B9;&#x53CA;&#x53EF;&#x9009;&#x62D0;&#x70B9;&#x3002;</p>
       <label class="field">&#x70B9;&#x4E91;&#x6587;&#x4EF6;
         <input id="guidance-file" type="file" accept=".xyz,.txt,.pts,text/plain">
       </label>
@@ -64,14 +64,13 @@ constexpr char kHtml[] = R"HTML(<!doctype html>
           <option value="l">l</option>
         </select>
       </label>
-      <p class="notice">&#x4EBA;&#x5DE5;&#x590D;&#x6838;&#xFF1A;required&#x3002;&#x6B64;&#x9875;&#x9762;&#x4E0D;&#x4F1A;&#x6267;&#x884C;&#x673A;&#x5668;&#x4EBA;&#x63A7;&#x5236;&#x3002;</p>
       <button id="guidance-submit" type="button" class="primary">&#x4E0A;&#x4F20;&#x5E76;&#x5F00;&#x59CB;&#x5206;&#x6790;</button>
       <button id="guidance-stop" type="button" class="secondary" hidden>&#x505C;&#x6B62;&#x7B49;&#x5F85;</button>
       <p class="viewer-description">&#x663E;&#x793A;&#x8F93;&#x5165;&#x70B9;&#x4E91;&#x3001;&#x8D77;&#x70B9;&#x3001;&#x7EC8;&#x70B9;&#x3001;&#x62D0;&#x70B9;&#x4E0E;&#x710A;&#x63A5;&#x8DEF;&#x5F84;&#x3002;&#x65B9;&#x5411;&#x8F74;&#x4EE5; start &#x4E3A;&#x663E;&#x793A;&#x951A;&#x70B9;&#xFF0C;&#x4E0D;&#x4EE3;&#x8868; WeldAgent &#x7B97;&#x6CD5;&#x5750;&#x6807;&#x7CFB;&#x539F;&#x70B9;&#x3002;</p>
       <div class="viewer-shell"><canvas id="guidance-viewer" aria-label="guidance 3D viewer"></canvas><p id="guidance-viewer-status" class="viewer-status" aria-live="polite">3D viewer loads after upload.</p><div class="viewer-controls"><button id="guidance-reset-view" type="button" class="secondary">Reset view</button><label>Point size <input id="guidance-point-size" type="range" min="1" max="10" value="3"></label><label><input id="guidance-input-layer" type="checkbox" checked> Input</label><label><input id="guidance-geometry-layer" type="checkbox" checked> Geometry</label></div></div>
       <div id="guidance-result" class="result" aria-live="polite"></div>
     </section>
-    <footer><p>PTV2 &#x4E0E; WeldAgent &#x4E3A;&#x4E24;&#x4E2A;&#x72EC;&#x7ACB;&#x4E1A;&#x52A1;&#x3002;&#x8D28;&#x91CF;&#x8BC4;&#x4EF7;&#x5C1A;&#x672A;&#x5B9E;&#x73B0;&#xFF1B;&#x673A;&#x5668;&#x4EBA;&#x6267;&#x884C;&#x59CB;&#x7EC8;&#x5173;&#x95ED;&#x3002;</p></footer>
+    <footer><p>PTV2 &#x4E0E; WeldAgent &#x4E3A;&#x4E24;&#x4E2A;&#x72EC;&#x7ACB;&#x4E1A;&#x52A1;&#x3002;</p></footer>
   </main>
 </body>
 </html>
@@ -102,7 +101,6 @@ h1, h2 { margin: .35rem 0 .6rem; }
 .field { display: grid; gap: 6px; margin: 14px 0; font-weight: 600; }
 input[type="file"], select { width: 100%; max-width: 520px; padding: 9px; border: 1px solid #b9c7dc; border-radius: 7px; background: #fff; }
 fieldset { border: 1px solid #d9e1ee; border-radius: 8px; margin: 14px 0; padding: 12px; display: flex; flex-wrap: wrap; gap: 14px; }
-.notice { padding: 10px; border-left: 4px solid #e6a700; background: #fff8dd; }
 .viewer-description { margin: 16px 0 0; color: #526179; }
 .result { margin-top: 18px; display: grid; gap: 10px; }
 .viewer-shell { margin-top: 20px; padding: 10px; border: 1px solid #d9e1ee; border-radius: 8px; background: #f8fafc; }
@@ -122,6 +120,9 @@ footer { margin-top: 20px; font-size: .9rem; }
 constexpr char kViewerJavaScript[] = R"JS((() => {
   "use strict";
   const MAX_DISPLAY_POINTS = 500000;
+  const MAX_PATH_SAMPLES_PER_SEGMENT = 96;
+  const MAX_AXIS_SAMPLES = 64;
+  const MAX_GUIDANCE_AUX_POINTS = 512;
   const XYZ_MEDIA = "application/vnd.iaisf.pointcloud.xyz-f32le";
   const PLY_MEDIA = "application/vnd.iaisf.pointcloud.ply";
   const finite = (value) => Number.isFinite(value);
@@ -144,6 +145,27 @@ constexpr char kViewerJavaScript[] = R"JS((() => {
     if (!tokenMatches(token, DECIMAL_FLOAT)) return null;
     const value = Number(token);
     return Number.isFinite(value) ? value : null;
+  };
+  const sampleSegments = (points, samplesPerSegment) => {
+    if (!Array.isArray(points) || points.length < 2 ||
+        !Number.isSafeInteger(samplesPerSegment) || samplesPerSegment < 2) {
+      throw new Error("guidance display sampling is invalid");
+    }
+    const count = (points.length - 1) * samplesPerSegment;
+    if (count > MAX_GUIDANCE_AUX_POINTS) throw new Error("guidance display sampling exceeds its limit");
+    const positions = new Float32Array(count * 3);
+    let output = 0;
+    for (let segment = 0; segment + 1 < points.length; ++segment) {
+      for (let sample = 0; sample < samplesPerSegment; ++sample) {
+        const ratio = sample / (samplesPerSegment - 1);
+        for (let axis = 0; axis < 3; ++axis) {
+          positions[output * 3 + axis] = points[segment][axis] +
+            (points[segment + 1][axis] - points[segment][axis]) * ratio;
+        }
+        ++output;
+      }
+    }
+    return { positions, count };
   };
   const setText = (node, text) => { if (node) node.textContent = String(text).slice(0, 256); };
   const artifactBytes = async (artifact, signal, media) => {
@@ -263,12 +285,12 @@ R"JS(
     }
     const schedule = () => { state.dirty = true; if (!state.raf && !state.disposed) state.raf = window.requestAnimationFrame(render); };
     const upload = (layer) => { if (!gl || !program || !layer) return; gl.bindBuffer(gl.ARRAY_BUFFER, buffer); gl.bufferData(gl.ARRAY_BUFFER, layer.positions, gl.STATIC_DRAW); };
-    const render = () => { state.raf = 0; if (state.disposed || !gl || !program) return; if (!state.dirty) return; state.dirty = false; const dpr = Math.min(window.devicePixelRatio || 1, 2); const width = Math.max(1, Math.floor(canvas.clientWidth * dpr)); const height = Math.max(1, Math.floor(canvas.clientHeight * dpr)); if (canvas.width !== width || canvas.height !== height) { canvas.width = width; canvas.height = height; } gl.viewport(0, 0, width, height); gl.clearColor(0.067,0.094,0.153,1); gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT); gl.useProgram(program); gl.uniform2fv(rotationLocation, state.rotation); gl.uniform1f(zoomLocation, state.zoom); gl.uniform2fv(panLocation, state.pan); gl.enableVertexAttribArray(positionLocation); gl.bindBuffer(gl.ARRAY_BUFFER, buffer); gl.vertexAttribPointer(positionLocation, 3, gl.FLOAT, false, 0, 0); const draw = (layer, color, mode, size) => { if (!layer) return; upload(layer); gl.uniform4fv(colorLocation, color); gl.uniform1f(sizeLocation, size); gl.drawArrays(mode, 0, layer.count); }; if (state.inputVisible) draw(state.input, [0.72,0.78,0.88,0.52], gl.POINTS, state.pointSize); if (state.overlayVisible) draw(state.overlay, [1,0.25,0.08,1], gl.POINTS, state.pointSize + 2); if (state.geometryVisible && state.geometry) { draw(state.geometry.path, [0.1,0.75,1,1], gl.LINE_STRIP, 2); draw(state.geometry.markers, [1,0.85,0.1,1], gl.POINTS, state.pointSize + 4); if (state.geometry.axes) state.geometry.axes.forEach((axis) => draw(axis, axis.color, gl.LINES, 2)); } };
+    const render = () => { state.raf = 0; if (state.disposed || !gl || !program) return; if (!state.dirty) return; state.dirty = false; const dpr = Math.min(window.devicePixelRatio || 1, 2); const width = Math.max(1, Math.floor(canvas.clientWidth * dpr)); const height = Math.max(1, Math.floor(canvas.clientHeight * dpr)); if (canvas.width !== width || canvas.height !== height) { canvas.width = width; canvas.height = height; } gl.viewport(0, 0, width, height); gl.clearColor(0.067,0.094,0.153,1); gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT); gl.useProgram(program); gl.uniform2fv(rotationLocation, state.rotation); gl.uniform1f(zoomLocation, state.zoom); gl.uniform2fv(panLocation, state.pan); gl.enableVertexAttribArray(positionLocation); gl.bindBuffer(gl.ARRAY_BUFFER, buffer); gl.vertexAttribPointer(positionLocation, 3, gl.FLOAT, false, 0, 0); const draw = (layer, color, mode, size) => { if (!layer) return; upload(layer); gl.uniform4fv(colorLocation, color); gl.uniform1f(sizeLocation, size); gl.drawArrays(mode, 0, layer.count); }; if (state.inputVisible) draw(state.input, [0.72,0.78,0.88,0.52], gl.POINTS, state.pointSize); if (state.overlayVisible) draw(state.overlay, [1,0.25,0.08,1], gl.POINTS, state.pointSize + 2); if (state.geometryVisible && state.geometry) { draw(state.geometry.path, [0.05,0.9,1,1], gl.LINE_STRIP, 1); draw(state.geometry.pathSamples, [0.05,0.9,1,1], gl.POINTS, 6); draw(state.geometry.markers, [0.02,0.03,0.06,1], gl.POINTS, 14); draw(state.geometry.markers, [1,0.88,0.08,1], gl.POINTS, 9); if (state.geometry.axes) state.geometry.axes.forEach((axis) => { draw(axis.line, axis.color, gl.LINES, 1); draw(axis.samples, axis.color, gl.POINTS, 5); }); } };
     const resetView = () => { state.zoom = 1.6; state.pan = [0, 0]; state.rotation = [0.25, -0.35]; schedule(); };
     const clear = () => { state.input = null; state.overlay = null; state.geometry = null; state.frame = null; resetView(); status("3D scene cleared"); };
   const loadInputArtifact = async (artifact, signal) => { try { const bytes = await artifactBytes(artifact, signal, XYZ_MEDIA); state.input = parseXyz(bytes, artifact); state.frame = artifact; schedule(); status(`input cloud: ${state.input.count} / ${state.input.totalCount} points`); return state.input; } catch (error) { state.input = null; schedule(); if (error && error.name === "AbortError") throw error; status(error instanceof Error ? error.message : "input 3D parsing failed"); throw error; } };
     const setInspectionOverlay = async (artifact, expectedCount, signal) => { if (!artifact) { state.overlay = null; schedule(); return; } try { if (!state.frame || artifact.coordinate_frame !== state.frame.coordinate_frame || artifact.unit !== state.frame.unit) throw new Error("overlay coordinate metadata mismatch"); const bytes = await artifactBytes(artifact, signal, PLY_MEDIA); state.overlay = parsePly(bytes, artifact, state.input, expectedCount); schedule(); status("PTV2 weld overlay loaded"); } catch (error) { if (error && error.name === "AbortError") throw error; state.overlay = null; schedule(); status(error instanceof Error ? error.message : "PTV2 overlay parsing failed"); } };
-    const setGuidanceGeometry = (result) => { try { if (!state.input || result.coordinate_frame !== state.frame.coordinate_frame || result.unit !== state.frame.unit || !point(result.start) || !point(result.end)) throw new Error("guidance geometry metadata or points are invalid"); const pathPoints = [result.start]; if (result.weld_type === "l") { if (!point(result.corner)) throw new Error("L result has no corner"); pathPoints.push(result.corner); } else if (result.corner !== null && result.corner !== undefined) throw new Error("corner is not allowed for this weld type"); pathPoints.push(result.end); const outside = (value) => value.some((item, axis) => item < state.input.bbox.min[axis] - Math.max(1, state.input.extent * .02) || item > state.input.bbox.max[axis] + Math.max(1, state.input.extent * .02)); if (pathPoints.some(outside)) throw new Error("guidance geometry is outside input cloud"); const normalize = (value) => new Float32Array(value.map((item, axis) => (item - state.input.center[axis]) / state.input.extent)); const path = new Float32Array(pathPoints.length * 3); pathPoints.forEach((value, index) => path.set(normalize(value), index * 3)); const markers = new Float32Array(path); let axes = null; const vectors = [result.x_axis, result.y_axis, result.z_axis]; if (vectors.every(point)) { const norms = vectors.map((value) => Math.hypot(...value)); const dots = [vectors[0][0]*vectors[1][0]+vectors[0][1]*vectors[1][1]+vectors[0][2]*vectors[1][2], vectors[0][0]*vectors[2][0]+vectors[0][1]*vectors[2][1]+vectors[0][2]*vectors[2][2], vectors[1][0]*vectors[2][0]+vectors[1][1]*vectors[2][1]+vectors[1][2]*vectors[2][2]]; const cross = [vectors[0][1]*vectors[1][2]-vectors[0][2]*vectors[1][1], vectors[0][2]*vectors[1][0]-vectors[0][0]*vectors[1][2], vectors[0][0]*vectors[1][1]-vectors[0][1]*vectors[1][0]]; const handed = cross[0]*vectors[2][0]+cross[1]*vectors[2][1]+cross[2]*vectors[2][2]; if (norms.every((value) => Math.abs(value - 1) <= .05) && dots.every((value) => Math.abs(value) <= .05) && handed >= .8) { const anchor = normalize(result.start); const axisLength = .15; const colors = [[1,0,0,1],[0,1,0,1],[0,0,1,1]]; axes = vectors.map((value, index) => { const positions = new Float32Array(6); positions.set(anchor, 0); positions.set(anchor.map((item, axis) => item + value[axis] * axisLength), 3); return { positions, count: 2, color: colors[index] }; }); } } state.geometry = { path: { positions: path, count: pathPoints.length }, markers: { positions: markers, count: pathPoints.length }, axes }; schedule(); status(axes ? "guidance path and display-anchor axes loaded" : "guidance path loaded; axes failed validation"); } catch (error) { state.geometry = null; schedule(); status(error instanceof Error ? error.message : "guidance geometry parsing failed"); } };
+    const setGuidanceGeometry = (result) => { try { if (!state.input || result.coordinate_frame !== state.frame.coordinate_frame || result.unit !== state.frame.unit || !point(result.start) || !point(result.end)) throw new Error("guidance geometry metadata or points are invalid"); const pathPoints = [result.start]; if (result.weld_type === "l") { if (!point(result.corner)) throw new Error("L result has no corner"); pathPoints.push(result.corner); } else if (result.corner !== null && result.corner !== undefined) throw new Error("corner is not allowed for this weld type"); pathPoints.push(result.end); const outside = (value) => value.some((item, axis) => item < state.input.bbox.min[axis] - Math.max(1, state.input.extent * .02) || item > state.input.bbox.max[axis] + Math.max(1, state.input.extent * .02)); if (pathPoints.some(outside)) throw new Error("guidance geometry is outside input cloud"); const normalize = (value) => new Float32Array(value.map((item, axis) => (item - state.input.center[axis]) / state.input.extent)); const normalizedPath = pathPoints.map(normalize); const path = new Float32Array(pathPoints.length * 3); normalizedPath.forEach((value, index) => path.set(value, index * 3)); const markers = new Float32Array(path); const pathSamples = sampleSegments(normalizedPath, MAX_PATH_SAMPLES_PER_SEGMENT); let axes = null; const vectors = [result.x_axis, result.y_axis, result.z_axis]; if (vectors.every(point)) { const norms = vectors.map((value) => Math.hypot(...value)); const dots = [vectors[0][0]*vectors[1][0]+vectors[0][1]*vectors[1][1]+vectors[0][2]*vectors[1][2], vectors[0][0]*vectors[2][0]+vectors[0][1]*vectors[2][1]+vectors[0][2]*vectors[2][2], vectors[1][0]*vectors[2][0]+vectors[1][1]*vectors[2][1]+vectors[1][2]*vectors[2][2]]; const cross = [vectors[0][1]*vectors[1][2]-vectors[0][2]*vectors[1][1], vectors[0][2]*vectors[1][0]-vectors[0][0]*vectors[1][2], vectors[0][0]*vectors[1][1]-vectors[0][1]*vectors[1][0]]; const handed = cross[0]*vectors[2][0]+cross[1]*vectors[2][1]+cross[2]*vectors[2][2]; if (norms.every((value) => Math.abs(value - 1) <= .05) && dots.every((value) => Math.abs(value) <= .05) && handed >= .8) { const anchor = normalize(result.start); const axisLength = .22; const colors = [[1,0,0,1],[0,1,0,1],[0,0,1,1]]; axes = vectors.map((value, index) => { const end = new Float32Array(anchor.map((item, axis) => item + value[axis] * axisLength)); const positions = new Float32Array(6); positions.set(anchor, 0); positions.set(end, 3); return { line: { positions, count: 2 }, samples: sampleSegments([anchor, end], MAX_AXIS_SAMPLES), color: colors[index] }; }); } } const auxiliaryCount = pathSamples.count + markers.length / 3 + (axes ? axes.reduce((total, axis) => total + axis.samples.count, 0) : 0); if (auxiliaryCount > MAX_GUIDANCE_AUX_POINTS) throw new Error("guidance display geometry exceeds its limit"); state.geometry = { path: { positions: path, count: pathPoints.length }, pathSamples, markers: { positions: markers, count: pathPoints.length }, axes }; schedule(); status(axes ? "guidance path and display-anchor axes loaded" : "guidance path loaded; axes failed validation"); } catch (error) { state.geometry = null; schedule(); status(error instanceof Error ? error.message : "guidance geometry parsing failed"); } };
     const setLayerVisibility = (values) => { if (!values || typeof values !== "object") return; if (typeof values.input === "boolean") state.inputVisible = values.input; if (typeof values.overlay === "boolean") state.overlayVisible = values.overlay; if (typeof values.geometry === "boolean") state.geometryVisible = values.geometry; schedule(); };
     const setPointSize = (value) => { if (Number.isFinite(Number(value))) { state.pointSize = Math.min(10, Math.max(1, Number(value))); schedule(); } };
     const onPointer = (event) => { if (!state.drag) return; const dx = event.clientX - state.drag.x; const dy = event.clientY - state.drag.y; state.drag.x = event.clientX; state.drag.y = event.clientY; if (event.buttons === 1) { state.rotation[1] += dx * .01; state.rotation[0] += dy * .01; } else { state.pan[0] += dx / Math.max(1, canvas.clientWidth); state.pan[1] -= dy / Math.max(1, canvas.clientHeight); } schedule(); };
@@ -443,9 +465,10 @@ R"JS(
     const card = document.createElement("div");
     card.className = "result-card";
     const list = document.createElement("dl");
+    const withUnit = (value, unit) => value === undefined || value === null ? value : `${String(value)} ${unit}`;
     const values = application === "weld_inspection"
-      ? [["\u8f93\u5165\u70b9\u6570", operation.inputPointCount], ["\u710a\u7f1d\u70b9\u6570", result.weld_point_count], ["\u710a\u7f1d\u6bd4\u4f8b", result.weld_ratio], ["\u957f\u5ea6", result.length_mm], ["\u63a8\u7406\u8017\u65f6", result.inference_time_ms], ["\u603b\u8017\u65f6", result.total_time_ms], ["\u8d28\u91cf\u8bc4\u4ef7", result.quality_assessment]]
-      : [["\u710a\u7f1d\u7c7b\u578b", result.weld_type], ["\u5750\u6807\u7cfb", result.coordinate_frame], ["\u5355\u4f4d", result.unit], ["\u72b6\u6001", result.disposition], ["\u53ef\u4fe1\u5ea6", result.confidence], ["\u4eba\u5de5\u590d\u6838\u539f\u56e0", result.waiting_reason], ["\u673a\u5668\u4eba\u6267\u884c", String(result.robot_execution_allowed)]];
+      ? [["\u8f93\u5165\u70b9\u6570", operation.inputPointCount], ["\u710a\u7f1d\u70b9\u6570", result.weld_point_count], ["\u710a\u7f1d\u6bd4\u4f8b", result.weld_ratio], ["\u957f\u5ea6", withUnit(result.length_mm, "mm")], ["\u63a8\u7406\u8017\u65f6", withUnit(result.inference_time_ms, "ms")], ["\u603b\u8017\u65f6", withUnit(result.total_time_ms, "ms")]]
+      : [["\u710a\u7f1d\u7c7b\u578b", result.weld_type], ["\u5750\u6807\u7cfb", result.coordinate_frame], ["\u5355\u4f4d", result.unit], ["\u72b6\u6001", result.disposition]];
     values.forEach(([label, value]) => {
       if (value === undefined || value === null) return;
       const dt = document.createElement("dt"); dt.textContent = label;
@@ -546,7 +569,7 @@ R"JS(
       }
       const contract = application === "weld_inspection"
         ? { schema_version: "1.0", input_artifacts: [artifact], requested_outputs: [$("inspection-segmentation").checked ? "segmentation" : null, $("inspection-geometry").checked ? "geometry" : null].filter(Boolean) }
-        : { schema_version: "1.0", input_artifacts: [artifact], weld_type: $("guidance-type").value === "auto" ? { mode: "auto" } : { mode: "requested", requested: $("guidance-type").value }, review_policy: { human_checkpoint: "required" } };
+        : { schema_version: "1.0", input_artifacts: [artifact], weld_type: $("guidance-type").value === "auto" ? { mode: "auto" } : { mode: "requested", requested: $("guidance-type").value }, review_policy: { human_checkpoint: "not_required" } };
       setStatus("\u6b63\u5728\u63d0\u4ea4\u4efb\u52a1\u2026");
       const submitPath = application === "weld_inspection" ? "/api/weld-inspection/v1/jobs" : "/api/welding-guidance/v1/jobs";
       const submitResponse = await fetch(submitPath, { method: "POST", headers: { "Content-Type": "application/json; charset=utf-8", Accept: "application/json" }, body: JSON.stringify(contract), signal });

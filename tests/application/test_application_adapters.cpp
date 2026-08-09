@@ -1,11 +1,13 @@
 #include <gtest/gtest.h>
 
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <functional>
+#include <thread>
 #include <sstream>
 #include <nlohmann/json.hpp>
 #include <set>
@@ -16,6 +18,7 @@
 
 #include "iaisf/application/application_adapters.hpp"
 #include "iaisf/application/application_artifacts.hpp"
+#include "iaisf/application/application_executor.hpp"
 #include "iaisf/application/local_artifact_catalog.hpp"
 
 namespace iaisf::application {
@@ -122,7 +125,9 @@ public:
     enum class Kind { Ptv2, Ptv2InvalidCounts, Ptv2WrongTotal, Ptv2WeldExceedsTotal,
                       Ptv2ZeroWeld, Ptv2ZeroWeldMissingRatio,
                       Ptv2ZeroWeldNonzeroRatio, Ptv2ZeroWeldInvalidRatio,
-                      Agent, AgentMinimal, Fail, Timeout, OutputLimit, Throw };
+                      Agent, AgentMinimal, AgentFinalWaiting, AgentStateWaiting,
+                      AgentSafetyRequired, AgentAdvisoryWarning, Fail, Timeout,
+                      OutputLimit, Throw };
     explicit FakeRunner(Kind kind, std::filesystem::path project = {})
         : kind_(kind), project_(std::move(project)) {}
 
@@ -215,11 +220,21 @@ public:
             std::filesystem::create_directories(output);
             std::filesystem::create_directories(intermediate);
             std::ofstream result(output / "final_result.json");
-            result << (kind_ == Kind::AgentMinimal
-                           ? R"({"status":"success"})"
-                           : kAgentExternalResult);
+            if (kind_ == Kind::AgentFinalWaiting) {
+                result << R"({"status":"waiting_human"})";
+            } else {
+                result << (kind_ == Kind::AgentMinimal
+                               ? R"({"status":"success"})"
+                               : kAgentExternalResult);
+            }
             std::ofstream state(intermediate / "agent_state.json");
-            state << R"({"status":"completed","safety":{"manual_confirmation_required":false}})";
+            state << (kind_ == Kind::AgentStateWaiting
+                          ? R"({"status":"waiting_human","safety":{"manual_confirmation_required":false}})"
+                          : kind_ == Kind::AgentAdvisoryWarning
+                                ? R"({"status":"completed","last_decision":{"decision":"continue_with_warning","manual_check_required":true},"safety":{"manual_confirmation_required":true}})"
+                          : kind_ == Kind::AgentSafetyRequired
+                                ? R"({"status":"completed","safety":{"manual_confirmation_required":true}})"
+                                : R"({"status":"completed","safety":{"manual_confirmation_required":false}})");
             std::ofstream feature(intermediate / "weld_feature.json");
             if (argument_after(spec.arguments, "--weld-type") == "straight") {
                 feature << R"({"coordinate":"fixture_frame","unit":"mm","start":[0,0,0],"end":[1,0,0],"x_axis":[1,0,0],"y_axis":[0,1,0],"z_axis":[0,0,1],"confidence":0.9})";
@@ -255,12 +270,26 @@ Result<ApplicationSubmissionSpec> inspection_submission() {
 }
 
 Result<ApplicationSubmissionSpec> guidance_submission(const WeldTypeMode mode,
-                                                      const std::optional<RequestedWeldType> type) {
+                                                      const std::optional<RequestedWeldType> type,
+                                                      const HumanCheckpointPolicy policy =
+                                                          HumanCheckpointPolicy::Required) {
     auto request = WeldTypeRequest::create(mode, type);
     auto submission = WeldingGuidanceSubmission::create(request.value(),
-                                                        HumanCheckpointPolicy::Required);
+                                                        policy);
     return ApplicationSubmissionSpec::create(submission.value());
 }
+
+class IncrementingClock final : public IApplicationJobClock {
+public:
+    Result<ApplicationJobTimePoint> now() const override {
+        const auto value = seconds_.fetch_add(1, std::memory_order_relaxed);
+        return Result<ApplicationJobTimePoint>::success(
+            ApplicationJobTimePoint{std::chrono::seconds{value}});
+    }
+
+private:
+    mutable std::atomic<std::int64_t> seconds_{10};
+};
 
 TEST(ApplicationAdapterTest, Ptv2ParsesFixtureAndRegistersArtifacts) {
     Fixture fixture;
@@ -498,7 +527,7 @@ TEST(ApplicationAdapterTest, WeldAgentMapsRequestedTypeAndDoesNotEnableRobot) {
     EXPECT_TRUE(guidance.z_axis.has_value());
     ASSERT_TRUE(guidance.waiting_reason.has_value());
     EXPECT_FALSE(guidance.waiting_reason->empty());
-    ASSERT_NE(std::find(runner.last_.arguments.begin(), runner.last_.arguments.end(), "l"),
+    ASSERT_NE(std::find(runner.last_.arguments.begin(), runner.last_.arguments.end(), "L"),
               runner.last_.arguments.end());
     const auto external_result = fixture.project / "tasks" / "job-agent" /
                                  "output" / "final_result.json";
@@ -552,6 +581,166 @@ TEST(ApplicationAdapterTest, WeldAgentMapsRequestedTypeAndDoesNotEnableRobot) {
     const auto manifest = nlohmann::json::parse(manifest_input);
     EXPECT_EQ(manifest.at("sha256"), artifact.sha256);
     EXPECT_EQ(manifest.at("size_bytes"), artifact.size_bytes);
+}
+
+TEST(ApplicationAdapterTest, NotRequiredSuccessCompletesWithoutWaitingReason) {
+    Fixture fixture;
+    auto resolver = LocalArtifactResolver::make(fixture.artifacts);
+    ASSERT_TRUE(resolver);
+    FakeRunner runner(FakeRunner::Kind::Agent, fixture.project);
+    auto adapter = WeldAgentWeldingGuidanceAdapter::create(
+        {"python", "agent_orchestrator.py", "tool.yaml", fixture.project,
+         fixture.scratch, fixture.outputs, std::chrono::seconds{5}, 1024U,
+         1024U, 4096U}, *resolver.value(), runner);
+    ASSERT_TRUE(adapter);
+    auto snapshot = fixture.snapshot(
+        IndustrialApplication::WeldingGuidance, ScenePhase::PreWeld,
+        guidance_submission(WeldTypeMode::Requested,
+                            RequestedWeldType::Straight,
+                            HumanCheckpointPolicy::NotRequired).value(),
+        "job-agent-completed");
+    ASSERT_TRUE(snapshot);
+
+    const auto execution = adapter.value()->execute(snapshot.value());
+    ASSERT_TRUE(execution) << execution.error().message;
+    const auto& guidance = std::get<WeldingGuidanceResult>(execution.value());
+    EXPECT_EQ(guidance.weld_type, RequestedWeldType::Straight);
+    EXPECT_EQ(guidance.disposition, GuidanceResultDisposition::Completed);
+    EXPECT_FALSE(guidance.waiting_reason.has_value());
+    EXPECT_FALSE(guidance.robot_execution_allowed);
+    EXPECT_NE(std::find(runner.last_.arguments.begin(),
+                        runner.last_.arguments.end(), "straight"),
+              runner.last_.arguments.end());
+
+    const auto public_path = fixture.outputs / "jobs" / "job-agent-completed" /
+                             "weld_agent" / "final_result.json";
+    std::ifstream input(public_path);
+    const auto public_json = nlohmann::json::parse(input);
+    EXPECT_EQ(public_json.at("weld_type"), "straight");
+    EXPECT_EQ(public_json.at("disposition"), "completed");
+    EXPECT_EQ(public_json.at("robot_execution_allowed"), false);
+    EXPECT_FALSE(public_json.contains("waiting_reason"));
+}
+
+TEST(ApplicationAdapterTest, NotRequiredPreservesRealExternalWaitingSignals) {
+    Fixture fixture;
+    auto resolver = LocalArtifactResolver::make(fixture.artifacts);
+    ASSERT_TRUE(resolver);
+    const std::array cases{
+        FakeRunner::Kind::AgentFinalWaiting,
+        FakeRunner::Kind::AgentStateWaiting,
+        FakeRunner::Kind::AgentSafetyRequired,
+    };
+    for (std::size_t index = 0; index < cases.size(); ++index) {
+        FakeRunner runner(cases[index], fixture.project);
+        auto adapter = WeldAgentWeldingGuidanceAdapter::create(
+            {"python", "agent_orchestrator.py", "tool.yaml", fixture.project,
+             fixture.scratch, fixture.outputs, std::chrono::seconds{5}, 1024U,
+             1024U, 4096U}, *resolver.value(), runner);
+        ASSERT_TRUE(adapter);
+        const auto job = "job-agent-waiting-" + std::to_string(index);
+        auto snapshot = fixture.snapshot(
+            IndustrialApplication::WeldingGuidance, ScenePhase::PreWeld,
+            guidance_submission(WeldTypeMode::Requested,
+                                RequestedWeldType::Straight,
+                                HumanCheckpointPolicy::NotRequired).value(),
+            job);
+        ASSERT_TRUE(snapshot);
+        const auto execution = adapter.value()->execute(snapshot.value());
+        ASSERT_TRUE(execution) << execution.error().message;
+        const auto& guidance =
+            std::get<WeldingGuidanceResult>(execution.value());
+        EXPECT_EQ(guidance.disposition,
+                  GuidanceResultDisposition::WaitingHuman);
+        ASSERT_TRUE(guidance.waiting_reason.has_value());
+        EXPECT_FALSE(guidance.waiting_reason->empty());
+        EXPECT_FALSE(guidance.robot_execution_allowed);
+    }
+}
+
+TEST(ApplicationAdapterTest, NotRequiredCompletesAnExplicitContinueWithWarning) {
+    Fixture fixture;
+    auto resolver = LocalArtifactResolver::make(fixture.artifacts);
+    ASSERT_TRUE(resolver);
+    FakeRunner runner(FakeRunner::Kind::AgentAdvisoryWarning, fixture.project);
+    auto adapter = WeldAgentWeldingGuidanceAdapter::create(
+        {"python", "agent_orchestrator.py", "tool.yaml", fixture.project,
+         fixture.scratch, fixture.outputs, std::chrono::seconds{5}, 1024U,
+         1024U, 4096U}, *resolver.value(), runner);
+    ASSERT_TRUE(adapter);
+    auto snapshot = fixture.snapshot(
+        IndustrialApplication::WeldingGuidance, ScenePhase::PreWeld,
+        guidance_submission(WeldTypeMode::Requested,
+                            RequestedWeldType::Straight,
+                            HumanCheckpointPolicy::NotRequired).value(),
+        "job-agent-advisory");
+    ASSERT_TRUE(snapshot);
+
+    const auto execution = adapter.value()->execute(snapshot.value());
+    ASSERT_TRUE(execution) << execution.error().message;
+    const auto& guidance = std::get<WeldingGuidanceResult>(execution.value());
+    EXPECT_EQ(guidance.disposition, GuidanceResultDisposition::Completed);
+    EXPECT_FALSE(guidance.waiting_reason.has_value());
+    EXPECT_FALSE(guidance.robot_execution_allowed);
+}
+
+TEST(ApplicationAdapterTest, ExecutorCompletesNotRequiredGuidanceAsSucceeded) {
+    Fixture fixture;
+    auto resolver = LocalArtifactResolver::make(fixture.artifacts);
+    ASSERT_TRUE(resolver);
+    FakeRunner runner(FakeRunner::Kind::AgentMinimal, fixture.project);
+    auto adapter = WeldAgentWeldingGuidanceAdapter::create(
+        {"python", "agent_orchestrator.py", "tool.yaml", fixture.project,
+         fixture.scratch, fixture.outputs, std::chrono::seconds{5}, 1024U,
+         1024U, 4096U}, *resolver.value(), runner);
+    ASSERT_TRUE(adapter);
+    auto repository = InMemoryApplicationJobRepository::make(4U);
+    ASSERT_TRUE(repository);
+    auto id = ApplicationJobId::parse(
+        "wg_0123456789abcdef0123456789abcdef");
+    ASSERT_TRUE(id);
+    auto submission = guidance_submission(
+        WeldTypeMode::Requested, RequestedWeldType::Straight,
+        HumanCheckpointPolicy::NotRequired);
+    ASSERT_TRUE(submission);
+    auto created = repository.value()->create(ApplicationJobCreateRequest{
+        id.value(), IndustrialApplication::WeldingGuidance,
+        ScenePhase::PreWeld, submission.value(),
+        ApplicationJobTimePoint{std::chrono::seconds{1}},
+        {fixture.artifact()}});
+    ASSERT_TRUE(created);
+    auto queued = repository.value()->transition(
+        id.value(), IndustrialApplication::WeldingGuidance,
+        created.value().version(), ApplicationJobState::Queued,
+        ApplicationJobTimePoint{std::chrono::seconds{2}});
+    ASSERT_TRUE(queued);
+    IncrementingClock clock;
+    auto executor = ApplicationExecutor::create(
+        *repository.value(), nullptr, adapter.value().get(), clock, 2U);
+    ASSERT_TRUE(executor);
+    ASSERT_TRUE(executor.value()->submit(id.value()));
+
+    const auto deadline = std::chrono::steady_clock::now() +
+                          std::chrono::seconds{2};
+    ApplicationJobSnapshot finished = queued.value();
+    for (;;) {
+        auto current = repository.value()->get(
+            id.value(), IndustrialApplication::WeldingGuidance);
+        ASSERT_TRUE(current);
+        finished = current.value();
+        if (is_terminal(finished.state())) break;
+        ASSERT_LT(std::chrono::steady_clock::now(), deadline);
+        std::this_thread::yield();
+    }
+    EXPECT_EQ(finished.state(), ApplicationJobState::Succeeded);
+    ASSERT_NE(finished.execution_result(), nullptr);
+    const auto* guidance =
+        std::get_if<WeldingGuidanceResult>(finished.execution_result());
+    ASSERT_NE(guidance, nullptr);
+    EXPECT_EQ(guidance->disposition, GuidanceResultDisposition::Completed);
+    EXPECT_FALSE(guidance->waiting_reason.has_value());
+    EXPECT_FALSE(guidance->robot_execution_allowed);
+    EXPECT_TRUE(executor.value()->shutdown());
 }
 
 TEST(ApplicationAdapterTest, StraightPublicResultOmitsCornerAndUnknownFields) {

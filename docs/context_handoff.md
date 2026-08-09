@@ -3,11 +3,15 @@
 ## 1. 当前状态
 
 - 项目：IndustrialAIServiceFramework
-- 当前分支：`phase/10-browser-upload-mvp`
-- 当前状态：Phase 10D 真实浏览器闭环与 WeldAgent 公共结果安全封板（待提交）
-- 已提交基线：Phase 10C `32f6a269301e971d2588b034fcb7242d92b3a4e2`
-- Phase 10C CI：Linux CI run `31263414316`，Debug/Release 通过
-- 当前工作：提交从已验证 IAISF Domain Result 生成的固定白名单 WeldAgent 公共 JSON；不进入 Phase 11
+- 当前分支：`fix/web-ui-result-display`
+- 当前基线：main `5d24c1648d8597e683eb9190cc647a2119a283c0`
+- 当前状态：Web UI 单位/文案、Guidance completed 语义、外部 L 参数与 Viewer 显著性修正（待提交）
+- Guidance policy：公共协议兼容 `required` 与 `not_required`；浏览器默认 `not_required`
+- 终态：无真实外部等待的成功分析为 `Succeeded/completed`；显式 Required 或外部 waiting/safety 信号仍为 `WaitingHuman`
+- L 边界：HTTP/JSON/Domain 保持小写 `l`，仅 WeldAgent CLI 参数转换为大写 `L`
+- 安全边界：`robot_execution_allowed=false` 仍强制校验；分析结果不授权或触发机器人控制
+- 真实浏览器回归：独立 straight 与 L 文件均通过真实文件控件上传并到达 `Succeeded/completed`；L 外部参数为 `L`、公共值为 `l`，包含 start/corner/end 和 RGB axes；浏览器 console 0 error
+- 外部状态语义：`continue_with_warning` 的后续机器人确认标记不阻塞 NotRequired 的纯分析；`stop`、`waiting_human`、无明确 continue 的安全要求及客户端 Required 仍进入 `WaitingHuman`
 - 当前实现：本地点云导入、SHA/manifest、Artifact resolver、Artifact HTTP 上传/下载、受控跨平台 ProcessRunner、独立 PTV2/WeldAgent adapters、Application Repository/Executor、单 worker 有界队列、六条 versioned HTTP route 和 Service 生命周期接入
 - Phase 9A：只读 Application Integration Design Audit 已完成
 - Phase 9B-1：新增 `iaisf_application_core` / `iaisf::application_core`，仅依赖 `iaisf::core`
@@ -1768,3 +1772,11 @@ Release (683 passed, 5 explicit capability skips, 0 failed), and 921 tests in
 WSL Ubuntu Debug and Release (920 passed, 1 explicit capability skip, 0 failed).
 Web UI 7/7 and Linux Service Web UI routes 4/4 passed in both WSL builds. WSL
 is local evidence, not GitHub Actions evidence.
+# Current fix validation
+
+Windows Debug/Release each passed 692 of 697 registered tests with 5 explicit
+capability skips and 0 failures. Local WSL Debug/Release each passed 929 of 930
+registered tests with 1 explicit capability skip and 0 failures. Focused
+regression passed 76/76 on Windows and 80/80 on WSL; Adapter 23/23, Web UI 7/7,
+Artifact HTTP 9/9 and WSL Service routes 4/4. Version/config smoke passed and
+project source/test compiler warnings were zero. WSL is local evidence.

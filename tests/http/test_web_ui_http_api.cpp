@@ -72,6 +72,25 @@ TEST(WebUiHttpApiTest, RegistersFourResourcesWithSecureHeaders) {
     EXPECT_EQ(response.value().body().find("visualization-placeholder"), std::string::npos);
     EXPECT_EQ(response.value().body().find("Phase 10C"), std::string::npos);
     EXPECT_NE(response.value().body().find("viewer-description"), std::string::npos);
+    EXPECT_NE(response.value().body().find(
+                  "PTV2 &#x4E0E; WeldAgent &#x4E3A;&#x4E24;&#x4E2A;&#x72EC;&#x7ACB;&#x4E1A;&#x52A1;&#x3002;"),
+              std::string::npos);
+    EXPECT_EQ(response.value().body().find(
+                  "&#x8D28;&#x91CF;&#x8BC4;&#x4EF7;&#x5C1A;&#x672A;&#x5B9E;&#x73B0;"),
+              std::string::npos);
+    EXPECT_EQ(response.value().body().find(
+                  "&#x673A;&#x5668;&#x4EBA;&#x6267;&#x884C;&#x59CB;&#x7EC8;&#x5173;&#x95ED;"),
+              std::string::npos);
+    EXPECT_EQ(response.value().body().find("class=\"notice\""),
+              std::string::npos);
+    EXPECT_EQ(response.value().body().find(
+                  "&#x63D0;&#x4EA4;&#x540E;&#x9700;&#x8981;&#x4EBA;&#x5DE5;&#x590D;&#x6838;"),
+              std::string::npos);
+    EXPECT_NE(response.value().body().find(
+                  "&#x8F93;&#x51FA;&#x5750;&#x6807;&#x8F74;&#x3001;&#x8D77;&#x70B9;&#x3001;&#x7EC8;&#x70B9;&#x53CA;&#x53EF;&#x9009;&#x62D0;&#x70B9;"),
+              std::string::npos);
+    EXPECT_NE(response.value().body().find("<option value=\"l\">l</option>"),
+              std::string::npos);
 }
 
 TEST(WebUiHttpApiTest, ResourcesHaveExpectedMediaTypesAndAccessibleContent) {
@@ -121,6 +140,24 @@ TEST(WebUiHttpApiTest, ResourcesHaveExpectedMediaTypesAndAccessibleContent) {
     EXPECT_NE(viewer.value().body().find("parseFiniteDecimal"), std::string::npos);
     EXPECT_NE(viewer.value().body().find("Number.isSafeInteger(value)"), std::string::npos);
     EXPECT_NE(viewer.value().body().find("values[3] !== \"0\""), std::string::npos);
+    EXPECT_NE(viewer.value().body().find("MAX_PATH_SAMPLES_PER_SEGMENT"),
+              std::string::npos);
+    EXPECT_NE(viewer.value().body().find("MAX_AXIS_SAMPLES"),
+              std::string::npos);
+    EXPECT_NE(viewer.value().body().find("MAX_GUIDANCE_AUX_POINTS"),
+              std::string::npos);
+    EXPECT_NE(viewer.value().body().find("sampleSegments"),
+              std::string::npos);
+    EXPECT_NE(viewer.value().body().find("gl.POINTS, 14"),
+              std::string::npos);
+    EXPECT_NE(viewer.value().body().find("gl.POINTS, 9"),
+              std::string::npos);
+    EXPECT_NE(viewer.value().body().find("gl.POINTS, 6"),
+              std::string::npos);
+    EXPECT_NE(viewer.value().body().find("const axisLength = .22"),
+              std::string::npos);
+    EXPECT_NE(viewer.value().body().find("pathPoints.push(result.corner)"),
+              std::string::npos);
 }
 
 TEST(WebUiHttpApiTest, ClientContractValidationAndAbortControlsAreEmbedded) {
@@ -153,8 +190,38 @@ TEST(WebUiHttpApiTest, ClientContractValidationAndAbortControlsAreEmbedded) {
     EXPECT_NE(body.find("isCurrent(operation) && finalPhase !== null"), std::string::npos);
     EXPECT_NE(body.find("const stopped = stopOperation()"), std::string::npos);
     EXPECT_NE(body.find("canonicalDownloadId"), std::string::npos);
-    EXPECT_NE(body.find("quality_assessment"), std::string::npos);
-    EXPECT_NE(body.find("robot_execution_allowed"), std::string::npos);
+    EXPECT_NE(body.find(
+                  "result.quality_assessment !== \"not_implemented\""),
+              std::string::npos);
+    EXPECT_NE(body.find("result.robot_execution_allowed !== false"),
+              std::string::npos);
+    EXPECT_NE(body.find("human_checkpoint: \"not_required\""),
+              std::string::npos);
+    EXPECT_EQ(body.find("human_checkpoint: \"required\""),
+              std::string::npos);
+    EXPECT_NE(body.find("[\"\\u72b6\\u6001\", result.disposition]"),
+              std::string::npos);
+    EXPECT_EQ(body.find("[\"\\u53ef\\u4fe1\\u5ea6\", result.confidence]"),
+              std::string::npos);
+    EXPECT_EQ(body.find(
+                  "[\"\\u4eba\\u5de5\\u590d\\u6838\\u539f\\u56e0\", result.waiting_reason]"),
+              std::string::npos);
+    EXPECT_EQ(body.find(
+                  "[\"\\u673a\\u5668\\u4eba\\u6267\\u884c\", String(result.robot_execution_allowed)]"),
+              std::string::npos);
+    EXPECT_NE(body.find(
+                  "[\"\\u957f\\u5ea6\", withUnit(result.length_mm, \"mm\")]"),
+              std::string::npos);
+    EXPECT_NE(body.find(
+                  "[\"\\u63a8\\u7406\\u8017\\u65f6\", withUnit(result.inference_time_ms, \"ms\")]"),
+              std::string::npos);
+    EXPECT_NE(body.find(
+                  "[\"\\u603b\\u8017\\u65f6\", withUnit(result.total_time_ms, \"ms\")]"),
+              std::string::npos);
+    EXPECT_EQ(body.find(
+                  "[\"\\u8d28\\u91cf\\u8bc4\\u4ef7\", result.quality_assessment]"),
+              std::string::npos);
+    EXPECT_EQ(body.find("innerHTML"), std::string::npos);
     EXPECT_NE(body.find("waiting_human"), std::string::npos);
     EXPECT_NE(body.find("setResultText"), std::string::npos);
 }

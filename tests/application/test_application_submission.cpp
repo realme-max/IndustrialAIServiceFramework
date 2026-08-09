@@ -24,11 +24,12 @@ namespace {
 
 [[nodiscard]] ApplicationSubmissionSpec guidance_spec(
     const WeldTypeMode mode,
-    const std::optional<RequestedWeldType> requested) {
+    const std::optional<RequestedWeldType> requested,
+    const HumanCheckpointPolicy policy = HumanCheckpointPolicy::Required) {
     auto weld_type = WeldTypeRequest::create(mode, requested);
     EXPECT_TRUE(weld_type);
     auto submission = WeldingGuidanceSubmission::create(
-        std::move(weld_type).value(), HumanCheckpointPolicy::Required);
+        std::move(weld_type).value(), policy);
     EXPECT_TRUE(submission);
     auto spec = ApplicationSubmissionSpec::create(
         std::move(submission).value());
@@ -92,6 +93,22 @@ TEST(ApplicationSubmissionTest, GuidanceRequestedSupportsAllRequestedTypes) {
     }
 }
 
+TEST(ApplicationSubmissionTest, GuidanceSupportsBothCheckpointPolicies) {
+    const auto required = guidance_spec(
+        WeldTypeMode::Requested, RequestedWeldType::Straight,
+        HumanCheckpointPolicy::Required);
+    const auto not_required = guidance_spec(
+        WeldTypeMode::Requested, RequestedWeldType::Straight,
+        HumanCheckpointPolicy::NotRequired);
+    ASSERT_NE(required.guidance(), nullptr);
+    ASSERT_NE(not_required.guidance(), nullptr);
+    EXPECT_EQ(required.guidance()->human_checkpoint(),
+              HumanCheckpointPolicy::Required);
+    EXPECT_EQ(not_required.guidance()->human_checkpoint(),
+              HumanCheckpointPolicy::NotRequired);
+    EXPECT_NE(required, not_required);
+}
+
 TEST(ApplicationSubmissionTest, GuidanceInvalidCombinationsFailClosed) {
     EXPECT_FALSE(WeldTypeRequest::create(
         WeldTypeMode::Auto, RequestedWeldType::Straight));
@@ -113,6 +130,7 @@ TEST(ApplicationSubmissionTest, EnumStringsAreStableAndInvalidValuesAreUnknown) 
     EXPECT_EQ(to_string(WeldTypeMode::Requested), "requested");
     EXPECT_EQ(to_string(RequestedWeldType::L), "l");
     EXPECT_EQ(to_string(HumanCheckpointPolicy::Required), "required");
+    EXPECT_EQ(to_string(HumanCheckpointPolicy::NotRequired), "not_required");
     EXPECT_EQ(
         to_string(static_cast<ApplicationSubmissionKind>(99)), "unknown");
     EXPECT_EQ(to_string(static_cast<WeldTypeMode>(99)), "unknown");
@@ -123,7 +141,8 @@ TEST(ApplicationSubmissionTest, EnumStringsAreStableAndInvalidValuesAreUnknown) 
 
 TEST(ApplicationSubmissionTest, CopyAndMovePreserveValidatedValues) {
     auto original = guidance_spec(
-        WeldTypeMode::Requested, RequestedWeldType::Straight);
+        WeldTypeMode::Requested, RequestedWeldType::Straight,
+        HumanCheckpointPolicy::NotRequired);
     const auto copied = original;
     auto moved = std::move(original);
     ASSERT_NE(copied.guidance(), nullptr);
@@ -133,7 +152,7 @@ TEST(ApplicationSubmissionTest, CopyAndMovePreserveValidatedValues) {
     EXPECT_EQ(original, moved);
     EXPECT_EQ(
         moved.guidance()->human_checkpoint(),
-        HumanCheckpointPolicy::Required);
+        HumanCheckpointPolicy::NotRequired);
 }
 
 TEST(ApplicationSubmissionTest, CrossApplicationAndScenePairingsFailClosed) {

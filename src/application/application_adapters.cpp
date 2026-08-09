@@ -642,7 +642,9 @@ WeldAgentWeldingGuidanceAdapter::execute(const ApplicationJobSnapshot& snapshot)
         spec.max_stderr_bytes = options_.max_stderr_bytes;
         const std::string weld_type_arg = guidance->weld_type().mode() == WeldTypeMode::Auto
                                               ? std::string{"auto"}
-                                              : std::string{to_string(type.value())};
+                                              : type.value() == RequestedWeldType::L
+                                                    ? std::string{"L"}
+                                                    : std::string{to_string(type.value())};
         spec.arguments = {windows_child_path_text(options_.orchestrator), "--mode", "pointcloud", "--task-id",
                           job, "--cloud", windows_child_path_text(materialized.value().text_path), "--weld-type",
                           weld_type_arg, "--tool-config",
@@ -688,6 +690,28 @@ WeldAgentWeldingGuidanceAdapter::execute(const ApplicationJobSnapshot& snapshot)
                     ErrorCode::InvalidArgument, "WeldAgent safety schema is invalid");
             }
             state_requires_human = safety.value("manual_confirmation_required", false);
+            if (state_requires_human && state_json.value().contains("last_decision")) {
+                const auto& decision = state_json.value().at("last_decision");
+                if (!decision.is_object() ||
+                    !decision.contains("decision") ||
+                    !decision.at("decision").is_string()) {
+                    return failure<ApplicationExecutionResult>(
+                        ErrorCode::InvalidArgument,
+                        "WeldAgent safety decision schema is invalid");
+                }
+                const auto action = decision.at("decision").get<std::string>();
+                if (action == "continue" || action == "continue_with_warning") {
+                    // WeldAgent may require confirmation before a later robot-use
+                    // workflow while explicitly allowing analysis to complete.
+                    // NotRequired applies only to this analysis result; robot
+                    // execution remains forbidden below.
+                    state_requires_human = false;
+                } else if (action != "stop") {
+                    return failure<ApplicationExecutionResult>(
+                        ErrorCode::InvalidArgument,
+                        "WeldAgent safety decision is invalid");
+                }
+            }
         }
         WeldingGuidanceResult result;
         result.weld_type = type.value();

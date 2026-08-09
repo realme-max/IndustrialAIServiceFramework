@@ -1,5 +1,28 @@
 # 协议设计
 
+## Current Guidance checkpoint and L compatibility contract
+
+Guidance v1.0 accepts exactly `required` or `not_required` in
+`review_policy.human_checkpoint`. The browser sends `not_required`. Successful
+external `success/completed` results with no safety wait become public
+`disposition=completed` and Job state `succeeded`; explicit `required` or real
+external waiting/manual-confirmation signals remain `waiting_human`.
+
+The HTTP/JSON/Domain weld type stays lowercase `l`. Only the controlled
+WeldAgent process argument maps it to uppercase `L`; public results map back to
+`l` and require a finite corner with path order `start -> corner -> end`.
+`robot_execution_allowed` must still be exactly `false`. Hiding selected safety
+fields from the result table does not remove them from the validated backend
+contract and does not authorize robot control.
+
+For the current WeldAgent contract, `last_decision=continue` or
+`continue_with_warning` explicitly permits the analysis pipeline to finish.
+Its manual-confirmation flag applies to a later robot-use workflow and does not
+override a client `not_required` analysis request. `last_decision=stop`, an
+external `waiting_human` state/status, an unqualified manual requirement, or a
+client `required` policy still yields `waiting_human`. This distinction never
+changes `robot_execution_allowed=false`.
+
 ## Phase 10D public WeldAgent result projection
 
 Phase 10C is committed at
