@@ -1,5 +1,33 @@
 # 测试计划
 
+## Current Web UI and Guidance regression scope
+
+The current fix must cover both checkpoint policies, strict JSON rejection of
+unknown/case/duplicate/extra values, Snapshot/Repository preservation,
+successful `NotRequired -> Completed -> Succeeded`, retained Required/external
+waiting behavior, uppercase external CLI `L` with lowercase public `l`, and
+the fixed-key safe download contract. Web UI resource tests verify the
+`not_required` request, retained robot false validation, units and display-row
+changes, bounded path/axis sampling, independent marker sizing, RGB axes and no
+unsafe `innerHTML` use. Resource-string assertions are not browser-runtime
+evidence; separate real browser straight/L workflows are required before the
+commit gate.
+
+The real-browser commit gate passed locally. Straight and L used real file
+controls and ended at Repository `Succeeded` with `disposition=completed`.
+The L evidence separately verified public `l`, external `L`, corner geometry,
+the two-segment path and RGB axes. Both result downloads matched ArtifactRef
+size/SHA and contained no robot-control fields; console errors were zero. This
+does not replace CTest and is not GitHub Actions evidence.
+
+The final current-fix matrix is Windows VS2022 Debug/Release at 697 registered,
+692 passed, 5 explicitly skipped and 0 failed per configuration, and local WSL
+Ubuntu 24.04 Debug/Release at 930 registered, 929 passed, 1 explicitly skipped
+and 0 failed per configuration. The focused regression passed 76/76 on Windows
+and 80/80 on WSL; ApplicationAdapter is 23/23, Web UI 7/7, Artifact HTTP 9/9,
+and Linux Service Web UI routes 4/4. Version/config smoke passed and project
+source/test compiler warnings were zero. The WSL matrix is local evidence.
+
 ## Phase 10D final validation scope
 
 Phase 10C commit `32f6a269301e971d2588b034fcb7242d92b3a4e2` passed Linux CI run

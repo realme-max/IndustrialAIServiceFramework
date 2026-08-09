@@ -1,13 +1,42 @@
 # IndustrialAIServiceFramework
 
-## Phase 10D current status
+## Current Web UI guidance refinement
 
-Phase 10C is committed at
-`32f6a269301e971d2588b034fcb7242d92b3a4e2`; its Linux CI run
-`31263414316` passed Debug and Release. Phase 10D is the current local
-worktree. Its two independent real-browser workflows have passed, and the
-remaining change publishes WeldAgent results from an explicit IAISF allowlist
-instead of copying or recursively filtering external JSON.
+The current `fix/web-ui-result-display` worktree is based on main commit
+`5d24c1648d8597e683eb9190cc647a2119a283c0`. Browser guidance submissions use
+the backward-compatible `human_checkpoint=not_required` policy. A successful
+WeldAgent analysis with no real external safety wait therefore finishes as
+`Succeeded/completed`; an explicit `required` request or an external
+`waiting_human`/safety signal still finishes as `WaitingHuman`.
+
+The public API keeps lowercase weld type `l`; only the controlled WeldAgent CLI
+argument boundary maps it to uppercase `L`. Robot execution remains forbidden
+and `robot_execution_allowed=false` remains a validated backend/browser
+contract. The page no longer displays the inspection quality row or the three
+guidance confidence/review/robot rows. Inspection length/time values now show
+their protocol units without rounding. The viewer uses bounded sampled points
+to make the cyan path, yellow key points and RGB axes visible without adding a
+frontend dependency; the two applications remain independent.
+
+Local real-browser regression passed with two independent read-only WeldAgent
+samples. Requested `straight` and requested `l` both uploaded through the real
+file control and reached Repository `Succeeded` with public disposition
+`completed`. The L invocation used external uppercase `L`, mapped back to
+public lowercase `l`, and returned finite start/corner/end plus RGB axes. Both
+safe JSON downloads matched their ArtifactRef size/SHA and kept
+`robot_execution_allowed=false`; the browser console reported no errors. This
+is local browser evidence, not GitHub Actions evidence.
+
+Final local validation for this fix passed in all four configurations. Windows
+VS2022 Debug/Release each registered 697 tests (692 passed, 5 explicitly
+skipped, 0 failed); local WSL Ubuntu 24.04 Debug/Release each registered 930
+tests (929 passed, 1 explicitly skipped, 0 failed). The focused regression was
+76/76 on Windows and 80/80 on WSL; ApplicationAdapter was 23/23, Web UI 7/7,
+Artifact HTTP 9/9, and Linux Service Web UI routes 4/4. Version/config smoke
+passed and project source/test compiler warnings were zero. WSL results are
+local evidence, not GitHub Actions evidence.
+
+## Historical Phase 10D status
 
 Phase 10A adds a bounded Artifact Web API:
 `POST /api/artifacts/v1/pointclouds` accepts direct `text/plain` XYZ input and

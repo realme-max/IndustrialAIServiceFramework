@@ -79,7 +79,7 @@ namespace {
         WeldTypeMode::Requested, RequestedWeldType::Corner);
     EXPECT_TRUE(weld_type);
     auto submission = WeldingGuidanceSubmission::create(
-        std::move(weld_type).value(), HumanCheckpointPolicy::Required);
+        std::move(weld_type).value(), HumanCheckpointPolicy::NotRequired);
     EXPECT_TRUE(submission);
     auto spec = ApplicationSubmissionSpec::create(
         std::move(submission).value());
@@ -195,17 +195,26 @@ TEST(InMemoryApplicationJobRepositoryTest, PersistsGuidanceSubmissionSpec) {
     EXPECT_EQ(
         *created.value().submission().guidance()->weld_type().requested_type(),
         RequestedWeldType::Corner);
+    EXPECT_EQ(
+        created.value().submission().guidance()->human_checkpoint(),
+        HumanCheckpointPolicy::NotRequired);
 
     const auto fetched = repo->get(
         job_id("guidance-job"), IndustrialApplication::WeldingGuidance);
     ASSERT_TRUE(fetched);
     EXPECT_EQ(fetched.value().submission(), created.value().submission());
+    EXPECT_EQ(
+        fetched.value().submission().guidance()->human_checkpoint(),
+        HumanCheckpointPolicy::NotRequired);
     const auto transitioned = repo->transition(
         job_id("guidance-job"), IndustrialApplication::WeldingGuidance,
         1U, ApplicationJobState::Queued,
         ApplicationJobTimePoint{std::chrono::seconds{101}});
     ASSERT_TRUE(transitioned);
     EXPECT_EQ(transitioned.value().submission(), created.value().submission());
+    EXPECT_EQ(
+        transitioned.value().submission().guidance()->human_checkpoint(),
+        HumanCheckpointPolicy::NotRequired);
 }
 
 TEST(InMemoryApplicationJobRepositoryTest, InvalidCreateIsTransactional) {

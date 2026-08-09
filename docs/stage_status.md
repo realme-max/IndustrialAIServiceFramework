@@ -3,12 +3,26 @@
 ## 当前结论
 
 ```text
-PHASE_10D_REAL_BROWSER_E2E_AND_PUBLIC_RESULT_SECURITY_IMPLEMENTED
+WEB_UI_AND_WELDING_GUIDANCE_FIXES_LOCAL_VALIDATED
 ```
 
-Phase 10C is committed at
+Current branch `fix/web-ui-result-display` is based on main
+`5d24c1648d8597e683eb9190cc647a2119a283c0`. The worktree keeps public lowercase
+`l`, maps only the external WeldAgent CLI argument to uppercase `L`, adds
+`not_required` while preserving `required`, and makes successful non-waiting
+browser analyses `Succeeded/completed`. Real external waiting/safety signals
+still produce `WaitingHuman`; `robot_execution_allowed=false` remains strict.
+The Web UI also adds inspection units, removes presentation-only quality and
+guidance safety rows, and enhances bounded path/key-point/RGB-axis visibility.
+
+- Local real-browser straight: real file control, Repository `Succeeded`, public `completed`, camera/mm start/end/RGB axes, safe download verified.
+- Local real-browser L: real `L_001.txt` file control, external `L`, public `l`, Repository `Succeeded`, finite start/corner/end, two-segment cyan path, three key points and RGB axes, safe download verified.
+- Browser console: 0 errors. The two runs are local evidence and are not GitHub Actions evidence.
+- Current fix local matrix: Windows Debug/Release each 697 registered, 692 passed, 5 explicitly skipped, 0 failed; local WSL Debug/Release each 930 registered, 929 passed, 1 explicitly skipped, 0 failed. Focused regression passed 76/76 on Windows and 80/80 on WSL; Adapter 23/23, Web UI 7/7, Artifact HTTP 9/9 and WSL Service routes 4/4. Version/config smoke passed and project source/test compiler warnings were zero.
+
+Historical baseline: Phase 10C is committed at
 `32f6a269301e971d2588b034fcb7242d92b3a4e2`; Linux CI run `31263414316`
-passed Debug and Release. Phase 10D is the current local worktree. Both real
+passed Debug and Release. Phase 10D was the subsequent browser-E2E worktree. Both real
 browser flows passed, and WeldAgent public download generation is now a fixed
 allowlist projection from the validated IAISF Domain Result.
 

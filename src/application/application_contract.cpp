@@ -303,7 +303,12 @@ ContractResult parse_root(
             ApplicationContractErrorCategory::InvalidRequest,
             "human checkpoint policy is invalid");
     }
-    if (checkpoint != "required") {
+    HumanCheckpointPolicy checkpoint_policy;
+    if (checkpoint == "required") {
+        checkpoint_policy = HumanCheckpointPolicy::Required;
+    } else if (checkpoint == "not_required") {
+        checkpoint_policy = HumanCheckpointPolicy::NotRequired;
+    } else {
         return failure(
             ApplicationContractErrorCategory::ValidationFailed,
             "human checkpoint policy is not supported");
@@ -317,7 +322,7 @@ ContractResult parse_root(
             "weld type request is invalid");
     }
     const auto guidance = WeldingGuidanceSubmission::create(
-        weld_request.value(), HumanCheckpointPolicy::Required);
+        weld_request.value(), checkpoint_policy);
     if (!guidance) {
         return failure(
             ApplicationContractErrorCategory::ValidationFailed,

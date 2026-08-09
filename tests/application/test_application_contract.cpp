@@ -18,11 +18,14 @@ std::string inspection_json(const std::string& outputs) {
            artifact_json() + R"(],"requested_outputs":)" + outputs + "}";
 }
 
-std::string guidance_json(const std::string& weld_type) {
+std::string guidance_json(
+    const std::string& weld_type,
+    const std::string& checkpoint = "required") {
     return std::string{"{"} +
            R"("schema_version":"1.0","input_artifacts":[)" +
            artifact_json() + R"(],"weld_type":)" + weld_type +
-           R"(,"review_policy":{"human_checkpoint":"required"}})";
+           R"(,"review_policy":{"human_checkpoint":")" + checkpoint +
+           R"("}})";
 }
 
 TEST(ApplicationContractTest, ParsesInspectionAndCanonicalizesOutputOrder) {
@@ -53,9 +56,14 @@ TEST(ApplicationContractTest, ParsesGuidanceAutoAndRequestedModes) {
         guidance_json(R"({"mode":"requested","requested":"corner"})").c_str());
     const auto l_type = parse_welding_guidance_submit(
         guidance_json(R"({"mode":"requested","requested":"l"})").c_str());
+    const auto not_required = parse_welding_guidance_submit(
+        guidance_json(R"({"mode":"requested","requested":"straight"})",
+                      "not_required")
+            .c_str());
     ASSERT_TRUE(automatic);
     ASSERT_TRUE(requested);
     ASSERT_TRUE(l_type);
+    ASSERT_TRUE(not_required);
     EXPECT_EQ(automatic.value().scene_phase, ScenePhase::PreWeld);
     ASSERT_NE(requested.value().submission.guidance(), nullptr);
     EXPECT_EQ(
@@ -64,6 +72,9 @@ TEST(ApplicationContractTest, ParsesGuidanceAutoAndRequestedModes) {
     EXPECT_EQ(
         l_type.value().submission.guidance()->weld_type().requested_type(),
         RequestedWeldType::L);
+    EXPECT_EQ(
+        not_required.value().submission.guidance()->human_checkpoint(),
+        HumanCheckpointPolicy::NotRequired);
 }
 
 TEST(ApplicationContractTest, RejectsUnknownAndDuplicateFields) {
@@ -318,6 +329,14 @@ TEST(ApplicationContractTest, RejectsInvalidGuidanceAndDangerousFields) {
         parse_welding_guidance_submit(
             guidance_json(R"({"mode":"auto","controller_url":"x"})")).error().category,
         ApplicationContractErrorCategory::InvalidRequest);
+    for (const auto& checkpoint : {"unknown", "Not_Required", "REQUIRED", ""}) {
+        EXPECT_EQ(
+            parse_welding_guidance_submit(
+                guidance_json(R"({"mode":"auto"})", checkpoint))
+                .error()
+                .category,
+            ApplicationContractErrorCategory::ValidationFailed);
+    }
 
     auto missing_checkpoint = guidance_json(R"({"mode":"requested","requested":"straight"})");
     const auto review_position = missing_checkpoint.find(
