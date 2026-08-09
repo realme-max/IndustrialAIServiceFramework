@@ -1,12 +1,13 @@
 # IndustrialAIServiceFramework
 
-## Phase 10C current status
+## Phase 10D current status
 
-The committed Phase 10B baseline is
-`8a79084373de46f31caa83ef8f0363c684b30f46`. Phase 10C is the current
-uncommitted bounded browser 3D visualization hardening worktree; the native browser file
-chooser is supported by the product, while host-file access limits in
-Codex/Chrome automation are test-tool constraints only.
+Phase 10C is committed at
+`32f6a269301e971d2588b034fcb7242d92b3a4e2`; its Linux CI run
+`31263414316` passed Debug and Release. Phase 10D is the current local
+worktree. Its two independent real-browser workflows have passed, and the
+remaining change publishes WeldAgent results from an explicit IAISF allowlist
+instead of copying or recursively filtering external JSON.
 
 Phase 10A adds a bounded Artifact Web API:
 `POST /api/artifacts/v1/pointclouds` accepts direct `text/plain` XYZ input and
@@ -36,6 +37,32 @@ Debug/Release each registered 921 tests (920 passed, 1 explicitly skipped,
 0 failed). Artifact HTTP targeted tests were 9/9 in all four configurations.
 The current Web UI target is 7/7 and the Linux Service route target is 4/4;
 these focused checks are local evidence.
+
+Phase 10D real-browser evidence is local and is not GitHub Actions evidence.
+PTV2 uploaded 2048 points, reached `Succeeded`, displayed the grey input cloud
+and red 205-point overlay, reported ratio `0.10009765625` and length about
+`0.8822024465 mm`, and verified all three browser downloads;
+`quality_assessment=not_implemented` remains explicit. WeldAgent independently
+uploaded 823114 points for requested `straight`, reached `waiting_human`, and
+displayed camera/mm start/end/path, RGB axes and confidence without a corner;
+`robot_execution_allowed=false` remains explicit. Real E2E exposed that the
+original downloadable result could contain joint/tcp/path fields. The final
+public file is generated only from the validated IAISF Domain Result, is 628
+bytes with SHA-256
+`71f49be2ecc3dc22c7ff49cd2cd6285e9b98a0ce1deb72d58728ed59f9001bf4`,
+and contains no joint, tcp, path, URL, command, log or unknown external field.
+PTV2 and WeldAgent remain separate and are never automatically chained. There
+is still no weld-quality algorithm, joint generation or robot control.
+Ignored browser evidence, inputs, local configuration, models and outputs are
+not repository content and must not be committed.
+
+Final Phase 10D local matrix: Windows VS2022 Debug/Release each registered 692
+tests (687 passed, 5 explicitly skipped, 0 failed); WSL Ubuntu 24.04
+Debug/Release each registered 925 tests (924 passed, 1 explicitly skipped,
+0 failed). ApplicationAdapter is 19/19, Web UI 7/7 and Artifact HTTP 9/9 in
+all four configurations; Linux Service Web UI routes are 4/4 in both WSL
+configurations. Version/config smoke passed and project source/test compiler
+warnings were zero.
 
 面向工业 AI 应用的 C++ 高性能任务服务框架。
 
@@ -768,9 +795,10 @@ blocks the text result or Artifact downloads. Direction axes use `start` only
 as a display anchor and are not claimed to be an algorithmic coordinate
 origin. PTV2 quality remains `quality_assessment=not_implemented` and
 WeldAgent remains `robot_execution_allowed=false`; the applications remain
-independent. Current evidence is C++ resource/route contract testing only,
-not browser or WebGL runtime E2E. Phase 10D retains full browser E2E,
-streaming/LOD and advanced visualization work.
+independent. Phase 10C's commit gate used C++ resource/route contract tests;
+Phase 10D subsequently supplied the separate local real-browser evidence
+recorded at the top of this document. Streaming/LOD and advanced visualization
+remain deferred.
 
 Phase 10C local full CTest validation registered 688 tests in Windows VS2022
 Debug and Release (683 passed, 5 explicit capability skips, 0 failed), and

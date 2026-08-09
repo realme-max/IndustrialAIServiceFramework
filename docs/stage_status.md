@@ -3,27 +3,34 @@
 ## 当前结论
 
 ```text
-PHASE_10C_BROWSER_3D_VISUALIZATION_FINAL_HARDENED
+PHASE_10D_REAL_BROWSER_E2E_AND_PUBLIC_RESULT_SECURITY_IMPLEMENTED
 ```
 
-The committed Phase 10B baseline is
-`8a79084373de46f31caa83ef8f0363c684b30f46`; Phase 10C
-viewer changes are uncommitted. Local real HTTP E2E is complete with independent PTV2 and
-WeldAgent inputs. No real browser/WebGL runtime E2E evidence is claimed; the
-resource checks are source/route contract tests only. Host-file access limits in
-Codex/Chrome automation are test-tool limitations, not product blockers.
+Phase 10C is committed at
+`32f6a269301e971d2588b034fcb7242d92b3a4e2`; Linux CI run `31263414316`
+passed Debug and Release. Phase 10D is the current local worktree. Both real
+browser flows passed, and WeldAgent public download generation is now a fixed
+allowlist projection from the validated IAISF Domain Result.
+
+- PTV2 local browser E2E: 2048 input points, 205 weld points, ratio `0.10009765625`, length about `0.8822024465 mm`, grey input/red overlay, three verified browser downloads, `quality_assessment=not_implemented`.
+- WeldAgent local browser E2E: independent 823114-point requested `straight`, `waiting_human`, camera/mm start/end/path, RGB axes/confidence, no corner, `robot_execution_allowed=false`.
+- Security finding and resolution: the original external download could contain joint/tcp/path fields. The final implementation neither copies nor recursively sanitizes that JSON; it generates a new fixed-key document from validated Domain values.
+- Safe download evidence: 628 bytes, SHA-256 `71f49be2ecc3dc22c7ff49cd2cd6285e9b98a0ce1deb72d58728ed59f9001bf4`; no joint, tcp, path, URL, command, log or unknown external field.
+- Evidence boundary: real-browser E2E is local, not GitHub Actions. Ignored evidence, inputs, configuration, models and outputs are not committed.
+- Product boundary: the applications remain independent. Quality assessment, joint values, robot control and automatic chaining remain unimplemented.
+- Final local matrix: Windows Debug/Release each 692 registered, 687 passed, 5 explicitly skipped, 0 failed; WSL Debug/Release each 925 registered, 924 passed, 1 explicitly skipped, 0 failed. Adapter 19/19, Web UI 7/7 and Artifact HTTP 9/9 passed in all four configurations; WSL Service routes passed 4/4.
 
 - 历史阶段：Phase 9 Fast Track MVP-3 Application Executor、HTTP 与 Service
 - 历史本地实现提交：`b2f16cb99bc2e4c04cdf777fc6acc56575b35b16`
-- 本轮范围：Phase 10C 浏览器 3D 可视化 MVP；Phase 10B 页面、资源和路由作为已完成基线保留
+- 本轮范围：Phase 10D 真实浏览器双业务闭环与 WeldAgent 公共结果安全封板；Phase 10C viewer 作为已提交基线保留
 - 本地点云导入、SHA/manifest、Artifact resolver、受控进程、PTV2/WeldAgent adapters、Application Repository/Executor、单 worker 有界队列和六条 versioned HTTP route 均已接入
 - Phase 10B 本地验证：Windows VS2022 Debug/Release 全量 CTest 各 681 registered、676 passed、5 explicitly skipped、0 failed；WSL Ubuntu 24.04 GCC Debug/Release 各 914 registered、913 passed、1 explicitly skipped、0 failed。Web UI 7/7、Linux Service Web UI routes 4/4、Artifact HTTP 9/9。
 - WSL Release 唯一测试级 skip 为既有 `SafePathResolverTest.PermissionFailureIsExplicitlyHandled` 能力检查；不属于 workflow step skip。
 - warning：项目源码与测试为 0；WSL 本地结果不冒充 GitHub Actions
-- 日期：2026-08-08（Asia/Shanghai）
+- 日期：2026-08-09（Asia/Shanghai）
 - 未实现：持久化 Catalog/Repository、Range、流式上传/下载、认证、cancel/retry/heartbeat/lease/fencing、远程 Worker Protocol、PTV2 真实质量评价、WeldAgent joint values/机器人控制、两个应用自动串联，以及 GitHub runner 上的真实 GPU/外部项目 E2E；Phase 10A Artifact HTTP 上传/下载已实现
 - Phase 10C 本地全量验证：Windows VS2022 Debug/Release 各 688 registered、683 passed、5 explicitly skipped、0 failed；WSL Ubuntu 24.04 Debug/Release 各 921 registered、920 passed、1 explicitly skipped、0 failed。Web UI 7/7、Linux Service Web UI routes 4/4；均为本地证据。
-- 下一步：提交本轮文档/workflow 封板并等待 exact-commit Linux CI；不进入后续功能阶段
+- 下一步：完成本地全量矩阵后提交当前 10 文件并等待 exact-commit Linux CI；不进入 Phase 11
 
 ## Phase 9 Fast Track MVP-3 封板范围（历史记录）
 
@@ -1146,10 +1153,11 @@ failed. The current Web UI target is 7/7 and the Linux Service route target is
 These are local evidence, not GitHub Actions evidence; no browser automation
 claim substitutes for the Phase 10A real backend E2E.
 
-## Current Phase 10C browser 3D visualization MVP
+## Historical Phase 10C browser 3D visualization MVP
 
 The compiled viewer resource renders the input cloud, the validated PTV2 PLY
 overlay and WeldAgent path geometry. PTV2 output metadata is inherited from
 the input Artifact; prediction remains download-only. Direction axes use
 `start` as a display anchor without changing the Application JSON schema.
-Phase 10D retains full real browser E2E, streaming/LOD and advanced rendering.
+Phase 10D subsequently completed the local real-browser E2E recorded above;
+streaming/LOD and advanced rendering remain deferred.
