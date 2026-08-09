@@ -1,0 +1,4 @@
+# Every run directory is local evidence and must remain untracked.
+*
+!.gitignore
+!README.md

@@ -269,6 +269,23 @@ http://127.0.0.1:<port>/
 
 本节预留给后续基准数据。正式报告应记录硬件、操作系统、编译配置、输入规模、并发模型和统计方法，避免只给出脱离环境的单一 QPS。
 
+### 可复现测试基线
+
+`benchmarks/` 提供无第三方依赖、有界的 Linux Release 基础 smoke，验证
+`/health`、`/version` 和 `/metrics`，并生成版本化 manifest、固定列 CSV、
+结构化 summary 与有界事件日志。它是测试基础设施，不是性能数据，不执行
+压力、sanitizer、长时间稳定性、真实 PTV2/WeldAgent 或 GPU 测试。详见
+[`benchmarks/README.md`](benchmarks/README.md)。
+
+正式 clean worktree 验证命令：
+
+```text
+python3 benchmarks/scripts/run_baseline_smoke.py
+```
+
+开发 dirty worktree 时可显式使用 `--allow-dirty`；该选项不应作为正式
+baseline 证据的默认命令。
+
 计划覆盖：
 
 - HTTP 基础接口吞吐、延迟分位数、keep-alive 与连接建立成本。
