@@ -4,9 +4,10 @@
 
 - 项目：IndustrialAIServiceFramework
 - 当前分支：`phase/10-browser-upload-mvp`
-- 当前状态：`PHASE_10C_BROWSER_3D_VISUALIZATION_FINAL_HARDENED`（未提交工作区）
-- 已提交基线：Phase 10B `8a79084373de46f31caa83ef8f0363c684b30f46`
-- 当前工作：完成 Phase 10C bounded WebGL2 viewer 的本地验证；不进入 Phase 10D
+- 当前状态：Phase 10D 真实浏览器闭环与 WeldAgent 公共结果安全封板（待提交）
+- 已提交基线：Phase 10C `32f6a269301e971d2588b034fcb7242d92b3a4e2`
+- Phase 10C CI：Linux CI run `31263414316`，Debug/Release 通过
+- 当前工作：提交从已验证 IAISF Domain Result 生成的固定白名单 WeldAgent 公共 JSON；不进入 Phase 11
 - 当前实现：本地点云导入、SHA/manifest、Artifact resolver、Artifact HTTP 上传/下载、受控跨平台 ProcessRunner、独立 PTV2/WeldAgent adapters、Application Repository/Executor、单 worker 有界队列、六条 versioned HTTP route 和 Service 生命周期接入
 - Phase 9A：只读 Application Integration Design Audit 已完成
 - Phase 9B-1：新增 `iaisf_application_core` / `iaisf::application_core`，仅依赖 `iaisf::core`
@@ -19,6 +20,10 @@
 - 验证：Windows Debug/Release 各注册 642 项（637 passed、5 explicitly skipped、0 failed）；WSL Ubuntu 24.04 GCC 13.3.0 Debug/Release 各注册 871 项（870 passed、1 explicitly skipped、0 failed）；Application Windows 103/103、WSL 104/104，api_primitives Windows 18/18、Linux 19/19（含 Linux-only getrandom seam）；warning 0。WSL 结果不是 GitHub Actions 证据
 - 应用边界：`weld_inspection/post_weld` 与 `welding_guidance/pre_weld` 完全独立，不自动串联
 - 真实性边界：PTV2 质量评价为 `quality_assessment=not_implemented`；WeldAgent 不得生成真实 joint values、控制机器人或发送 URL
+- Phase 10D 本地浏览器证据：PTV2 2048 输入点、205 weld points、ratio `0.10009765625`、length 约 `0.8822024465 mm`、灰色输入/红色 overlay 和 3 个校验下载；WeldAgent 独立使用 823114 点、requested `straight`、`waiting_human`，显示 camera/mm start/end/path、RGB axes/confidence，无 corner，且 `robot_execution_allowed=false`
+- 公共结果安全：真实 E2E 暴露外部原始下载可能含 joint/tcp/path；最终实现不复制或递归净化外部 JSON，而从已验证 Domain Result 生成固定白名单。安全下载为 628 bytes，SHA-256 `71f49be2ecc3dc22c7ff49cd2cd6285e9b98a0ce1deb72d58728ed59f9001bf4`，不含 joint、tcp、路径、URL、命令、日志或未知外部字段
+- 证据边界：上述为本地真实浏览器证据，不是 GitHub Actions；ignored evidence、输入、配置、模型和输出不得提交
+- Phase 10D 最终本地矩阵：Windows Debug/Release 各 692 registered、687 passed、5 explicitly skipped、0 failed；WSL Debug/Release 各 925 registered、924 passed、1 explicitly skipped、0 failed；四配置 Adapter 19/19、Web UI 7/7、Artifact HTTP 9/9，WSL Service routes 4/4
 - 未实现：持久化 Catalog/Repository、Range、流式上传/下载、认证、cancel/retry/heartbeat/lease/fencing、远程 Worker Protocol、PTV2 真实质量评价、WeldAgent joint values/机器人控制、两个应用自动串联，以及 GitHub runner 上的真实 GPU/外部项目 E2E；Phase 10A Artifact HTTP 上传/下载已实现
 - Phase 0 提交：`5fbcec0 docs: complete phase 0 architecture design`
 - Phase 1 最终实现提交：`63b30cffcbe3e621af33664721b3675a647bd1a1`
@@ -1724,7 +1729,7 @@ configurations; WSL is local evidence, not GitHub Actions evidence.
   extension/host-file limitation is specific to Codex/Chrome automation and
   is not a product blocker. Controlled client-contract assertions and Linux
   Service route tests are separate local evidence, not GitHub Actions evidence.
-- Phase 10B did not include the Phase 10C viewer; the current Phase 10C checkpoint is
+- Phase 10B did not include the Phase 10C viewer; the historical Phase 10C checkpoint is
   recorded below.
 
 ## Historical Phase 10B same-origin Web UI
@@ -1750,7 +1755,7 @@ browser attempt was blocked by the WSL network boundary. Phase 10A's real
 dual-application HTTP E2E remains separate local backend evidence. This is
 local evidence, not GitHub Actions evidence.
 
-## Current Phase 10C checkpoint
+## Historical Phase 10C checkpoint
 
 `iaisf_web_ui` now owns `/ui/point-cloud-viewer.js`. It uses bounded XYZ and
 fixed ASCII PLY parsing, shared input-cloud normalization, deterministic

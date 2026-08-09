@@ -1,19 +1,37 @@
 # 分阶段开发计划
 
-## Current Phase 10C status
+## Current Phase 10D status
 
-The current uncommitted worktree is Phase 10C browser 3D visualization
-hardening on top of committed Phase 10B baseline
-`8a79084373de46f31caa83ef8f0363c684b30f46`; it must not be treated as Phase
-10B or Phase 10D. No browser/WebGL runtime E2E evidence is claimed.
+Phase 10C is committed at
+`32f6a269301e971d2588b034fcb7242d92b3a4e2` and passed Linux CI run
+`31263414316`. The current Phase 10D worktree seals two independent local
+real-browser flows and the WeldAgent public-result allowlist; it does not start
+Phase 11.
 
 ## 1. 执行原则
 
-当前实施点为 **Phase 10B 同域 Web UI（Phase 10A 已提交）**。Phase 9A/9B
-domain/repository、Fast Track MVP-1/2/3 和 Phase 10A Artifact Web API 已完成；Phase 10B
-在既有六条 Application route 和两条 Artifact route 之上增加编译进二进制的同域页面资源。
+当前实施点为 **Phase 10D 真实浏览器双业务闭环与公共结果安全封板**。Phase 9A/9B、
+Fast Track MVP-1/2/3、Phase 10A Artifact Web API、Phase 10B 同域页面和 Phase 10C
+浏览器 3D viewer 均已完成；Phase 10D 不新增业务能力，只封板真实浏览器证据和公共下载边界。
 持久化 Catalog、Range、流式上传/下载、认证、取消/重试、远程 Worker Protocol、质量评价和
 机器人控制仍属后续范围。
+
+Phase 10D 的 PTV2 本地浏览器闭环使用 2048 点输入，得到 205 weld points、ratio
+`0.10009765625`、length 约 `0.8822024465 mm`、灰色输入/红色 overlay 和三个
+经 size/SHA 校验的下载，且 `quality_assessment=not_implemented`。WeldAgent 使用独立
+823114 点输入、requested `straight`，进入 `waiting_human` 并显示 camera/mm
+start/end/path、RGB axes/confidence，无 corner，且 `robot_execution_allowed=false`。
+外部原始 JSON 只参与状态判断；公共文件从已验证 Domain Result 的固定白名单生成，
+大小 628 bytes，SHA-256 为
+`71f49be2ecc3dc22c7ff49cd2cd6285e9b98a0ce1deb72d58728ed59f9001bf4`，
+不含 joint/tcp/路径/URL/命令/日志或未知外部字段。该证据不是 GitHub CI；ignored
+evidence、输入、配置、模型和输出不得提交。两个应用不串联，也不实现质量评价、
+joint values 或机器人控制。
+
+Phase 10D 最终本地矩阵为 Windows Debug/Release 各 692 registered、687
+passed、5 explicitly skipped、0 failed，WSL Debug/Release 各 925
+registered、924 passed、1 explicitly skipped、0 failed；四配置 Adapter
+19/19、Web UI 7/7、Artifact HTTP 9/9，WSL 两配置 Service routes 4/4。
 
 项目当前按 Phase 0—10 推进。Phase 2 后将 Reactor Core 与 TCP Transport 分开验收，
 因此后续原计划顺延一阶段。每个阶段只在其验收门槛通过后进入下一阶段，并同步更新：

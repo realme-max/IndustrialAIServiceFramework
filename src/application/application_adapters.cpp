@@ -130,29 +130,161 @@ Result<ArtifactRef> register_required(LocalOutputArtifactRegistrar& registrar,
         std::move(coordinate_frame), std::move(unit), point_count});
 }
 
-Result<void> copy_regular(const std::filesystem::path& source,
-                          const std::filesystem::path& destination) {
-    try {
-        std::error_code error;
-        const auto status = std::filesystem::symlink_status(source, error);
-        if (error || std::filesystem::is_symlink(status) ||
-            !std::filesystem::is_regular_file(status)) {
-            return failure<void>(ErrorCode::InvalidArgument,
-                                 "external output is not a regular file");
+Result<bool> path_entry_exists(const std::filesystem::path& path) {
+    std::error_code error;
+    const auto status = std::filesystem::symlink_status(path, error);
+    if (error) {
+        if (error == std::errc::no_such_file_or_directory) {
+            return Result<bool>::success(false);
         }
+        return failure<bool>(ErrorCode::IoError,
+                             "controlled WeldAgent result path cannot be inspected");
+    }
+    return Result<bool>::success(status.type() != std::filesystem::file_type::not_found);
+}
+
+nlohmann::json point_json(const ApplicationPoint3& point) {
+    return nlohmann::json::array({point.x, point.y, point.z});
+}
+
+nlohmann::json public_weld_agent_result_json(
+    const ApplicationJobSnapshot& snapshot,
+    const WeldingGuidanceResult& result) {
+    nlohmann::json value{
+        {"schema_version", "1.0"},
+        {"job_id", std::string{snapshot.job_id().value()}},
+        {"application", "welding_guidance"},
+        {"weld_type", std::string{to_string(result.weld_type)}},
+        {"coordinate_frame", result.coordinate_frame},
+        {"unit", result.unit},
+        {"disposition", std::string{to_string(result.disposition)}},
+        {"robot_execution_allowed", false}};
+    if (result.start) value["start"] = point_json(*result.start);
+    if (result.end) value["end"] = point_json(*result.end);
+    if (result.corner) value["corner"] = point_json(*result.corner);
+    if (result.x_axis) value["x_axis"] = point_json(*result.x_axis);
+    if (result.y_axis) value["y_axis"] = point_json(*result.y_axis);
+    if (result.z_axis) value["z_axis"] = point_json(*result.z_axis);
+    if (result.confidence) value["confidence"] = *result.confidence;
+    if (result.waiting_reason) value["waiting_reason"] = *result.waiting_reason;
+    return value;
+}
+
+Result<void> write_public_weld_agent_result(const nlohmann::json& value,
+                                            const std::filesystem::path& destination,
+                                            const std::size_t maximum) {
+    auto temporary = destination;
+    temporary += ".tmp";
+    bool temporary_created = false;
+    try {
+        if (maximum == 0U) {
+            return failure<void>(ErrorCode::ResourceExhausted,
+                                 "public WeldAgent result limit is invalid");
+        }
+        const auto serialized = value.dump();
+        if (serialized.size() > maximum) {
+            return failure<void>(ErrorCode::ResourceExhausted,
+                                 "public WeldAgent result exceeds its limit");
+        }
+        std::error_code error;
         std::filesystem::create_directories(destination.parent_path(), error);
         if (error) return failure<void>(ErrorCode::IoError,
                                         "controlled output directory cannot be created");
-        std::filesystem::copy_file(source, destination,
-                                   std::filesystem::copy_options::none, error);
-        if (error) return failure<void>(ErrorCode::IoError,
-                                        "external output cannot be copied");
+        const auto destination_exists = path_entry_exists(destination);
+        if (!destination_exists) return Result<void>::failure(destination_exists.error());
+        const auto temporary_exists = path_entry_exists(temporary);
+        if (!temporary_exists) return Result<void>::failure(temporary_exists.error());
+        if (destination_exists.value() || temporary_exists.value()) {
+            return failure<void>(ErrorCode::InvalidState,
+                                 "controlled WeldAgent result already exists");
+        }
+        std::ofstream output(temporary, std::ios::binary | std::ios::trunc);
+        if (!output) {
+            std::filesystem::remove(temporary, error);
+            return failure<void>(ErrorCode::IoError,
+                                 "controlled WeldAgent result cannot be opened");
+        }
+        temporary_created = true;
+        output.write(serialized.data(), static_cast<std::streamsize>(serialized.size()));
+        output.flush();
+        output.close();
+        if (!output) {
+            std::filesystem::remove(temporary, error);
+            temporary_created = false;
+            return failure<void>(ErrorCode::IoError,
+                                 "controlled WeldAgent result cannot be written");
+        }
+        const auto temporary_status = std::filesystem::symlink_status(temporary, error);
+        if (error || std::filesystem::is_symlink(temporary_status) ||
+            !std::filesystem::is_regular_file(temporary_status)) {
+            std::filesystem::remove(temporary, error);
+            temporary_created = false;
+            return failure<void>(ErrorCode::IoError,
+                                 "controlled WeldAgent result temporary is invalid");
+        }
+        const auto written_size = std::filesystem::file_size(temporary, error);
+        if (error || written_size != serialized.size() || written_size > maximum) {
+            std::filesystem::remove(temporary, error);
+            temporary_created = false;
+            return failure<void>(ErrorCode::IoError,
+                                 "controlled WeldAgent result size is invalid");
+        }
+        const auto destination_before_commit = path_entry_exists(destination);
+        if (!destination_before_commit) {
+            std::filesystem::remove(temporary, error);
+            temporary_created = false;
+            return Result<void>::failure(destination_before_commit.error());
+        }
+        if (destination_before_commit.value()) {
+            std::filesystem::remove(temporary, error);
+            temporary_created = false;
+            return failure<void>(ErrorCode::InvalidState,
+                                 "controlled WeldAgent result already exists");
+        }
+        std::filesystem::rename(temporary, destination, error);
+        if (error) {
+            std::filesystem::remove(temporary, error);
+            temporary_created = false;
+            return failure<void>(ErrorCode::IoError,
+                                 "controlled WeldAgent result cannot be committed");
+        }
+        temporary_created = false;
         return Result<void>::success();
     } catch (const std::filesystem::filesystem_error&) {
-        return failure<void>(ErrorCode::IoError, "external output copy failed");
+        if (temporary_created) {
+            std::error_code ignored;
+            std::filesystem::remove(temporary, ignored);
+        }
+        return failure<void>(ErrorCode::IoError,
+                             "controlled WeldAgent result filesystem failure");
+    } catch (const nlohmann::json::exception&) {
+        if (temporary_created) {
+            std::error_code ignored;
+            std::filesystem::remove(temporary, ignored);
+        }
+        return failure<void>(ErrorCode::InternalError,
+                             "WeldAgent public result cannot be serialized");
     } catch (const std::bad_alloc&) {
+        if (temporary_created) {
+            std::error_code ignored;
+            std::filesystem::remove(temporary, ignored);
+        }
         return failure<void>(ErrorCode::ResourceExhausted,
-                             "external output copy allocation failed");
+                             "WeldAgent public result allocation failed");
+    } catch (const std::exception&) {
+        if (temporary_created) {
+            std::error_code ignored;
+            std::filesystem::remove(temporary, ignored);
+        }
+        return failure<void>(ErrorCode::InternalError,
+                             "WeldAgent public result generation failed");
+    } catch (...) {
+        if (temporary_created) {
+            std::error_code ignored;
+            std::filesystem::remove(temporary, ignored);
+        }
+        return failure<void>(ErrorCode::InternalError,
+                             "WeldAgent public result generation failed");
     }
 }
 
@@ -557,15 +689,7 @@ WeldAgentWeldingGuidanceAdapter::execute(const ApplicationJobSnapshot& snapshot)
             }
             state_requires_human = safety.value("manual_confirmation_required", false);
         }
-        const auto controlled = options_.output_root / "jobs" / job / "weld_agent";
-        const auto copied_final = controlled / "final_result.json";
-        auto copied = copy_regular(final_path, copied_final);
-        if (!copied) return Result<ApplicationExecutionResult>::failure(copied.error());
-        auto final_ref = register_required(*registrar_, copied_final, job + "-agent-result",
-                                           "agent_result", "application/json");
-        if (!final_ref) return Result<ApplicationExecutionResult>::failure(final_ref.error());
         WeldingGuidanceResult result;
-        result.output_artifacts.push_back(final_ref.value());
         result.weld_type = type.value();
         result.coordinate_frame = feature_json.value().value("coordinate", std::string{});
         result.unit = feature_json.value().value("unit", std::string{"mm"});
@@ -583,7 +707,36 @@ WeldAgentWeldingGuidanceAdapter::execute(const ApplicationJobSnapshot& snapshot)
             result.waiting_reason = std::string{"human review is required"};
         }
         result.robot_execution_allowed = false;
-        const auto checked = validate_execution_result(result, IndustrialApplication::WeldingGuidance);
+        // The public validator requires at least one valid output artifact.  Use
+        // an already-validated input ArtifactRef only in this transient copy so
+        // the guidance payload is checked before any public file is generated.
+        // The input ArtifactRef is never published as an output.
+        auto validation_candidate = result;
+        validation_candidate.output_artifacts.push_back(
+            snapshot.input_artifacts().front());
+        const auto checked_without_artifact = validate_execution_result(
+            validation_candidate, IndustrialApplication::WeldingGuidance);
+        if (!checked_without_artifact) {
+            return Result<ApplicationExecutionResult>::failure(
+                checked_without_artifact.error());
+        }
+        const auto controlled = options_.output_root / "jobs" / job / "weld_agent";
+        const auto copied_final = controlled / "final_result.json";
+        const auto public_json = public_weld_agent_result_json(snapshot, result);
+        auto copied = write_public_weld_agent_result(
+            public_json, copied_final, options_.max_json_bytes);
+        if (!copied) return Result<ApplicationExecutionResult>::failure(copied.error());
+        auto final_ref = register_required(*registrar_, copied_final,
+                                           job + "-agent-result", "agent_result",
+                                           "application/json");
+        if (!final_ref) {
+            std::error_code ignored;
+            std::filesystem::remove(copied_final, ignored);
+            return Result<ApplicationExecutionResult>::failure(final_ref.error());
+        }
+        result.output_artifacts.push_back(final_ref.value());
+        const auto checked = validate_execution_result(
+            result, IndustrialApplication::WeldingGuidance);
         if (!checked) return Result<ApplicationExecutionResult>::failure(checked.error());
         return Result<ApplicationExecutionResult>::success(std::move(result));
     } catch (const std::bad_alloc&) {

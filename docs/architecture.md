@@ -3,12 +3,36 @@
 ## 1. 文档状态
 
 - 项目：IndustrialAIServiceFramework
-- 阶段：Phase 10C 浏览器 3D 可视化 MVP（基于已提交的 Phase 10B 同域 Web UI）
-- 日期：2026-08-08
-- 状态：Phase 10B 已提交基线 `8a79084373de46f31caa83ef8f0363c684b30f46`；Phase 10C 为当前未提交工作区
+- 阶段：Phase 10D 真实浏览器双业务闭环与公共结果安全封板
+- 日期：2026-08-09
+- 状态：Phase 10C 已提交为 `32f6a269301e971d2588b034fcb7242d92b3a4e2`，Linux CI run `31263414316` 已通过；Phase 10D 为当前本地工作区
 - 目标平台：portable C++17 application core；既有服务运行目标仍为 Linux x86_64
 
 本文同时记录已实现的既有服务栈和 Phase 9B-1/9B-2 应用领域与 Repository 核心。只有明确列入已实现边界的类才是当前能力；历史阶段验证记录保留，不代表 Phase 9 外部 worker 已实现。
+
+### Phase 10D 公共结果边界
+
+Phase 10D 的本地真实浏览器证据覆盖两个互不串联的业务。PTV2 使用
+2048 点输入并显示灰色输入、红色 205 点 overlay，ratio 为
+`0.10009765625`、length 约 `0.8822024465 mm`，三个下载均完成 size/SHA
+校验，且仍为 `quality_assessment=not_implemented`。WeldAgent 使用独立的
+823114 点输入、requested `straight` 与 required checkpoint，进入
+`waiting_human`，显示 camera/mm start/end/path、RGB axes 与 confidence，
+straight 无 corner，且 `robot_execution_allowed=false`。
+
+真实 E2E 发现外部原始 JSON 可能含 joint/tcp/path 等内部字段，因此架构
+边界固定为：外部文件只参与受控状态判断；公共下载 JSON 必须从已验证的
+IAISF Domain Result 以固定白名单重新构造，再原子写入、注册并复验。安全
+文件为 628 bytes，SHA-256 为
+`71f49be2ecc3dc22c7ff49cd2cd6285e9b98a0ce1deb72d58728ed59f9001bf4`，
+不含 joint、tcp、路径、URL、命令、日志或未知外部字段。不存在质量评价
+算法、joint values、机器人控制或两个应用自动串联。本地真实浏览器证据
+不等同于 GitHub CI；ignored evidence、输入、配置、模型和输出不得提交。
+
+最终本地矩阵：Windows Debug/Release 各 692 registered、687 passed、5
+explicitly skipped、0 failed；WSL Debug/Release 各 925 registered、924
+passed、1 explicitly skipped、0 failed。四配置 Adapter 19/19、Web UI 7/7、
+Artifact HTTP 9/9，WSL 两配置 Service Web UI routes 4/4。
 
 ### Phase 9B-1 应用层边界
 

@@ -1,5 +1,35 @@
 # 协议设计
 
+## Phase 10D public WeldAgent result projection
+
+Phase 10C is committed at
+`32f6a269301e971d2588b034fcb7242d92b3a4e2` and passed Linux CI run
+`31263414316`. Phase 10D completed separate local real-browser PTV2 and
+WeldAgent flows. PTV2 used 2048 input points, returned 205 weld points, ratio
+`0.10009765625`, length about `0.8822024465 mm`, a grey/red viewer and three
+verified downloads while keeping `quality_assessment=not_implemented`.
+WeldAgent used an independent 823114-point requested `straight` input, reached
+`waiting_human`, displayed camera/mm start/end/path, RGB axes and confidence
+without a corner, and kept `robot_execution_allowed=false`.
+
+The public WeldAgent download protocol is a fixed allowlist projection created
+from a validated IAISF Domain Result. The external `final_result.json` is used
+only for controlled status evaluation; no external object or array is copied
+or recursively sanitized. Optional validated fields are omitted when absent.
+The verified file is 628 bytes with SHA-256
+`71f49be2ecc3dc22c7ff49cd2cd6285e9b98a0ce1deb72d58728ed59f9001bf4` and
+contains no joint, tcp, path, URL, command, log or unknown external field.
+This local browser evidence is distinct from GitHub CI. The applications remain
+independent; quality scoring, joint values, robot control and automatic chaining
+are not protocol capabilities. Ignored evidence, inputs, local configuration,
+models and outputs are not committed.
+
+Final local validation recorded Windows Debug/Release at 692 registered, 687
+passed, 5 explicitly skipped and 0 failed, and WSL Debug/Release at 925
+registered, 924 passed, 1 explicitly skipped and 0 failed. Adapter 19/19, Web
+UI 7/7 and Artifact HTTP 9/9 passed in all four configurations; Linux Service
+Web UI routes passed 4/4 in Debug and Release.
+
 ## 1. 范围与状态
 
 Phase 4 HTTP 协议库状态保持 `PHASE_4_HTTP_PROTOCOL_COMPLETED`。Phase 5 总体状态为
@@ -25,7 +55,9 @@ Release smoke 成功，但每个配置各有 3 条项目源码和 3 条项目测
 `HttpServer` API 提供的能力。Task Runtime 和 Plugin System 不依赖 HTTP，后文任务
 Phase 7 已提供可组合的 C++ Task HTTP API；当前 CLI 仍不启动 `/v1/tasks`、
 `/api/v1/tasks` 或 `/v1/plugins` 路由，CLI 也不加载插件。
-服务不提供 HTML、文件下载、任意路径读取、shell 或客户端代码执行。
+HTTP Core 本身不提供通用静态目录、任意路径读取、shell 或客户端代码执行。
+当 `applications.enabled=true` 时，Service 仅注册受控的编译内 Web UI、Artifact
+上传和 catalog 校验下载路由；不存在任意文件服务器。
 
 ## 2. HTTP 基线
 

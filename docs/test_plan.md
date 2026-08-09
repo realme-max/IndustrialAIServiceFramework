@@ -1,5 +1,36 @@
 # 测试计划
 
+## Phase 10D final validation scope
+
+Phase 10C commit `32f6a269301e971d2588b034fcb7242d92b3a4e2` passed Linux CI run
+`31263414316`. Phase 10D adds no browser framework or external dependency. Its
+local validation combines four full CTest configurations, 19 ApplicationAdapter
+tests, Web UI 7/7, Linux Service Web UI routes 4/4, Artifact HTTP 9/9,
+version/config smoke, warning audit and an Adapter fixture parallel-repeat run.
+The repeat run is specifically required because an earlier fixture selected a
+timestamp-only directory and could delete another process's directory. The
+fixed fixture atomically claims a unique directory and cleans only its own.
+
+Real-browser evidence remains a separate manual/local layer: PTV2 used 2048
+input points and verified its 205-point overlay plus three downloads;
+WeldAgent independently used 823114 points for requested `straight`, reached
+`waiting_human`, displayed path/RGB axes, and downloaded the new 628-byte
+allowlist JSON whose SHA-256 is
+`71f49be2ecc3dc22c7ff49cd2cd6285e9b98a0ce1deb72d58728ed59f9001bf4`.
+It contains no joint/tcp/path/URL/command/log/unknown external field and keeps
+`robot_execution_allowed=false`; PTV2 keeps
+`quality_assessment=not_implemented`. This is not GitHub CI evidence. Ignored
+evidence, inputs, configuration, models and outputs are not submitted.
+
+Final Phase 10D local results: Windows Debug/Release each registered 692 (687
+passed, 5 explicitly skipped, 0 failed); WSL Debug/Release each registered 925
+(924 passed, 1 explicitly skipped, 0 failed). Adapter 19/19, Web UI 7/7 and
+Artifact HTTP 9/9 passed in all four configurations; WSL Service Web UI routes
+passed 4/4. The Windows skips are the two RollingFileSink failure-capability
+checks and three SafePathResolver symlink/permission capability checks. The
+WSL skip is `SafePathResolverTest.PermissionFailureIsExplicitlyHandled`.
+These are test-level capability skips, not workflow-step skips.
+
 ## 1. 状态与原则
 
 > 当前 Phase 10B 本地矩阵：Windows VS2022 Debug 和 Release 各注册 681 项，其中 676 passed、
@@ -87,9 +118,9 @@ GoogleTest case。
 - 性能数字只在 Phase 9 实际测量后记录。
 - 测试失败必须保留原始命令和足够诊断，不以重试掩盖竞态。
 
-## Phase 10C current validation note
+## Phase 10C historical validation note
 
-The current uncommitted Phase 10C matrix is Windows Debug/Release: 688
+The committed Phase 10C matrix is Windows Debug/Release: 688
 registered, 683 passed, 5 explicitly skipped, 0 failed; WSL Debug/Release:
 921 registered, 920 passed, 1 explicitly skipped, 0 failed. Web UI is 7/7
 and Linux Service Web UI routes are 4/4. These are local checks; resource

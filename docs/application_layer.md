@@ -1,5 +1,37 @@
 # Application Layer
 
+## Phase 10D real-browser evidence and public-result boundary
+
+Phase 10C is committed at
+`32f6a269301e971d2588b034fcb7242d92b3a4e2` and passed Linux CI run
+`31263414316`. Phase 10D then completed two separate local real-browser flows.
+PTV2 used 2048 input points, produced 205 weld points, ratio
+`0.10009765625`, length about `0.8822024465 mm`, a grey input/red overlay and
+three verified browser downloads while retaining
+`quality_assessment=not_implemented`. WeldAgent used an independent 823114
+point input for requested `straight`, reached `waiting_human`, and rendered
+camera/mm start/end/path, RGB axes and confidence without a corner while
+retaining `robot_execution_allowed=false`.
+
+The WeldAgent downloadable result is not copied from the external
+`final_result.json` and is not produced by a recursive blacklist. The external
+file is used only for controlled status evaluation. After the IAISF Domain
+Result passes validation, the adapter creates a new fixed-key JSON projection
+from its validated values, atomically writes it, registers it, and validates
+the final result again. The verified browser download is 628 bytes with
+SHA-256 `71f49be2ecc3dc22c7ff49cd2cd6285e9b98a0ce1deb72d58728ed59f9001bf4`;
+it contains no joint, tcp, path, URL, command, log or unknown external field.
+The applications remain independent; quality assessment, joint generation,
+robot control and automatic chaining are not implemented. This is local
+browser evidence, not GitHub Actions evidence. Ignored evidence, inputs,
+configuration, models and outputs are not committed.
+
+The final local matrix is Windows Debug/Release 692 registered, 687 passed,
+5 explicitly skipped and 0 failed; WSL Debug/Release 925 registered, 924
+passed, 1 explicitly skipped and 0 failed. ApplicationAdapter 19/19, Web UI
+7/7 and Artifact HTTP 9/9 passed in all four configurations; Linux Service Web
+UI routes passed 4/4 in both WSL configurations.
+
 ## Phase 10A Artifact Web API hardening
 
 When `applications.enabled=true`, the service owns one bounded,
