@@ -226,21 +226,25 @@ class BaselineSmokeTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as root:
             root_path = Path(root)
             server, config = self._fixture(root_path)
-            _, summary = run_baseline_smoke(
-                repo_root=Path(__file__).resolve().parents[2],
-                server_path=server,
-                config_template=config,
-                build_type="Release",
-                output_root=root_path / "results",
-                host="127.0.0.1",
-                port=18184,
-                startup_timeout_seconds=5,
-                request_timeout_seconds=1,
-                allow_dirty=False,
-                server_command=[sys.executable, str(server)],
-            )
-            # The repository is intentionally dirty while these new baseline
-            # files are being developed; production invocation is fail-closed.
+            with mock.patch(
+                "run_baseline_smoke.git_snapshot",
+                return_value={"sha": "0" * 40, "dirty": True},
+            ):
+                _, summary = run_baseline_smoke(
+                    repo_root=Path(__file__).resolve().parents[2],
+                    server_path=server,
+                    config_template=config,
+                    build_type="Release",
+                    output_root=root_path / "results",
+                    host="127.0.0.1",
+                    port=18184,
+                    startup_timeout_seconds=5,
+                    request_timeout_seconds=1,
+                    allow_dirty=False,
+                    server_command=[sys.executable, str(server)],
+                )
+            # The dirty snapshot is injected so this gate remains tested after
+            # the baseline checkpoint itself becomes a clean worktree.
             self.assertEqual(summary["outcome"], "failure")
             self.assertEqual(summary["failure_category"], "git_dirty")
 
