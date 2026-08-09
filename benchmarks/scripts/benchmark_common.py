@@ -201,11 +201,17 @@ def atomic_write_bytes(path: Path, data: bytes) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     if path.exists() or path.is_symlink():
         raise BaselineError("output_exists", "result file already exists")
-    temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
-    if temporary.exists() or temporary.is_symlink():
-        raise BaselineError("output_exists", "temporary result file already exists")
+    temporary: Path | None = None
+    file_descriptor: int | None = None
     try:
-        with temporary.open("xb") as stream:
+        # mkstemp claims a distinct temporary inode even when several threads
+        # in this process target the same destination concurrently.
+        file_descriptor, temporary_name = tempfile.mkstemp(
+            prefix=f".{path.name}.", suffix=".tmp", dir=str(path.parent)
+        )
+        temporary = Path(temporary_name)
+        with os.fdopen(file_descriptor, "wb") as stream:
+            file_descriptor = None
             stream.write(data)
             stream.flush()
             os.fsync(stream.fileno())
@@ -220,22 +226,31 @@ def atomic_write_bytes(path: Path, data: bytes) -> None:
         temporary.unlink()
     except FileExistsError as exc:
         try:
-            temporary.unlink(missing_ok=True)
+            if temporary is not None:
+                temporary.unlink(missing_ok=True)
         except OSError:
             pass
         raise BaselineError("output_exists", "result file already exists") from exc
     except BaselineError:
         try:
-            temporary.unlink(missing_ok=True)
+            if temporary is not None:
+                temporary.unlink(missing_ok=True)
         except OSError:
             pass
         raise
     except (OSError, ValueError) as exc:
         try:
-            temporary.unlink(missing_ok=True)
+            if temporary is not None:
+                temporary.unlink(missing_ok=True)
         except OSError:
             pass
         raise BaselineError("output_write_failure", "unable to commit result file") from exc
+    finally:
+        if file_descriptor is not None:
+            try:
+                os.close(file_descriptor)
+            except OSError:
+                pass
 
 
 def atomic_write_json(path: Path, value: Mapping[str, Any]) -> None:
