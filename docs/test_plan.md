@@ -1172,3 +1172,24 @@ This stage records no performance claim. It does not run load tests, 30 MiB
 uploads, concurrent jobs, repeated CTest, sanitizers, real PTV2/WeldAgent,
 CUDA, or soak tests. WSL/Linux results are local evidence and are kept distinct
 from GitHub Actions evidence. Later benchmark stages may consume this schema.
+
+## 标准加固验证（2026-08-10）
+
+基线 HEAD 为 `e049d9bd5c46dd65be2ea1f0feb98a408d9b8e7a`。WSL Ubuntu 24.04、GCC
+13.3 的独立 ASan+UBSan Debug 构建使用
+`-fsanitize=address,undefined -fno-omit-frame-pointer -fno-sanitize-recover=all`，
+编译与全量 CTest 均通过：930 registered、929 passed、1 explicitly skipped、0
+failed；未出现 ASan、LeakSanitizer 或 UBSan runtime error。普通 Linux Release
+通过 `ctest --repeat until-fail:50 --output-on-failure --no-tests=error` 串行执行，
+`ctest --repeat until-fail:50` 要求每个已执行测试连续成功 50 次，任一测试失败时立即停止。结果为
+930 registered、929 passed、1 explicitly skipped、0 failed；墙钟耗时 735 秒。
+
+唯一测试级 skip 为
+`SafePathResolverTest.PermissionFailureIsExplicitlyHandled`，原因是运行环境不具备
+可可靠注入的权限能力；它不是 workflow-step skip。Windows Python baseline 为
+21 registered、18 passed、3 platform skips、0 failed；WSL Python baseline 为
+21/21/0/0。Windows/WSL Release version/config smoke 均通过。WSL 构建日志中的
+clock-skew 仅为主机文件时间戳环境提示，项目源码与测试编译 warning 为 0。
+
+本阶段明确未执行 TSan、Valgrind、正式压力测试、QPS/P95/P99、真实 AI 性能测试或
+soak test。

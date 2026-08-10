@@ -259,8 +259,9 @@ http://127.0.0.1:<port>/
 |---|---|---|---|---|
 | 单元与集成测试 | GoogleTest / CTest | Windows + Linux，Debug + Release | 已建立 | [测试计划](docs/test_plan.md) |
 | 编译器告警 | MSVC / GCC | 项目源码与测试 | 已建立，当前 0 warning | GitHub Actions |
-| AddressSanitizer | 待确定 | 内存越界、use-after-free、泄漏 | 待执行 | 待补充 |
-| UndefinedBehaviorSanitizer | 待确定 | 未定义行为 | 待执行 | 待补充 |
+| AddressSanitizer + LeakSanitizer | GCC 13.3 / WSL Ubuntu 24.04，Debug，HEAD `e049d9b` | 内存越界、use-after-free、泄漏 | 已通过 | 930 registered，929 passed，1 个既有权限能力 skip，0 failed |
+| UndefinedBehaviorSanitizer | GCC 13.3 / WSL Ubuntu 24.04，Debug，HEAD `e049d9b` | 未定义行为 | 已通过 | 与 ASan 同一全量 CTest：930/929/1/0 |
+| Release 重复稳定性 | GCC 13.3 / WSL Ubuntu 24.04，`--repeat until-fail:50` | 普通 Release 全量 CTest 串行重复 | 已通过 | 930/929/1/0；墙钟 735 秒 |
 | ThreadSanitizer | 待确定 | 并发数据竞争 | 待执行 | 待补充 |
 | Valgrind | 待确定 | Linux 内存与资源泄漏 | 待执行 | 待补充 |
 | 长时间稳定性 | 待确定 | 重复运行、资源增长、优雅停止 | 待执行 | 待补充 |
@@ -285,6 +286,14 @@ python3 benchmarks/scripts/run_baseline_smoke.py
 
 开发 dirty worktree 时可显式使用 `--allow-dirty`；该选项不应作为正式
 baseline 证据的默认命令。
+
+标准加固结果（HEAD `e049d9bd5c46dd65be2ea1f0feb98a408d9b8e7a`）已完成：Linux
+ASan+UBSan 全量 CTest 930/929/1/0，普通 Linux Release 串行
+`ctest --repeat until-fail:50` 要求每个已执行测试连续成功 50 次，任一测试失败时立即停止；
+统计为 930/929/1/0。唯一 skip 是
+`SafePathResolverTest.PermissionFailureIsExplicitlyHandled` 的既有权限能力
+差异；WSL 构建中的 clock-skew 提示属于环境时间戳提示，不是项目编译 warning。
+本轮尚未执行 TSan、Valgrind、压力测试、真实 AI 性能测试或 soak test。
 
 计划覆盖：
 
