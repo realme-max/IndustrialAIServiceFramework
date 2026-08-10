@@ -1,5 +1,6 @@
 #include "iaisf/application/application_executor.hpp"
 
+#include <algorithm>
 #include <exception>
 #include <new>
 #include <string_view>
@@ -204,13 +205,72 @@ bool ApplicationExecutor::stopped() const noexcept {
     return tasks_->stopped();
 }
 
-void ApplicationExecutor::fail_running(
-    const ApplicationJobSnapshot& snapshot) noexcept {
+Result<ApplicationJobTimePoint> ApplicationExecutor::effective_timestamp(
+    const ApplicationJobSnapshot& snapshot) const {
     auto now = clock_.now();
-    const auto timestamp = now ? now.value() : snapshot.updated_at();
-    (void)repository_.transition(
-        snapshot.job_id(), snapshot.application(), snapshot.version(),
-        ApplicationJobState::Failed, timestamp);
+    if (!now) {
+        return Result<ApplicationJobTimePoint>::failure(std::move(now).error());
+    }
+    return Result<ApplicationJobTimePoint>::success(
+        std::max(now.value(), snapshot.updated_at()));
+}
+
+ApplicationJobTimePoint ApplicationExecutor::failure_timestamp(
+    const ApplicationJobSnapshot& snapshot) const {
+    auto now = clock_.now();
+    if (!now) {
+        return snapshot.updated_at();
+    }
+    return std::max(now.value(), snapshot.updated_at());
+}
+
+Result<void> ApplicationExecutor::fail_running(
+    const ApplicationJobSnapshot& snapshot) {
+    auto current_result = repository_.get(snapshot.job_id(), snapshot.application());
+    if (!current_result) {
+        return Result<void>::failure(make_error(
+            ErrorCode::InternalError,
+            "unable to read application job for failure transition"));
+    }
+
+    auto current = std::move(current_result).value();
+    if (is_terminal(current.state())) {
+        return Result<void>::success();
+    }
+
+    auto transitioned = repository_.transition(
+        current.job_id(), current.application(), current.version(),
+        ApplicationJobState::Failed, failure_timestamp(current));
+    if (transitioned) {
+        return Result<void>::success();
+    }
+    if (transitioned.error().category !=
+        ApplicationRepositoryFailure::VersionConflict) {
+        return Result<void>::failure(make_error(
+            ErrorCode::InternalError,
+            "application job failure transition was rejected"));
+    }
+
+    auto refreshed_result =
+        repository_.get(snapshot.job_id(), snapshot.application());
+    if (!refreshed_result) {
+        return Result<void>::failure(make_error(
+            ErrorCode::InternalError,
+            "unable to reread application job after failure conflict"));
+    }
+    auto refreshed = std::move(refreshed_result).value();
+    if (is_terminal(refreshed.state())) {
+        return Result<void>::success();
+    }
+    auto retried = repository_.transition(
+        refreshed.job_id(), refreshed.application(), refreshed.version(),
+        ApplicationJobState::Failed, failure_timestamp(refreshed));
+    if (retried) {
+        return Result<void>::success();
+    }
+    return Result<void>::failure(make_error(
+        ErrorCode::InternalError,
+        "application job failure transition remained unresolved"));
 }
 
 void ApplicationExecutor::execute(const ApplicationJobId& job_id) noexcept {
@@ -228,29 +288,32 @@ void ApplicationExecutor::execute(const ApplicationJobId& job_id) noexcept {
         return;
     }
     auto snapshot = std::move(snapshot_result).value();
-    auto now = clock_.now();
-    if (!now) {
-        (void)repository_.transition(
-            snapshot.job_id(), application, snapshot.version(),
-            ApplicationJobState::Failed,
-            snapshot.updated_at());
+    auto dispatching_at = effective_timestamp(snapshot);
+    if (!dispatching_at) {
+        const auto failed = fail_running(snapshot);
+        if (!failed) {
+            return;
+        }
         return;
     }
     auto dispatching = repository_.transition(
         job_id, application, snapshot.version(),
-        ApplicationJobState::Dispatching, now.value());
+        ApplicationJobState::Dispatching, dispatching_at.value());
     if (!dispatching) {
         return;
     }
     snapshot = std::move(dispatching).value();
-    now = clock_.now();
-    if (!now) {
-        fail_running(snapshot);
+    auto running_at = effective_timestamp(snapshot);
+    if (!running_at) {
+        const auto failed = fail_running(snapshot);
+        if (!failed) {
+            return;
+        }
         return;
     }
     auto running = repository_.transition(
         job_id, application, snapshot.version(), ApplicationJobState::Running,
-        now.value());
+        running_at.value());
     if (!running) {
         return;
     }
@@ -268,12 +331,18 @@ void ApplicationExecutor::execute(const ApplicationJobId& job_id) noexcept {
             result = guidance_adapter_->execute(snapshot);
         }
         if (!result) {
-            fail_running(snapshot);
+            const auto failed = fail_running(snapshot);
+            if (!failed) {
+                return;
+            }
             return;
         }
-        auto completed_at = clock_.now();
+        auto completed_at = effective_timestamp(snapshot);
         if (!completed_at) {
-            fail_running(snapshot);
+            const auto failed = fail_running(snapshot);
+            if (!failed) {
+                return;
+            }
             return;
         }
         auto completed = repository_.complete(
@@ -285,10 +354,16 @@ void ApplicationExecutor::execute(const ApplicationJobId& job_id) noexcept {
                 : ApplicationJobState::Succeeded,
             std::move(result).value(), completed_at.value());
         if (!completed) {
-            fail_running(snapshot);
+            const auto failed = fail_running(snapshot);
+            if (!failed) {
+                return;
+            }
         }
     } catch (...) {
-        fail_running(snapshot);
+        const auto failed = fail_running(snapshot);
+        if (!failed) {
+            return;
+        }
     }
 }
 

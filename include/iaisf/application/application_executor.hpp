@@ -73,7 +73,12 @@ private:
         const IApplicationJobClock& clock,
         std::unique_ptr<ApplicationTaskManager> tasks) noexcept;
     void execute(const ApplicationJobId& job_id) noexcept;
-    void fail_running(const ApplicationJobSnapshot& snapshot) noexcept;
+    [[nodiscard]] Result<ApplicationJobTimePoint> effective_timestamp(
+        const ApplicationJobSnapshot& snapshot) const;
+    [[nodiscard]] ApplicationJobTimePoint failure_timestamp(
+        const ApplicationJobSnapshot& snapshot) const;
+    [[nodiscard]] Result<void> fail_running(
+        const ApplicationJobSnapshot& snapshot);
 
     IApplicationJobRepository& repository_;
     Ptv2WeldInspectionAdapter* const inspection_adapter_;
