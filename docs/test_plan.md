@@ -1173,6 +1173,35 @@ uploads, concurrent jobs, repeated CTest, sanitizers, real PTV2/WeldAgent,
 CUDA, or soak tests. WSL/Linux results are local evidence and are kept distinct
 from GitHub Actions evidence. Later benchmark stages may consume this schema.
 
+## HTTP load benchmark clean checkpoint
+
+正式 clean-worktree 基准代码提交为
+`c900e3d7cfa375c0471dac273be7635a32995a12`，run ID 为
+`20260810T042933578078Z-c900e3d7cfa3-http-load`。运行环境为 WSL Ubuntu 24.04、
+GCC 13.3、Linux Release 服务，客户端为与服务同机的 Python 标准库
+`http.client`。健康检查使用每 worker 一个 keep-alive 连接，并发
+`1/8/32/128`；上传使用 30 MiB、786,432 点 XYZ 文本，并发 `1/2/4`，每组
+20 requests、20 succeeded、0 failed，canonical size 为 9,437,184 bytes。
+
+CPU 仅统计正式测量窗口，使用 CPU 秒/墙钟秒加权；RSS 以 bytes 保存，展示时
+使用 MiB = bytes / 1,048,576。所有 profile 的 error rate 为 0，post-load
+`/health` 均通过。健康检查结果和上传结果均为 harness-specific loopback
+baseline，不代表服务端理论最大 QPS；上传 P99 每组只有 20 个样本，仅作探索性
+分位数。正式结果目录只保留 `manifest.json`、`profiles.csv`、`summary.json`
+和 `run.log`，不包含原始 payload、Artifact 或绝对路径。
+
+| 场景 | 并发 | 吞吐 | P50/P95/P99 | CPU avg/peak | RSS 初始/峰值 MiB |
+|---|---:|---:|---:|---:|---:|
+| `/health` | 1 | 10137.665 req/s | 0.084/0.147/0.208 ms | 23.333/39.635% | 5.766/5.766 |
+| `/health` | 8 | 6405.327 req/s | 1.074/2.653/3.622 ms | 13.389/28.403% | 5.863/5.863 |
+| `/health` | 32 | 6419.791 req/s | 4.326/10.557/14.398 ms | 14.646/24.127% | 6.066/6.066 |
+| `/health` | 128 | 5612.520 req/s | 19.602/48.914/67.735 ms | 14.679/22.399% | 7.074/7.078 |
+| upload | 1 | 180.243 MiB/s | 148.557/185.763/186.968 ms | 54.056/89.697% | 6.145/101.512 |
+| upload | 2 | 170.177 MiB/s | 300.192/817.225/845.247 ms | 52.201/99.629% | 6.172/166.469 |
+| upload | 4 | 165.020 MiB/s | 614.329/1341.859/1357.266 ms | 53.946/92.132% | 6.273/230.914 |
+
+该 checkpoint 不执行 PTV2、WeldAgent、CUDA/GPU、Job 压力或 soak test。
+
 ## 标准加固验证（2026-08-10）
 
 基线 HEAD 为 `e049d9bd5c46dd65be2ea1f0feb98a408d9b8e7a`。WSL Ubuntu 24.04、GCC
