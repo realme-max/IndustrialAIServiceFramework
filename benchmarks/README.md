@@ -42,6 +42,33 @@ process group is reaped; the summary records process, temporary-config and
 loopback-port cleanup. A failed startup or probe still writes a bounded
 structured summary when an output run directory was created.
 
+## HTTP load benchmark
+
+在 clean worktree 上从仓库根目录运行正式 HTTP 基准：
+
+```text
+python3 benchmarks/scripts/run_http_benchmark.py
+```
+
+该入口使用 Linux Release 服务和 `127.0.0.1`，健康检查并发为
+`1/8/32/128`（每组预热 5 秒、测量 30 秒），点云上传并发为 `1/2/4`。
+上传内容固定为 30 MiB、786,432 行 XYZ 文本，每组取得 20 个成功样本；
+canonical point-cloud size 为 9,437,184 bytes。客户端是 Python 标准库
+`http.client`，与服务同机，健康请求每个 worker 使用一个 keep-alive 连接，
+因此结果是 harness-specific loopback baseline，不是服务端理论最大 QPS。
+
+正式 clean run（代码 SHA `c900e3d7cfa375c0471dac273be7635a32995a12`，run
+`20260810T042933578078Z-c900e3d7cfa3-http-load`）的每个 profile 错误率为 0，
+负载后 `/health` 均通过。CPU 按正式窗口内 CPU 秒/墙钟秒加权；RSS 在 JSON/CSV
+中保存为 bytes，展示时使用 MiB = bytes / 1,048,576。输出字段包括请求数、成功/失败数、
+请求吞吐、上传 MiB/s、P50/P95/P99/max、CPU、RSS、客户端 CPU、post-load health
+和有效采样窗口数。上传 P99 每组只有 20 个样本，仅作探索性分位数。
+
+结果目录仍只生成 `manifest.json`、`profiles.csv`、`summary.json` 和有界
+`run.log`，不保存原始 payload 或 Artifact；该基准不执行 PTV2、WeldAgent、
+CUDA/GPU、Job 压力或 soak test。dirty worktree 仅可显式使用 `--allow-dirty` 做开发验证，
+不得将其当作正式 clean 证据。
+
 ## Local Python tests
 
 ```text
