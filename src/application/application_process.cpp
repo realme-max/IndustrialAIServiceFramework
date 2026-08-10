@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <cstdint>
 #include <exception>
 #include <filesystem>
 #include <limits>
@@ -342,95 +343,178 @@ Result<ProcessResult> run_linux(const ProcessSpec& spec) {
         return failure<ProcessResult>(ErrorCode::SystemError,
                                       "process pipe setup failed");
     }
+
+    // Everything reachable from the child after fork must already exist.  In
+    // particular, do not project paths or grow argv in the child: a service
+    // may be multi-threaded and the child can inherit a locked allocator.
+    const std::string executable = spec.executable.string();
+    const std::string working_directory = spec.working_directory.empty()
+                                               ? std::string{}
+                                               : spec.working_directory.string();
+    const bool has_working_directory = !working_directory.empty();
+    std::vector<char*> child_argv;
+    child_argv.reserve(spec.arguments.size() + 2U);
+    child_argv.push_back(const_cast<char*>(executable.c_str()));
+    for (const auto& argument : spec.arguments) {
+        child_argv.push_back(const_cast<char*>(argument.c_str()));
+    }
+    child_argv.push_back(nullptr);
+    const char* executable_c = executable.c_str();
+    const char* working_directory_c = working_directory.c_str();
+    char** child_argv_data = child_argv.data();
+
+    const int stdout_read_fd = stdout_read.get();
+    const int stdout_write_fd = stdout_write.get();
+    const int stderr_read_fd = stderr_read.get();
+    const int stderr_write_fd = stderr_write.get();
     const pid_t child = ::fork();
     if (child < 0) {
         return failure<ProcessResult>(ErrorCode::SystemError,
                                       "process creation failed");
     }
     if (child == 0) {
-        if (::dup2(stdout_write.get(), STDOUT_FILENO) < 0 ||
-            ::dup2(stderr_write.get(), STDERR_FILENO) < 0) {
+        if (::dup2(stdout_write_fd, STDOUT_FILENO) < 0 ||
+            ::dup2(stderr_write_fd, STDERR_FILENO) < 0) {
             ::_exit(126);
         }
-        if (stdout_read.get() > STDERR_FILENO) {
-            (void)::close(stdout_read.get());
+        if (stdout_read_fd != STDOUT_FILENO &&
+            stdout_read_fd != STDERR_FILENO) {
+            (void)::close(stdout_read_fd);
         }
-        if (stdout_write.get() > STDERR_FILENO) {
-            (void)::close(stdout_write.get());
+        if (stdout_write_fd != STDOUT_FILENO &&
+            stdout_write_fd != STDERR_FILENO) {
+            (void)::close(stdout_write_fd);
         }
-        if (stderr_read.get() > STDERR_FILENO) {
-            (void)::close(stderr_read.get());
+        if (stderr_read_fd != STDOUT_FILENO &&
+            stderr_read_fd != STDERR_FILENO) {
+            (void)::close(stderr_read_fd);
         }
-        if (stderr_write.get() > STDERR_FILENO) {
-            (void)::close(stderr_write.get());
+        if (stderr_write_fd != STDOUT_FILENO &&
+            stderr_write_fd != STDERR_FILENO) {
+            (void)::close(stderr_write_fd);
         }
-        if (!spec.working_directory.empty()) {
-            if (::chdir(spec.working_directory.c_str()) != 0) {
+        if (has_working_directory) {
+            if (::chdir(working_directory_c) != 0) {
                 ::_exit(126);
             }
         }
-        std::vector<char*> argv;
-        std::string executable = spec.executable.string();
-        argv.push_back(executable.data());
-        for (const auto& argument : spec.arguments) {
-            argv.push_back(const_cast<char*>(argument.c_str()));
-        }
-        argv.push_back(nullptr);
-        ::execv(executable.c_str(), argv.data());
+        ::execv(executable_c, child_argv_data);
         ::_exit(127);
     }
+    // The parent must close its write ends before doing any other work.  EOF
+    // on the read ends is otherwise dependent on this process's own handles.
     stdout_write.close();
     stderr_write.close();
     ProcessResult result;
     const auto started = std::chrono::steady_clock::now();
+    const auto deadline = started + spec.timeout;
     bool stdout_open = true; bool stderr_open = true;
-    bool output_failed = false;
+    enum class ChildState { Running, Reaped };
+    ChildState child_state = ChildState::Running;
     bool kill_sent = false;
-    bool waited = false;
+    bool failed = false;
+    ErrorCode failure_code = ErrorCode::InternalError;
     int wait_status = 0;
+    const auto record_failure = [&](const ErrorCode code) {
+        if (!failed) {
+            failed = true;
+            failure_code = code;
+        }
+    };
     const auto kill_child = [&] {
-        if (!kill_sent && !waited) {
-            (void)::kill(child, SIGKILL);
+        if (child_state == ChildState::Running && !kill_sent) {
+            if (::kill(child, SIGKILL) != 0 && errno != ESRCH) {
+                record_failure(ErrorCode::SystemError);
+            }
             kill_sent = true;
         }
     };
-    while (!waited || stdout_open || stderr_open) {
+    const auto reap_after_kill = [&] {
+        if (child_state != ChildState::Running) {
+            return;
+        }
+        // A blocking reap is used after termination was requested to prevent
+        // a direct-child zombie.  SIGKILL normally makes the child promptly
+        // waitable, but user space cannot provide an absolute deadline for an
+        // uninterruptible kernel state.  EINTR is the only retryable result.
+        for (;;) {
+            const pid_t waited_pid = ::waitpid(child, &wait_status, 0);
+            if (waited_pid == child) {
+                child_state = ChildState::Reaped;
+                return;
+            }
+            if (waited_pid < 0 && errno == EINTR) {
+                continue;
+            }
+            record_failure(ErrorCode::SystemError);
+            return;
+        }
+    };
+    while (true) {
         auto read_stdout = drain_fd(
             stdout_read.get(), result.stdout_text, spec.max_stdout_bytes, stdout_open);
         auto read_stderr = drain_fd(
             stderr_read.get(), result.stderr_text, spec.max_stderr_bytes, stderr_open);
-        if (!read_stdout || !read_stderr) {
-            output_failed = true;
-            kill_child();
+        if (!read_stdout) {
+            record_failure(read_stdout.error().code);
+        } else if (!read_stderr) {
+            record_failure(read_stderr.error().code);
         }
-        if (!waited) {
+        if (failed) {
+            kill_child();
+            break;
+        }
+        if (child_state == ChildState::Running) {
             const pid_t waited_pid = ::waitpid(child, &wait_status, WNOHANG);
-            if (waited_pid == child) waited = true;
-            else if (waited_pid < 0 && errno != EINTR) {
-                output_failed = true;
+            if (waited_pid == child) {
+                child_state = ChildState::Reaped;
+            } else if (waited_pid < 0 && errno != EINTR) {
+                record_failure(ErrorCode::SystemError);
                 kill_child();
             }
         }
-        if (!waited && std::chrono::steady_clock::now() - started >= spec.timeout) {
+        if (failed) {
+            break;
+        }
+        if (child_state == ChildState::Reaped && !stdout_open && !stderr_open) {
+            break;
+        }
+        if (std::chrono::steady_clock::now() >= deadline) {
             result.timed_out = true;
             kill_child();
+            break;
         }
-        if (waited && !stdout_open && !stderr_open) break;
         struct pollfd fds[2] = {
             {stdout_read.get(), static_cast<short>(stdout_open ? POLLIN : 0), 0},
             {stderr_read.get(), static_cast<short>(stderr_open ? POLLIN : 0), 0}};
-        (void)::poll(fds, 2U, 10);
+        const auto remaining = std::chrono::duration_cast<std::chrono::milliseconds>(
+            deadline - std::chrono::steady_clock::now());
+        const int wait_ms = static_cast<int>(std::max<std::int64_t>(
+            1, std::min<std::int64_t>(10, remaining.count())));
+        const int poll_result = ::poll(fds, 2U, wait_ms);
+        if (poll_result < 0 && errno != EINTR) {
+            record_failure(ErrorCode::SystemError);
+            kill_child();
+            break;
+        }
     }
-    if (!waited) {
-        while (::waitpid(child, &wait_status, 0) < 0 && errno == EINTR) {}
+    if (child_state == ChildState::Running) {
+        kill_child();
+        reap_after_kill();
     }
-    result.exit_code = WIFEXITED(wait_status) ? WEXITSTATUS(wait_status)
-                                              : 128 + WTERMSIG(wait_status);
+    if (child_state == ChildState::Reaped) {
+        result.exit_code = WIFEXITED(wait_status) ? WEXITSTATUS(wait_status)
+                                                  : 128 + WTERMSIG(wait_status);
+    }
     result.elapsed_ms = std::chrono::duration<double, std::milli>(
         std::chrono::steady_clock::now() - started).count();
-    if (output_failed) {
-        return failure<ProcessResult>(ErrorCode::ResourceExhausted,
-                                      "process output exceeded its limit");
+    if (failed) {
+        if (failure_code == ErrorCode::ResourceExhausted) {
+            return failure<ProcessResult>(
+                ErrorCode::ResourceExhausted, "process output exceeded its limit");
+        }
+        return failure<ProcessResult>(ErrorCode::SystemError,
+                                      "process wait or pipe operation failed");
     }
     return Result<ProcessResult>::success(std::move(result));
 }
