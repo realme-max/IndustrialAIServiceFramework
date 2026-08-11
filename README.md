@@ -293,6 +293,34 @@ worker 一个 keep-alive 连接；上传为恰好 30 MiB、786,432 点、canonic
 原始 payload、Artifact 或机器绝对路径。尚未执行 PTV2、WeldAgent、CUDA/GPU、Job 压力或
 soak test。
 
+## Application Job 队列压力基准
+
+正式 clean-worktree synthetic framework queue stress run 为
+`20260811T015906503761Z-2daf658b2acf-application-job-stress`，代码提交
+`2daf658b2acfa16594c9bcbf555c1a1e5da0971e`，`git_dirty=false`。环境为 WSL Ubuntu
+24.04、GCC 13.3、Linux Release；固定 queue capacity 128、Repository capacity 1024、
+单 Application worker、64 个提交 worker。该基准通过真实 HTTP、Artifact、Application
+Repository/Executor 和 synthetic CLI fixture 验证背压、排空、恢复与清理。
+
+| attempts | accepted / queue_full | batch submit req/s | drain s / jobs/s | CPU avg/peak | RSS 初始/峰值 MiB |
+|---:|---:|---:|---:|---:|---:|
+| 100 | 100 / 0 | 1586.503 | 3.016 / 33.156 | 15.761% / 29.955% | 7.066 / 8.269 |
+| 250 | 129 / 121 | 2632.628 | 3.731 / 34.573 | 16.525% / 29.926% | 7.105 / 8.490 |
+| 500 | 129 / 371 | 2558.032 | 3.749 / 34.409 | 16.441% / 29.933% | 7.089 / 8.488 |
+
+三组均为 1 running 加其余 accepted queued，accepted 全部 succeeded，recovery、post-load
+`/health` 和 cleanup 均通过，错误率为 0。batch submit throughput 不含 blocker 等待；drain/s
+包含单 worker、LocalProcessRunner、synthetic fixture、Adapter 文件处理、Repository transition
+和 HTTP status polling，不是纯队列 pop/s，也不是 Application 理论接纳容量。CPU 使用正式窗口
+内加权平均（100% 表示一个逻辑 CPU 核心），RSS 源数据为 bytes，表中换算为 MiB；synthetic
+子进程不计入服务进程资源。该结果是同机 harness-specific synthetic 基线，不是 PTV2 推理、
+WeldAgent、GPU/CUDA、真实 AI 端到端延迟或服务端理论最大吞吐。
+
+该基准验证并记录了已合并 PR #14 所覆盖的 Linux ProcessRunner 生命周期问题，以及
+`system_clock` 回拨导致 Job 永久 `running` 的终态化问题。此前开发工作区的 20 次、60 个
+profile 稳定性序列属于历史证据，不与本次单次 clean run 混同。后续可另行开展真实
+PTV2/WeldAgent 性能测试和 soak test。
+
 ### 可复现测试基线
 
 `benchmarks/` 提供无第三方依赖、有界的 Linux Release 基础 smoke，验证
