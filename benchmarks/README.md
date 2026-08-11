@@ -142,6 +142,42 @@ Result directories are ignored; retain only deliberately selected, sanitized
 human reports outside this directory. Remove only an exact run directory known
 to belong to the current invocation.
 
+## 真实 AI soak 稳定性基线
+
+`run_soak_stability_benchmark.py` 是串行、固定 cadence 的真实闭环稳定性工具，
+不是吞吐或 AI 性能 benchmark。它在一个 Linux Release 服务中每个周期依次执行
+PTV2 和 WeldAgent，各自复用一次上传的合法 ArtifactRef；每周期结束做 `/health`
+检查，并持续采样 IAISF server PID 的 CPU、RSS、线程、FD 和运行目录磁盘占用。
+采样不包含算法子进程或 GPU，`100% CPU` 表示一个逻辑 CPU 核心，RSS 源数据为 bytes。
+
+正式运行命令（必须 clean worktree）：
+
+```text
+python3 benchmarks/scripts/run_soak_stability_benchmark.py \
+  --duration-seconds 7200 --cadence-seconds 120
+python3 benchmarks/scripts/run_soak_stability_benchmark.py \
+  --duration-seconds 43200 --cadence-seconds 120
+```
+
+支持阶段为 600/7200/43200 秒，对应 5/60/360 个周期和 10/120/720 个作业。
+`--allow-dirty` 仅用于开发验证，不构成正式证据。每次 run 只生成
+`manifest.json`、`samples.csv`、`summary.json`、`run.log`，输出目录被忽略且不提交。
+日志不包含 Job ID、URL、路径、命令、环境变量、stdout/stderr 或原始结果。
+
+当前 clean 证据绑定代码 SHA `72531d45d79e46ca037bb09f2ba956cc840765ed`：
+
+| 阶段 | run ID | 周期 / 作业 | PTV2 成功 | WeldAgent 成功 | 健康失败 | PID 变化 | 清理 |
+|---|---|---:|---:|---:|---:|---:|---|
+| 2 小时 | `20260811T042439220584Z-72531d45d79e-soak-stability` | 60 / 120 | 60 | 60 | 0 | 0 | 全部 true |
+| 12 小时 | `20260811T061623420537Z-72531d45d79e-soak-stability` | 360 / 720 | 360 | 360 | 0 | 0 | 全部 true |
+
+12 小时资源趋势为：RSS `6,823,936–11,653,120` bytes，首/末小时中位数
+`7,921,664/11,485,184` bytes；线程 `5`，FD `8–11`，有效样本 `2990`，运行目录
+磁盘末值 `382,599,112` bytes。PTV2 total latency P50 首/末小时为
+`1116.773/1049.347 ms`，WeldAgent 为 `12816.037/11421.568 ms`。这些是本机本地
+真实外部运行证据，不是 GitHub Actions 证据；不代表 PTV2/WeldAgent、GPU/CUDA 或服务端
+理论性能上限，也不包含并发 Job、质量评价或机器人控制。
+
 ## 标准加固验证
 
 HEAD `e049d9bd5c46dd65be2ea1f0feb98a408d9b8e7a` 的 WSL Ubuntu 24.04 / GCC
