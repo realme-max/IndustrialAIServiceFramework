@@ -1249,3 +1249,23 @@ clock-skew 仅为主机文件时间戳环境提示，项目源码与测试编译
 
 本阶段明确未执行 TSan、Valgrind、正式压力测试、QPS/P95/P99、真实 AI 性能测试或
 soak test。
+
+## Real Industrial AI 单 Job 延迟基准
+
+正式 clean-worktree 运行 ID 为
+`20260811T031038135968Z-9580cc476ad7-real-ai-latency`，绑定代码 SHA
+`9580cc476ad7c70b005517f9f541691044d7f2c9`，`git_dirty=false`。环境为 WSL Ubuntu 24.04、
+GCC 13.3、Linux Release；使用 Python 标准库 `http.client` 同机 loopback，PTV2 与
+WeldAgent 串行、各 2 个 warmup 加 20 个 measured jobs。每个应用的 P95/P99 只有 20 个
+样本，属于探索性分位数；CPU 只计 IAISF server PID，RSS 源数据为 bytes，展示换算为
+`MiB = bytes / 1,048,576`。
+
+| 应用 | 输入点数 / canonical bytes | 上传 ms | submit P50/P95/P99 ms | terminal P50/P95/P99 ms | result P50/P95/P99 ms | download P50/P95/P99 ms | total P50/P95/P99 ms | CPU avg/peak | RSS 初始/峰值 MiB | 错误 |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| PTV2 焊后 | 2048 / 24,576 | 39.370 | 0.435/0.888/1.003 | 1039.477/1060.787/1060.802 | 0.664/1.471/2.249 | 52.192/65.333/71.555 | 1096.791/1127.563/1131.305 | 2.468%/19.931% | 6.062/7.324 | 0 |
+| WeldAgent 焊前 | 823,114 / 9,877,368 | 202.174 | 0.455/0.782/1.088 | 12403.929/12596.438/12599.910 | 0.864/1.669/1.746 | 24.979/37.036/37.488 | 12437.966/12621.767/12627.529 | 7.128%/92.078% | 7.324/47.329 | 0 |
+
+PTV2 inference/total 为 `33.658/792.673 ms`；WeldAgent 不提供该字段。两条链路均通过
+HTTP 上传、Job 状态、结果和输出 Artifact 校验；`quality_assessment` 与机器人安全
+约束保持既有契约。该证据是本地真实外部运行，不是 GitHub Actions 证据；未执行 GPU/CUDA、
+Job 压力、并发或 soak test，结果目录和外部输入/配置均未纳入 Git。

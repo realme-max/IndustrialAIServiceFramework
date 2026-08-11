@@ -105,6 +105,30 @@ PR #14 已合并的 ProcessRunner 生命周期修复和 `system_clock` 回拨终
 正确性前提；此前 20 次/60 profiles 的开发稳定性序列是历史证据，不是本次 clean run。
 真实 PTV2/WeldAgent 性能与 soak test 保留为后续工作。
 
+## 真实 Industrial AI 单 Job 延迟基准
+
+使用 `python3 benchmarks/scripts/run_real_ai_latency_benchmark.py`，在 clean worktree
+上针对真实 PTV2 和 WeldAgent 各串行执行 2 个 warmup、20 个 measured jobs。运行结果仅
+保留 `manifest.json`、`profiles.csv`、`summary.json` 和有界 `run.log`；不提交输入、
+Artifact、模型、配置或原始结果。
+
+正式 run `20260811T031038135968Z-9580cc476ad7-real-ai-latency` 绑定代码 SHA
+`9580cc476ad7c70b005517f9f541691044d7f2c9`，`git_dirty=false`；环境为 WSL Ubuntu 24.04、
+GCC 13.3、Linux Release。PTV2 输入为 2048 点/24,576 canonical bytes，WeldAgent 输入
+为 823,114 点/9,877,368 canonical bytes。客户端是同机 Python 标准库 `http.client`，
+因此属于 harness-specific loopback 基线；每个分位数只有 20 个样本，P95/P99 仅作探索性
+参考。资源统计只覆盖 IAISF server PID，CPU 使用加权平均，RSS 以 bytes 保存并以
+`MiB = bytes / 1,048,576` 展示。
+
+| 应用 | upload ms | submit P50/P95/P99 ms | terminal P50/P95/P99 ms | result P50/P95/P99 ms | download P50/P95/P99 ms | total P50/P95/P99 ms | CPU avg/peak | RSS 初始/峰值 MiB | 错误 |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| PTV2 | 39.370 | 0.435/0.888/1.003 | 1039.477/1060.787/1060.802 | 0.664/1.471/2.249 | 52.192/65.333/71.555 | 1096.791/1127.563/1131.305 | 2.468%/19.931% | 6.062/7.324 | 0 |
+| WeldAgent | 202.174 | 0.455/0.782/1.088 | 12403.929/12596.438/12599.910 | 0.864/1.669/1.746 | 24.979/37.036/37.488 | 12437.966/12621.767/12627.529 | 7.128%/92.078% | 7.324/47.329 | 0 |
+
+PTV2 记录到 inference `33.658 ms`、total `792.673 ms`；WeldAgent 不提供对应字段。
+该基准不代表 PTV2/WeldAgent 性能上限，也不是 GPU/CUDA、并发 Job、压力或 soak test；
+两个业务仍完全独立。
+
 ## Local Python tests
 
 ```text
