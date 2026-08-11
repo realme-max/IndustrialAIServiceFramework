@@ -1202,6 +1202,33 @@ baseline，不代表服务端理论最大 QPS；上传 P99 每组只有 20 个�
 
 该 checkpoint 不执行 PTV2、WeldAgent、CUDA/GPU、Job 压力或 soak test。
 
+## Application Job 队列压力基准（正式 clean run）
+
+正式 run `20260811T015906503761Z-2daf658b2acf-application-job-stress` 使用代码 SHA
+`2daf658b2acfa16594c9bcbf555c1a1e5da0971e`，`git_dirty=false`。环境为 WSL Ubuntu 24.04、
+GCC 13.3、Linux Release；queue capacity 128、Repository capacity 1024、单 worker、64 个
+提交 worker。该 synthetic framework queue stress 通过真实 HTTP/Application 路径验证
+queue_full 背压、release 前状态、accepted drain、recovery、health 和 cleanup。
+
+| attempts | accepted / queue_full | batch submit req/s | drain s / jobs/s | CPU avg/peak | RSS 初始/峰值 MiB |
+|---:|---:|---:|---:|---:|---:|
+| 100 | 100 / 0 | 1586.503 | 3.016 / 33.156 | 15.761% / 29.955% | 7.066 / 8.269 |
+| 250 | 129 / 121 | 2632.628 | 3.731 / 34.573 | 16.525% / 29.926% | 7.105 / 8.490 |
+| 500 | 129 / 371 | 2558.032 | 3.749 / 34.409 | 16.441% / 29.933% | 7.089 / 8.488 |
+
+三组均为 1 running 加其余 accepted queued，accepted 全部 succeeded，recovery、post-load
+`/health` 和 cleanup 均通过，unexpected failure 为 0。batch submit throughput 不包含
+blocker 等待；drain/s 包含 Application 单 worker、LocalProcessRunner fork/exec、synthetic
+fixture、Adapter 文件处理、Repository transition 和 HTTP status polling，不是纯队列 pop/s，
+也不代表 Application 理论接纳容量。CPU 只统计 IAISF server PID（100% 为一个逻辑 CPU 核心），
+RSS 源单位为 bytes，展示使用 MiB = bytes / 1,048,576；synthetic child 不计入资源口径。
+
+本次只建立 synthetic framework queue stress 基线，不是 PTV2 推理性能、WeldAgent 性能、
+GPU/CUDA benchmark、真实 AI 端到端延迟或服务端理论最大吞吐。PR #14 已合并的 Linux
+ProcessRunner 生命周期修复及 `system_clock` 回拨导致永久 `running` 的终态化修复是相关背景；
+此前 20 次/60 profiles 开发稳定性序列保留为历史证据。真实 PTV2/WeldAgent 性能与 soak test
+尚未执行，留待后续。
+
 ## 标准加固验证（2026-08-10）
 
 基线 HEAD 为 `e049d9bd5c46dd65be2ea1f0feb98a408d9b8e7a`。WSL Ubuntu 24.04、GCC

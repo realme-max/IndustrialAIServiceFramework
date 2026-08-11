@@ -69,6 +69,42 @@ canonical point-cloud size 为 9,437,184 bytes。客户端是 Python 标准库
 CUDA/GPU、Job 压力或 soak test。dirty worktree 仅可显式使用 `--allow-dirty` 做开发验证，
 不得将其当作正式 clean 证据。
 
+## Application Job 队列压力基准
+
+正式 clean-worktree 命令（仅运行一次）：
+
+```text
+python3 benchmarks/scripts/run_application_job_stress.py \
+  --server build/linux-release/iaisf_server \
+  --config-template benchmarks/configs/baseline-smoke.json \
+  --fixture benchmarks/fixtures/mock_ptv2_cli.py \
+  --output-root benchmarks/results
+```
+
+正式 run `20260811T015906503761Z-2daf658b2acf-application-job-stress` 绑定代码 SHA
+`2daf658b2acfa16594c9bcbf555c1a1e5da0971e`，`git_dirty=false`。每个 profile 使用
+queue 128、Repository 1024、单 Application worker 和 64 个 HTTP submit worker；阻塞
+fixture 释放前验证 1 running 与其余 queued，随后验证全部 accepted drain、recovery 和
+post-load health。结果目录只保留 `manifest.json`、`profiles.csv`、`summary.json`、`run.log`，
+不保留 Job、Artifact、原始输入、命令行、路径或进程输出。
+
+| attempts | accepted | queue_full | batch submit req/s | drain s / jobs/s | CPU avg/peak | RSS 初始/峰值 MiB |
+|---:|---:|---:|---:|---:|---:|---:|
+| 100 | 100 | 0 | 1586.503 | 3.016 / 33.156 | 15.761% / 29.955% | 7.066 / 8.269 |
+| 250 | 129 | 121 | 2632.628 | 3.731 / 34.573 | 16.525% / 29.926% | 7.105 / 8.490 |
+| 500 | 129 | 371 | 2558.032 | 3.749 / 34.409 | 16.441% / 29.933% | 7.089 / 8.488 |
+
+batch submit throughput 的分子是 `attempts - 1`，不含 blocker 等待；drain/s 是包含
+LocalProcessRunner fork/exec、synthetic fixture、Adapter 文件处理、Repository transition
+和 HTTP polling 的单 worker 端到端排空，不是纯队列 pop/s 或 Application 理论接纳容量。
+CPU/RSS 只统计 IAISF server PID，synthetic child 不计入；CPU 的 100% 表示一个逻辑 CPU
+核心，RSS 以 bytes 保存、展示换算为 MiB。该结果是 synthetic framework queue stress，
+不是 PTV2/WeldAgent 推理、GPU/CUDA、真实 AI E2E 或服务端理论最大吞吐。
+
+PR #14 已合并的 ProcessRunner 生命周期修复和 `system_clock` 回拨终态化修复是本基准的
+正确性前提；此前 20 次/60 profiles 的开发稳定性序列是历史证据，不是本次 clean run。
+真实 PTV2/WeldAgent 性能与 soak test 保留为后续工作。
+
 ## Local Python tests
 
 ```text
