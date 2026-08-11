@@ -1269,3 +1269,24 @@ PTV2 inference/total 为 `33.658/792.673 ms`；WeldAgent 不提供该字段。�
 HTTP 上传、Job 状态、结果和输出 Artifact 校验；`quality_assessment` 与机器人安全
 约束保持既有契约。该证据是本地真实外部运行，不是 GitHub Actions 证据；未执行 GPU/CUDA、
 Job 压力、并发或 soak test，结果目录和外部输入/配置均未纳入 Git。
+# 真实 Industrial AI soak 稳定性验收
+
+当前稳定性工具提交 SHA 为 `72531d45d79e46ca037bb09f2ba956cc840765ed`，使用 Linux
+Release、同一服务 PID、固定 120 秒 cadence，串行执行独立的 PTV2 焊后和 WeldAgent
+焊前作业。开发阶段 600 秒 dirty run
+`20260811T041337546185Z-c6f0a096d7fb-soak-stability` 完成 5 周期/10 作业；正式 clean
+run `20260811T042439220584Z-72531d45d79e-soak-stability` 完成 60 周期/120 作业，
+正式 clean run `20260811T061623420537Z-72531d45d79e-soak-stability` 完成 360 周期/
+720 作业。两次正式 run 均为 PTV2 及 WeldAgent 全部成功、健康失败 0、PID 未变化、
+配置/进程组/捕获线程/端口/临时文件清理全部通过。
+
+每次周期记录提交、终态、结果和 Artifact 下载校验延迟、schedule lag、健康状态及
+server-PID-only 资源样本。资源以 bytes 保存 RSS、线程、FD 和运行目录磁盘大小，CPU
+按时间窗口记录；外部算法进程和 GPU 排除。12 小时 run 取得 2990 个有效资源样本，
+RSS 首/末小时中位数为 `7,921,664/11,485,184` bytes，线程数保持 5，FD 在 8–11，
+PTV2 total latency P50 首/末小时为 `1116.773/1049.347 ms`，WeldAgent 为
+`12816.037/11421.568 ms`。这些数据用于稳定性趋势审计，不作无泄漏或性能上限结论。
+
+本地真实 PTV2/WeldAgent 证据与 GitHub Actions 的框架构建、CTest 和 smoke 证据严格
+分开；本阶段没有执行 GPU/CUDA 性能、并发 Job、机器人控制或质量评价。ignored 结果、
+输入、模型和临时配置不进入 Git。

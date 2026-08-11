@@ -421,3 +421,30 @@ IndustrialAIServiceFramework/
 ## License
 
 本项目采用 [Apache License 2.0](LICENSE)。
+
+## 真实 Industrial AI soak 稳定性基线
+
+在 clean worktree、代码 SHA `72531d45d79e46ca037bb09f2ba956cc840765ed` 上，
+按固定 120 秒 cadence 使用同一 Linux Release 服务串行执行 PTV2 焊后与 WeldAgent
+焊前作业。两个应用各自复用一次上传的 ArtifactRef；服务 PID、健康检查和清理结果均
+由 runner 记录。该基线是本地真实双业务稳定性证据，不是 GitHub Actions、GPU/CUDA、
+AI 性能上限或并发压力结论。
+
+| 阶段 | run ID | 时长 / 周期 / 作业 | 成功 | 结果 |
+|---|---|---:|---:|---|
+| 开发 10 分钟（dirty） | `20260811T041337546185Z-c6f0a096d7fb-soak-stability` | 600 s / 5 / 10 | PTV2 5、WeldAgent 5 | 通过 |
+| 正式 2 小时（clean） | `20260811T042439220584Z-72531d45d79e-soak-stability` | 7200 s / 60 / 120 | PTV2 60、WeldAgent 60 | 通过 |
+| 正式 12 小时（clean） | `20260811T061623420537Z-72531d45d79e-soak-stability` | 43200 s / 360 / 720 | PTV2 360、WeldAgent 360 | 通过 |
+
+正式 2 小时 PTV2/WeldAgent `total_latency_ms` 的首小时/末小时 P50 分别为
+`1101.490/1301.616` 与 `12833.833/12738.663`；正式 12 小时对应为
+`1116.773/1049.347` 与 `12816.037/11421.568`。12 小时服务 PID 未变化，健康失败为 0，
+2990 个资源样本有效；IAISF server RSS 为 `6,823,936–11,653,120` bytes，首/末小时
+中位数为 `7,921,664/11,485,184` bytes，线程数 `5`，FD 数 `8–11`。运行目录磁盘趋势
+按 bytes 记录（末值 `382,599,112`），不据此宣称无泄漏。
+
+采样只覆盖 IAISF server PID；PTV2/WeldAgent 子进程与 GPU 资源排除。该 soak 包含
+单 worker、LocalProcessRunner、adapter 文件处理、Repository 状态转换和 HTTP 轮询，
+不是纯队列 pop/s，也不是 Application 理论接纳容量。运行输出仅保留 ignored 目录中的
+四个有界文件，未提交输入、模型、配置或结果；真实 PTV2/WeldAgent 性能和长期 soak 仍须
+在明确环境中单独评估。
