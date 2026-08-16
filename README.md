@@ -251,7 +251,7 @@ http://127.0.0.1:<port>/
 
 当前建立了 Windows/MSVC 与 Linux/GCC 的 Debug、Release 双配置验证，覆盖领域模型、Repository、严格 JSON、HTTP/TCP、任务、插件、Service、Artifact、Adapter 和 Web UI。GitHub Actions 只运行框架构建、测试和 smoke，不运行外部项目、CUDA/GPU 或真实浏览器 E2E。
 
-最新合入基线的 [PR #11 Linux CI](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/31302286955)：Linux Debug/Release 各注册 937 项，936 项通过，1 项因 runner 权限能力显式跳过，0 失败；项目源码与测试编译 warning 为 0。
+最新合入基线的 [PR #17 Linux CI](https://github.com/realme-max/IndustrialAIServiceFramework/actions/runs/31520886413)：Linux Debug/Release 各注册 952 项，951 项通过，1 项因 runner 权限能力显式跳过，0 失败；项目源码与测试编译 warning 为 0。
 
 后续标准测试结果将在此补充：
 
@@ -264,7 +264,7 @@ http://127.0.0.1:<port>/
 | Release 重复稳定性 | GCC 13.3 / WSL Ubuntu 24.04，`--repeat until-fail:50` | 普通 Release 全量 CTest 串行重复 | 已通过 | 930/929/1/0；墙钟 735 秒 |
 | ThreadSanitizer | 待确定 | 并发数据竞争 | 待执行 | 待补充 |
 | Valgrind | 待确定 | Linux 内存与资源泄漏 | 待执行 | 待补充 |
-| 长时间稳定性 | 待确定 | 重复运行、资源增长、优雅停止 | 待执行 | 待补充 |
+| 长时间稳定性 | 真实 PTV2 + WeldAgent / WSL Ubuntu 24.04，Linux Release | 重复运行、资源趋势、健康检查与清理 | 已通过 | 2 小时 120/120、12 小时 720/720 作业成功，见下文 soak 基线 |
 
 ### 压力测试与性能测试
 
@@ -290,8 +290,8 @@ worker 一个 keep-alive 连接；上传为恰好 30 MiB、786,432 点、canonic
 | 点云上传 | 4 / 30 MiB | 165.020 MiB/s | 614.329 ms | 1341.859 ms | 1357.266 ms | 53.946% / 92.132% | 6.273 / 230.914 MiB | 0 |
 
 结果目录只保留有界的 `manifest.json`、`profiles.csv`、`summary.json` 和 `run.log`，不提交
-原始 payload、Artifact 或机器绝对路径。尚未执行 PTV2、WeldAgent、CUDA/GPU、Job 压力或
-soak test。
+原始 payload、Artifact 或机器绝对路径。该 HTTP 基准本身不运行 PTV2、WeldAgent、CUDA/GPU、
+Job 压力或 soak；这些场景由下文各自的独立基准覆盖。
 
 ## Application Job 队列压力基准
 
@@ -318,8 +318,8 @@ WeldAgent、GPU/CUDA、真实 AI 端到端延迟或服务端理论最大吞吐�
 
 该基准验证并记录了已合并 PR #14 所覆盖的 Linux ProcessRunner 生命周期问题，以及
 `system_clock` 回拨导致 Job 永久 `running` 的终态化问题。此前开发工作区的 20 次、60 个
-profile 稳定性序列属于历史证据，不与本次单次 clean run 混同。后续可另行开展真实
-PTV2/WeldAgent 性能测试和 soak test。
+profile 稳定性序列属于历史证据，不与本次单次 clean run 混同。真实 PTV2/WeldAgent 延迟与
+长期稳定性由下文独立基准记录。
 
 ## 真实 Industrial AI 单 Job 延迟基准
 
@@ -342,8 +342,34 @@ IAISF server PID（100% 为一个逻辑 CPU 核心），RSS 源数据为 bytes�
 harness-specific loopback 单 Job 基线，不是服务端理论最大吞吐或 AI 性能结论。
 
 本次真实外部运行验证了 PTV2 的 2048 点焊后分割与 WeldAgent 的 823,114 点焊前引导；
-未执行 Job 压力、GPU/CUDA 或 soak test。结果目录、输入、模型、配置和输出均保持在
-ignored 区域，未提交；两个外部仓库未修改。
+该单 Job 基准不执行并发 Job 压力、GPU/CUDA 或 soak。结果目录、输入、模型、配置和输出均
+保持在 ignored 区域，未提交；两个外部仓库未修改。
+
+## 真实 Industrial AI soak 稳定性基线
+
+在 clean worktree、代码 SHA `72531d45d79e46ca037bb09f2ba956cc840765ed` 上，
+按固定 120 秒 cadence 使用同一 Linux Release 服务串行执行 PTV2 焊后与 WeldAgent
+焊前作业。两个应用各自复用一次上传的 ArtifactRef；服务 PID、健康检查和清理结果均
+由 runner 记录。该基线是本地真实双业务稳定性证据，不是 GitHub Actions、GPU/CUDA、
+AI 性能上限或并发压力结论。
+
+| 阶段 | run ID | 时长 / 周期 / 作业 | 成功 | 结果 |
+|---|---|---:|---:|---|
+| 开发 10 分钟（dirty） | `20260811T041337546185Z-c6f0a096d7fb-soak-stability` | 600 s / 5 / 10 | PTV2 5、WeldAgent 5 | 通过 |
+| 正式 2 小时（clean） | `20260811T042439220584Z-72531d45d79e-soak-stability` | 7200 s / 60 / 120 | PTV2 60、WeldAgent 60 | 通过 |
+| 正式 12 小时（clean） | `20260811T061623420537Z-72531d45d79e-soak-stability` | 43200 s / 360 / 720 | PTV2 360、WeldAgent 360 | 通过 |
+
+正式 2 小时 PTV2/WeldAgent `total_latency_ms` 的首小时/末小时 P50 分别为
+`1101.490/1301.616` 与 `12833.833/12738.663`；正式 12 小时对应为
+`1116.773/1049.347` 与 `12816.037/11421.568`。12 小时服务 PID 未变化，健康失败为 0，
+2990 个资源样本有效；IAISF server RSS 为 `6,823,936–11,653,120` bytes，首/末小时
+中位数为 `7,921,664/11,485,184` bytes，线程数 `5`，FD 数 `8–11`。运行目录磁盘趋势
+按 bytes 记录（末值 `382,599,112`），不据此宣称无泄漏。
+
+采样只覆盖 IAISF server PID；PTV2/WeldAgent 子进程与 GPU 资源排除。该 soak 包含
+单 worker、LocalProcessRunner、adapter 文件处理、Repository 状态转换和 HTTP 轮询，
+不是纯队列 pop/s，也不是 Application 理论接纳容量。运行输出仅保留 ignored 目录中的
+四个有界文件，未提交输入、模型、配置或结果。
 
 ### 可复现测试基线
 
@@ -368,28 +394,25 @@ ASan+UBSan 全量 CTest 930/929/1/0，普通 Linux Release 串行
 统计为 930/929/1/0。唯一 skip 是
 `SafePathResolverTest.PermissionFailureIsExplicitlyHandled` 的既有权限能力
 差异；WSL 构建中的 clock-skew 提示属于环境时间戳提示，不是项目编译 warning。
-本轮尚未执行 TSan、Valgrind、压力测试、真实 AI 性能测试或 soak test。
+这组标准加固不包含 TSan 或 Valgrind；压力、真实 AI 延迟和 soak 由上文独立基准覆盖。
 
-计划覆盖：
+尚待补充：
 
-- HTTP 基础接口吞吐、延迟分位数、keep-alive 与连接建立成本。
-- 点云上传在不同文件大小和并发数下的吞吐、内存峰值与失败行为。
-- Job 提交、状态轮询和 Artifact 下载的混合负载。
-- Executor 队列饱和、Repository 容量耗尽和背压策略。
-- PTV2 GPU 推理吞吐、端到端延迟与显存占用。
-- WeldAgent 子进程启动成本、计算延迟与并发隔离。
-- 24 小时以上 soak test 的内存、fd、线程、队列和磁盘增长。
+- Artifact 独立并发下载吞吐；当前已完成真实 E2E 下载延迟、大小和 SHA-256 校验。
+- PTV2/WeldAgent 真实并发作业、GPU 利用率和显存占用。
+- ThreadSanitizer、Valgrind 与 24 小时以上 soak test。
 
-结果表预留：
+测试覆盖总览：
 
-| 场景 | 工具 | 并发/数据规模 | 吞吐 | P50 | P95 | P99 | CPU | 内存/显存 | 错误率 |
-|---|---|---|---:|---:|---:|---:|---:|---:|---:|
-| HTTP 健康检查 | Python `http.client`，并发 1/8/32/128 | 见正式 clean 基准表 | 见上表 | 见上表 | 见上表 | 见上表 | 见上表 | 0 |
-| 点云上传 | Python `http.client`，30 MiB，并发 1/2/4 | 见正式 clean 基准表 | 见上表 | 见上表 | 见上表 | 见上表 | 见上表 | 0 |
-| Job 提交与轮询 | 待测试 | 待测试 | — | — | — | — | — | — | — |
-| Artifact 下载 | 待测试 | 待测试 | — | — | — | — | — | — | — |
-| PTV2 端到端 | 待测试 | 待测试 | — | — | — | — | — | — | — |
-| WeldAgent 端到端 | 待测试 | 待测试 | — | — | — | — | — | — | — |
+| 场景 | 状态 | 正式数据规模 | 关键结果 | 说明 |
+|---|---|---|---|---|
+| HTTP 健康检查 | 已完成 | 并发 1/8/32/128，各 30 秒 | 最高 10137.665 req/s；错误率 0 | 同机 loopback，详见 HTTP 基准表 |
+| 点云上传 | 已完成 | 30 MiB，并发 1/2/4，各 20 次 | 165.020–180.243 MiB/s；错误率 0 | post-load `/health` 全部通过 |
+| Job 提交与轮询 | 已完成 | 100/250/500 attempts，单 worker、队列容量 128 | accepted 全部 succeeded；预期 `queue_full` 0/121/371 | synthetic framework queue stress |
+| Artifact 下载 | E2E 已完成 | PTV2、WeldAgent 各 20 个 measured jobs | PTV2 下载 P50/P95/P99 52.192/65.333/71.555 ms；WeldAgent 24.979/37.036/37.488 ms | 大小和 SHA-256 均校验；独立并发吞吐待补充 |
+| PTV2 端到端 | 已完成 | 2 warmup + 20 measured jobs | Total P50/P95/P99 1096.791/1127.563/1131.305 ms；20/20 成功 | 2048 点焊后分割 |
+| WeldAgent 端到端 | 已完成 | 2 warmup + 20 measured jobs | Total P50/P95/P99 12437.966/12621.767/12627.529 ms；20/20 成功 | 823,114 点焊前引导 |
+| 真实双业务稳定性 | 已完成至 12 小时 | 2 小时 120 作业；12 小时 720 作业 | PTV2、WeldAgent、health 全部成功；服务 PID 稳定 | 非并发、GPU 资源未计入 |
 
 ## 目录结构
 
@@ -421,30 +444,3 @@ IndustrialAIServiceFramework/
 ## License
 
 本项目采用 [Apache License 2.0](LICENSE)。
-
-## 真实 Industrial AI soak 稳定性基线
-
-在 clean worktree、代码 SHA `72531d45d79e46ca037bb09f2ba956cc840765ed` 上，
-按固定 120 秒 cadence 使用同一 Linux Release 服务串行执行 PTV2 焊后与 WeldAgent
-焊前作业。两个应用各自复用一次上传的 ArtifactRef；服务 PID、健康检查和清理结果均
-由 runner 记录。该基线是本地真实双业务稳定性证据，不是 GitHub Actions、GPU/CUDA、
-AI 性能上限或并发压力结论。
-
-| 阶段 | run ID | 时长 / 周期 / 作业 | 成功 | 结果 |
-|---|---|---:|---:|---|
-| 开发 10 分钟（dirty） | `20260811T041337546185Z-c6f0a096d7fb-soak-stability` | 600 s / 5 / 10 | PTV2 5、WeldAgent 5 | 通过 |
-| 正式 2 小时（clean） | `20260811T042439220584Z-72531d45d79e-soak-stability` | 7200 s / 60 / 120 | PTV2 60、WeldAgent 60 | 通过 |
-| 正式 12 小时（clean） | `20260811T061623420537Z-72531d45d79e-soak-stability` | 43200 s / 360 / 720 | PTV2 360、WeldAgent 360 | 通过 |
-
-正式 2 小时 PTV2/WeldAgent `total_latency_ms` 的首小时/末小时 P50 分别为
-`1101.490/1301.616` 与 `12833.833/12738.663`；正式 12 小时对应为
-`1116.773/1049.347` 与 `12816.037/11421.568`。12 小时服务 PID 未变化，健康失败为 0，
-2990 个资源样本有效；IAISF server RSS 为 `6,823,936–11,653,120` bytes，首/末小时
-中位数为 `7,921,664/11,485,184` bytes，线程数 `5`，FD 数 `8–11`。运行目录磁盘趋势
-按 bytes 记录（末值 `382,599,112`），不据此宣称无泄漏。
-
-采样只覆盖 IAISF server PID；PTV2/WeldAgent 子进程与 GPU 资源排除。该 soak 包含
-单 worker、LocalProcessRunner、adapter 文件处理、Repository 状态转换和 HTTP 轮询，
-不是纯队列 pop/s，也不是 Application 理论接纳容量。运行输出仅保留 ignored 目录中的
-四个有界文件，未提交输入、模型、配置或结果；真实 PTV2/WeldAgent 性能和长期 soak 仍须
-在明确环境中单独评估。
